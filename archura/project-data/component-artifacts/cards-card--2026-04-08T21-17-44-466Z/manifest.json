@@ -1,0 +1,20 @@
+{
+  "exportId": "cards-card--2026-04-08T21-17-44-466Z",
+  "componentPath": [
+    "cards",
+    "Card"
+  ],
+  "generatedAt": "2026-04-08T21:17:44.466Z",
+  "sourceCssFileName": "source.css",
+  "components": [
+    {
+      "id": "001-my-card",
+      "tagName": "my-card",
+      "wrapperTagName": "exported-cards-card-001",
+      "htmlFileName": "001-my-card.html",
+      "cssFileName": "001-my-card.css",
+      "assetFileName": "001-my-card.assets.json",
+      "jsFileName": "001-my-card.js"
+    }
+  ]
+}
