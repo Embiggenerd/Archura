@@ -172,19 +172,59 @@ export class ArchuraEditorController {
             {
               name: 'Typography',
               open: true,
-              properties: ['font-family', 'font-size', 'font-weight', 'color', 'line-height', 'text-align'],
+              properties: [
+                {
+                  label: 'Font Family',
+                  property: '--font-family',
+                  type: 'select',
+                  options: [
+                    { id: 'system-ui, -apple-system, sans-serif', label: 'System' },
+                    { id: 'Helvetica, Arial, sans-serif', label: 'Helvetica' },
+                    { id: 'Georgia, serif', label: 'Georgia' },
+                    { id: 'monospace', label: 'Monospace' },
+                  ],
+                },
+                { label: 'Font Size', property: '--font-size', type: 'number', units: ['px', 'rem', 'em'] },
+                {
+                  label: 'Font Weight',
+                  property: '--font-weight',
+                  type: 'select',
+                  options: [
+                    { id: '300', label: 'Light' },
+                    { id: '400', label: 'Normal' },
+                    { id: '600', label: 'Semibold' },
+                    { id: '700', label: 'Bold' },
+                  ],
+                },
+                { label: 'Color', property: '--color', type: 'color' },
+                { label: 'Line Height', property: '--line-height', type: 'number', units: ['', 'px'] },
+                {
+                  label: 'Text Align',
+                  property: '--text-align',
+                  type: 'select',
+                  options: [
+                    { id: 'left', label: 'Left' },
+                    { id: 'center', label: 'Center' },
+                    { id: 'right', label: 'Right' },
+                  ],
+                },
+              ],
             },
             {
               name: 'Spacing',
-              properties: ['padding', 'margin'],
-            },
-            {
-              name: 'Dimension',
-              properties: ['width', 'height', 'max-width'],
+              properties: [
+                { label: 'Padding', property: '--padding', type: 'number', units: ['px', 'rem', 'em', '%'] },
+                { label: 'Margin', property: '--margin', type: 'number', units: ['px', 'rem', 'em', '%'] },
+              ],
             },
             {
               name: 'Decorations',
-              properties: ['background-color', 'border-radius', 'border'],
+              properties: [
+                { label: 'Background', property: '--background-color', type: 'color' },
+                { label: 'Border Radius', property: '--border-radius', type: 'number', units: ['px', '%', 'rem'] },
+                { label: 'Border', property: '--border', type: 'base' },
+                { label: 'Box Shadow', property: '--box-shadow', type: 'base' },
+              ],
             },
           ],
         },

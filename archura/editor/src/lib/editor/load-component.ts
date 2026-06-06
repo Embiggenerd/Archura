@@ -1,4 +1,4 @@
-export const COMPONENT_SOURCE_ROOT = '/Users/code123/shurale/grapesjs-web-builder/component-source';
+export const COMPONENT_SOURCE_ROOT = '/Users/code123/shurale/archura-v2/src/components';
 
 export type LoadedComponent = {
   sourcePath: string;
