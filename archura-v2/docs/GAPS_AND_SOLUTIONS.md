@@ -86,6 +86,13 @@ type ArchuraComponentDefinition = {
   servers. Same shape, no special casing.
 - `#componentPlugin` takes `tagName` and `moduleUrl` from the definition instead of deriving
   them. Trait introspection from `static properties` is unchanged.
+- **The registry is not a separate package.** It is a type plus a lookup and ships with the
+  editor. The seam that matters is editor engine vs component library — different consumers
+  (edit time vs every deployed page) — expressed as package entry points: `archura` for the
+  editor, `archura/components/*` for individually importable component modules.
+- **Definitions are plain serializable data** (all strings). They can be statically imported
+  or fetched from the CMS backend — the component catalog can live in a database and be
+  served per client.
 
 ### Verify
 
@@ -167,6 +174,10 @@ deleted; save; reload; deploy snapshot renders both correctly standalone.
 
 ### Solution
 
+- **The package lives at `archura-v2/` as-is** — it is already a self-contained npm package.
+  `src/` builds to a published `dist/` (`"files": ["dist"]`); `demo/`, `index.html`, `docs/`,
+  and `scripts/` are repo-only. No workspace monorepo: revisit only when deployed client
+  pages need to pin component versions independently of editor releases.
 - Vite **lib mode** build emitting ESM + type declarations, with the component/page modules
   copied as importable assets (required by the `import.meta.url` registry in §2).
 - `exports` map: main entry (controller + elements + types), `./components/*` for the
@@ -195,12 +206,26 @@ deleted; save; reload; deploy snapshot renders both correctly standalone.
 
 ### Solutions
 
-- **Two actions, host-owned effects:**
-  - `controller.save()` → `onSave` — host persists a draft.
-  - `controller.publish()` → `onPublish(artifacts): Promise<void>` — host uploads and
-    deploys. The controller awaits the host's promise so the toolbar can show
-    `Publish → Publishing… → Published` (or failure). Deployment stays entirely on the host
-    side; the editor only reports its outcome.
+- **Persistence adapter — the editor's entire knowledge of storage:**
+
+  ```ts
+  type ArchuraPersistenceAdapter = {
+    load(target: ArchuraEditTarget): Promise<CanonicalComponentData | null>;
+    publish(artifact: CanonicalComponentData): Promise<void>;
+  };
+  ```
+
+  The host passes `persistence` in config. The controller calls `load()` when it opens a
+  target (replacing the `initialArtifact` config) and `publish()` when the client hits the
+  button, awaiting both — which drives the toolbar's
+  `Publish → Publishing… → Published` (or failure) states. S3, R2, a local database: all
+  just adapter implementations in host code; the editor cannot tell them apart.
+  - The package ships **the type only** — no reference adapters. The demo page implements
+    its own trivial inline adapter (it happens to use localStorage because a static demo
+    has nothing else; that is a demo detail, not a pattern).
+  - **No `saveDraft` yet.** The product flow is load → edit → publish. Add a draft method
+    when drafts become a real requirement; adding later is painless, removing is not.
+  - `onChange`/`onError` remain as notification hooks — they are not persistence.
 - **Wire `onError`:** canvas module script `onerror`, GrapesJS init failures, and rejected
   `onPublish` promises all route through it (and through the `editorerror` event on
   `<archura-editor>`).
