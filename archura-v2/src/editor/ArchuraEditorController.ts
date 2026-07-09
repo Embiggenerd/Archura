@@ -4,7 +4,13 @@ import {
   createCanonicalComponentData,
   type CanonicalComponentData,
 } from '../component-data/canonical.js';
-import type { ArchuraEditorConfig, ArchuraEditorState, ArchuraRenderable } from './types.js';
+import { defaultComponents } from '../components/index.js';
+import type {
+  ArchuraComponentDefinition,
+  ArchuraEditorConfig,
+  ArchuraEditorState,
+  ArchuraRenderable,
+} from './types.js';
 
 function createDefaultHtml(componentPath: string[]) {
   const componentName = componentPath.at(-1)?.toLowerCase() ?? 'component';
@@ -103,9 +109,13 @@ export class ArchuraEditorController {
   #initScheduled = false;
   #colorPickerListener: ((e: Event) => void) | null = null;
   #hasSnapshot = false;
+  #components: ArchuraComponentDefinition[];
+  #definition: ArchuraComponentDefinition | null = null;
 
   constructor(config: ArchuraEditorConfig = {}) {
     const componentPath = config.initialArtifact?.config.componentPath ?? config.componentPath ?? [];
+    this.#components = config.components ?? defaultComponents;
+    this.#definition = this.#resolveDefinition(componentPath);
     const html = config.initialArtifact?.snapshot.html ?? createDefaultHtml(componentPath);
     const css = config.initialArtifact?.snapshot.css ?? createDefaultCss();
 
@@ -165,10 +175,17 @@ export class ArchuraEditorController {
       ready: this.#state.ready,
     };
     this.#hasSnapshot = true;
+    this.#definition = this.#resolveDefinition(this.#state.componentPath);
     this.#artifacts = [artifact];
     this.#applySnapshot();
     this.#config.onChange?.(this.#artifacts);
     this.#notify();
+  }
+
+  #resolveDefinition(componentPath: string[]): ArchuraComponentDefinition | null {
+    if (componentPath.length === 0) return null;
+    const key = componentPath.join('/');
+    return this.#components.find((definition) => definition.path.join('/') === key) ?? null;
   }
 
   #applySnapshot(): void {
@@ -211,8 +228,14 @@ export class ArchuraEditorController {
 
   #initEditor(): void {
     const container = this.#canvasContainer!;
-    const componentPath = [...this.#state.componentPath];
+    const definition = this.#definition;
     container.style.cssText = 'width:100%;height:100%;';
+
+    if (this.#state.componentPath.length > 0 && !definition) {
+      this.#config.onError?.(
+        new Error(`No registered component definition for "${this.#state.componentPath.join('/')}"`)
+      );
+    }
 
     this.#gjsEditor = grapesjs.init({
       container,
@@ -405,8 +428,8 @@ export class ArchuraEditorController {
           ],
         },
       }),
-      plugins: componentPath.length > 0
-        ? [(editor) => this.#componentPlugin(editor, componentPath)]
+      plugins: definition
+        ? [(editor) => this.#componentPlugin(editor, definition)]
         : [],
     });
 
@@ -416,7 +439,7 @@ export class ArchuraEditorController {
     if (gjsCanvas) gjsCanvas.style.cssText = 'top:0;left:0;right:0;bottom:0;width:100%;height:100%;';
 
     // With no component plugin, the snapshot is the only content source
-    if (componentPath.length === 0 && this.#hasSnapshot) {
+    if (!definition && this.#hasSnapshot) {
       this.#gjsEditor.onReady(() => this.#applySnapshot());
     }
 
@@ -446,9 +469,8 @@ export class ArchuraEditorController {
     document.addEventListener('click', this.#colorPickerListener, true);
   }
 
-  #componentPlugin(editor: GrapesEditor, componentPath: string[]): void {
-    const moduleUrl = `/src/components/${componentPath.join('/')}.js`;
-    const tagName = `archura-${componentPath.at(-1)!.toLowerCase()}`;
+  #componentPlugin(editor: GrapesEditor, definition: ArchuraComponentDefinition): void {
+    const { tagName, moduleUrl } = definition;
 
     editor.Components.addType(tagName, {
       isComponent: (el: Element) => el.tagName?.toLowerCase() === tagName,
@@ -469,6 +491,9 @@ export class ArchuraEditorController {
       const script = canvasDocument.createElement('script');
       script.type = 'module';
       script.src = moduleUrl;
+      script.onerror = () => {
+        this.#config.onError?.(new Error(`Failed to load component module "${moduleUrl}"`));
+      };
       script.onload = () => {
         const iframeWindow = canvasDocument.defaultView as (Window & { customElements: CustomElementRegistry }) | null;
         type LitCtor = CustomElementConstructor & { properties?: Record<string, { type?: unknown }> };
@@ -576,17 +601,16 @@ export class ArchuraEditorController {
 
   #collectContent(): CanonicalComponentData['content'] {
     const editor = this.#gjsEditor;
-    const componentPath = this.#state.componentPath;
-    if (!editor || componentPath.length === 0) return {};
+    const definition = this.#definition;
+    if (!editor || !definition) return {};
 
-    const tagName = `archura-${componentPath.at(-1)!.toLowerCase()}`;
-    const instances = editor.getWrapper()?.find(tagName) ?? [];
+    const instances = editor.getWrapper()?.find(definition.tagName) ?? [];
     if (instances.length === 0) return {};
 
     return {
       components: instances.map((instance) => ({
-        componentPath: [...componentPath],
-        tagName,
+        componentPath: [...definition.path],
+        tagName: definition.tagName,
         instanceId: instance.getId(),
         attributes: instance.getAttributes(),
       })),

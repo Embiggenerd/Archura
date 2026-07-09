@@ -58,6 +58,10 @@ differently → each deployed element carries only its own custom props.
 
 ## 2. Component loading (decouple from the dev server)
 
+**Status: implemented** on `component-registry` — verified by `scripts/verify-section2.mjs`
+(5 checks: default registry URL resolution, editor regression, custom definition identity,
+onError for unregistered paths and failing module loads), plus §1 suite as regression.
+
 ### Problem
 
 The controller loads component modules from a hard-coded `/src/components/${path}.js` URL,

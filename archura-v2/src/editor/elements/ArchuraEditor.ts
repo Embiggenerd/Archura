@@ -13,10 +13,17 @@ export class ArchuraEditor extends LitElement {
 
   @property({ attribute: false }) initialArtifact: ArchuraEditorConfig['initialArtifact'] = null;
 
+  @property({ attribute: false }) components: ArchuraEditorConfig['components'] = undefined;
+
   @state() private controller: ArchuraEditorController | null = null;
 
   override updated(changedProperties: Map<string, unknown>): void {
-    if (!this.controller || changedProperties.has('componentPath') || changedProperties.has('initialArtifact')) {
+    if (
+      !this.controller ||
+      changedProperties.has('componentPath') ||
+      changedProperties.has('initialArtifact') ||
+      changedProperties.has('components')
+    ) {
       this.#recreateController();
       void this.controller!.init();
     }
@@ -32,6 +39,7 @@ export class ArchuraEditor extends LitElement {
     this.controller = new ArchuraEditorController({
       componentPath: this.componentPath,
       initialArtifact: this.initialArtifact,
+      components: this.components,
       onReady: () => {
         this.dispatchEvent(new CustomEvent('editorready', { detail: {} }));
       },
