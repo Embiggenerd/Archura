@@ -36,6 +36,55 @@ p {
 }`;
 }
 
+export const BASE_RESET_CSS = `*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; }`;
+
+export function transformForDeployment(html: string, css: string): { html: string; css: string } {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const sheet = new CSSStyleSheet();
+  try {
+    sheet.replaceSync(css);
+  } catch {
+    return { html, css };
+  }
+
+  const keptRules: string[] = [];
+  for (const rule of sheet.cssRules) {
+    if (!(rule instanceof CSSStyleRule)) {
+      keptRules.push(rule.cssText);
+      continue;
+    }
+
+    // Read names from cssText: some engines don't enumerate custom props by index
+    const propNames = [...rule.style.cssText.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]);
+
+    let targets: HTMLElement[] = [];
+    if (propNames.length > 0) {
+      try {
+        targets = [...doc.querySelectorAll<HTMLElement>(rule.selectorText)];
+      } catch {
+        targets = [];
+      }
+    }
+
+    if (targets.length > 0) {
+      for (const prop of propNames) {
+        const value = rule.style.getPropertyValue(prop);
+        for (const el of targets) {
+          el.style.setProperty(prop, value);
+        }
+        rule.style.removeProperty(prop);
+      }
+    }
+
+    if (rule.style.cssText.trim() !== '') {
+      keptRules.push(rule.cssText);
+    }
+  }
+
+  return { html: doc.body.innerHTML, css: keptRules.join('\n') };
+}
+
 function createArtifactId(componentPath: string[]) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const scope = componentPath.join('-').toLowerCase().replace(/[^a-z0-9-]+/g, '-');
@@ -53,6 +102,7 @@ export class ArchuraEditorController {
   #traitsPanelContainer: HTMLElement | null = null;
   #initScheduled = false;
   #colorPickerListener: ((e: Event) => void) | null = null;
+  #hasSnapshot = false;
 
   constructor(config: ArchuraEditorConfig = {}) {
     const componentPath = config.initialArtifact?.config.componentPath ?? config.componentPath ?? [];
@@ -60,6 +110,7 @@ export class ArchuraEditorController {
     const css = config.initialArtifact?.snapshot.css ?? createDefaultCss();
 
     this.#config = config;
+    this.#hasSnapshot = !!config.initialArtifact;
     this.#state = {
       componentPath,
       html,
@@ -113,9 +164,20 @@ export class ArchuraEditorController {
       css: artifact.snapshot.css,
       ready: this.#state.ready,
     };
+    this.#hasSnapshot = true;
     this.#artifacts = [artifact];
+    this.#applySnapshot();
     this.#config.onChange?.(this.#artifacts);
     this.#notify();
+  }
+
+  #applySnapshot(): void {
+    const editor = this.#gjsEditor;
+    if (!editor) return;
+    // setStyle first: it replaces all CssComposer rules, including the ones
+    // setComponents derives from inline styles in the snapshot html
+    editor.setStyle(this.#state.css);
+    editor.setComponents(this.#state.html);
   }
 
   mountCanvas(container: HTMLElement): void {
@@ -157,6 +219,7 @@ export class ArchuraEditorController {
       height: '100%',
       width: '100%',
       storageManager: false,
+      protectedCss: BASE_RESET_CSS,
       panels: { defaults: [] },
       deviceManager: {
         devices: [{ name: 'Desktop', width: '' }],
@@ -178,9 +241,16 @@ export class ArchuraEditorController {
                   property: '--font-family',
                   type: 'select',
                   options: [
-                    { id: 'system-ui, -apple-system, sans-serif', label: 'System' },
+                    { id: 'system-ui, -apple-system, sans-serif', label: 'System UI' },
+                    { id: 'Arial, Helvetica, sans-serif', label: 'Arial' },
                     { id: 'Helvetica, Arial, sans-serif', label: 'Helvetica' },
+                    { id: 'Verdana, Geneva, sans-serif', label: 'Verdana' },
+                    { id: 'Tahoma, Geneva, sans-serif', label: 'Tahoma' },
+                    { id: "'Trebuchet MS', sans-serif", label: 'Trebuchet MS' },
+                    { id: "'Times New Roman', Times, serif", label: 'Times New Roman' },
                     { id: 'Georgia, serif', label: 'Georgia' },
+                    { id: 'Garamond, serif', label: 'Garamond' },
+                    { id: "'Courier New', Courier, monospace", label: 'Courier New' },
                     { id: 'monospace', label: 'Monospace' },
                   ],
                 },
@@ -198,6 +268,7 @@ export class ArchuraEditorController {
                 },
                 { label: 'Color', property: '--color', type: 'color' },
                 { label: 'Line Height', property: '--line-height', type: 'number', units: ['', 'px'] },
+                { label: 'Letter Spacing', property: '--letter-spacing', type: 'number', units: ['px', 'em', 'rem'] },
                 {
                   label: 'Text Align',
                   property: '--text-align',
@@ -206,15 +277,55 @@ export class ArchuraEditorController {
                     { id: 'left', label: 'Left' },
                     { id: 'center', label: 'Center' },
                     { id: 'right', label: 'Right' },
+                    { id: 'justify', label: 'Justify' },
                   ],
                 },
+                {
+                  label: 'Font Style',
+                  property: '--font-style',
+                  type: 'select',
+                  options: [
+                    { id: 'normal', label: 'Normal' },
+                    { id: 'italic', label: 'Italic' },
+                    { id: 'oblique', label: 'Oblique' },
+                  ],
+                },
+                {
+                  label: 'Text Decoration',
+                  property: '--text-decoration',
+                  type: 'select',
+                  options: [
+                    { id: 'none', label: 'None' },
+                    { id: 'underline', label: 'Underline' },
+                    { id: 'line-through', label: 'Line Through' },
+                    { id: 'overline', label: 'Overline' },
+                  ],
+                },
+                { label: 'Text Shadow', property: '--text-shadow', type: 'base' },
               ],
             },
             {
               name: 'Spacing',
               properties: [
                 { label: 'Padding', property: '--padding', type: 'number', units: ['px', 'rem', 'em', '%'] },
+                { label: 'Padding Top', property: '--padding-top', type: 'number', units: ['px', 'rem', 'em', '%'] },
+                { label: 'Padding Right', property: '--padding-right', type: 'number', units: ['px', 'rem', 'em', '%'] },
+                { label: 'Padding Bottom', property: '--padding-bottom', type: 'number', units: ['px', 'rem', 'em', '%'] },
+                { label: 'Padding Left', property: '--padding-left', type: 'number', units: ['px', 'rem', 'em', '%'] },
                 { label: 'Margin', property: '--margin', type: 'number', units: ['px', 'rem', 'em', '%'] },
+                { label: 'Margin Top', property: '--margin-top', type: 'number', units: ['px', 'rem', 'em', '%'] },
+                { label: 'Margin Right', property: '--margin-right', type: 'number', units: ['px', 'rem', 'em', '%'] },
+                { label: 'Margin Bottom', property: '--margin-bottom', type: 'number', units: ['px', 'rem', 'em', '%'] },
+                { label: 'Margin Left', property: '--margin-left', type: 'number', units: ['px', 'rem', 'em', '%'] },
+              ],
+            },
+            {
+              name: 'Dimension',
+              properties: [
+                { label: 'Width', property: '--width', type: 'number', units: ['px', '%', 'rem', 'em', 'vw'] },
+                { label: 'Height', property: '--height', type: 'number', units: ['px', '%', 'rem', 'em', 'vh'] },
+                { label: 'Max Width', property: '--max-width', type: 'number', units: ['px', '%', 'rem', 'em', 'vw'] },
+                { label: 'Min Height', property: '--min-height', type: 'number', units: ['px', '%', 'rem', 'em', 'vh'] },
               ],
             },
             {
@@ -224,6 +335,71 @@ export class ArchuraEditorController {
                 { label: 'Border Radius', property: '--border-radius', type: 'number', units: ['px', '%', 'rem'] },
                 { label: 'Border', property: '--border', type: 'base' },
                 { label: 'Box Shadow', property: '--box-shadow', type: 'base' },
+                { label: 'Opacity', property: '--opacity', type: 'number', units: [''] },
+              ],
+            },
+            {
+              name: 'Flex',
+              properties: [
+                {
+                  label: 'Display',
+                  property: '--display',
+                  type: 'select',
+                  options: [
+                    { id: 'block', label: 'Block' },
+                    { id: 'flex', label: 'Flex' },
+                    { id: 'inline-flex', label: 'Inline Flex' },
+                    { id: 'inline-block', label: 'Inline Block' },
+                    { id: 'none', label: 'None' },
+                  ],
+                },
+                {
+                  label: 'Flex Direction',
+                  property: '--flex-direction',
+                  type: 'select',
+                  options: [
+                    { id: 'row', label: 'Row' },
+                    { id: 'row-reverse', label: 'Row Reverse' },
+                    { id: 'column', label: 'Column' },
+                    { id: 'column-reverse', label: 'Column Reverse' },
+                  ],
+                },
+                {
+                  label: 'Flex Wrap',
+                  property: '--flex-wrap',
+                  type: 'select',
+                  options: [
+                    { id: 'nowrap', label: 'No Wrap' },
+                    { id: 'wrap', label: 'Wrap' },
+                    { id: 'wrap-reverse', label: 'Wrap Reverse' },
+                  ],
+                },
+                {
+                  label: 'Justify Content',
+                  property: '--justify-content',
+                  type: 'select',
+                  options: [
+                    { id: 'flex-start', label: 'Start' },
+                    { id: 'flex-end', label: 'End' },
+                    { id: 'center', label: 'Center' },
+                    { id: 'space-between', label: 'Space Between' },
+                    { id: 'space-around', label: 'Space Around' },
+                    { id: 'space-evenly', label: 'Space Evenly' },
+                  ],
+                },
+                {
+                  label: 'Align Items',
+                  property: '--align-items',
+                  type: 'select',
+                  options: [
+                    { id: 'stretch', label: 'Stretch' },
+                    { id: 'flex-start', label: 'Start' },
+                    { id: 'flex-end', label: 'End' },
+                    { id: 'center', label: 'Center' },
+                    { id: 'baseline', label: 'Baseline' },
+                  ],
+                },
+                { label: 'Gap', property: '--gap', type: 'number', units: ['px', 'rem', 'em', '%'] },
               ],
             },
           ],
@@ -238,6 +414,11 @@ export class ArchuraEditorController {
     if (gjsEl) gjsEl.style.height = '100%';
     const gjsCanvas = container.querySelector<HTMLElement>('.gjs-cv-canvas');
     if (gjsCanvas) gjsCanvas.style.cssText = 'top:0;left:0;right:0;bottom:0;width:100%;height:100%;';
+
+    // With no component plugin, the snapshot is the only content source
+    if (componentPath.length === 0 && this.#hasSnapshot) {
+      this.#gjsEditor.onReady(() => this.#applySnapshot());
+    }
 
     this.#setupColorPickerFix();
   }
@@ -320,12 +501,16 @@ export class ArchuraEditorController {
           editor.Components.addType(tagName, { model: { defaults: { traits } } });
         }
 
-        // Render with default attribute values so GrapesJS picks them up
-        const attrs = traits
-          .filter(t => t.value !== '')
-          .map(t => `${t.name}="${t.value}"`)
-          .join(' ');
-        editor.setComponents(`<${tagName}${attrs ? ' ' + attrs : ''}></${tagName}>`);
+        if (this.#hasSnapshot) {
+          this.#applySnapshot();
+        } else {
+          // Render with default attribute values so GrapesJS picks them up
+          const attrs = traits
+            .filter(t => t.value !== '')
+            .map(t => `${t.name}="${t.value}"`)
+            .join(' ');
+          editor.setComponents(`<${tagName}${attrs ? ' ' + attrs : ''}></${tagName}>`);
+        }
         this.#notify();
       };
       canvasDocument.head.appendChild(script);
@@ -389,17 +574,36 @@ export class ArchuraEditorController {
     }
   }
 
+  #collectContent(): CanonicalComponentData['content'] {
+    const editor = this.#gjsEditor;
+    const componentPath = this.#state.componentPath;
+    if (!editor || componentPath.length === 0) return {};
+
+    const tagName = `archura-${componentPath.at(-1)!.toLowerCase()}`;
+    const instances = editor.getWrapper()?.find(tagName) ?? [];
+    if (instances.length === 0) return {};
+
+    return {
+      components: instances.map((instance) => ({
+        componentPath: [...componentPath],
+        tagName,
+        instanceId: instance.getId(),
+        attributes: instance.getAttributes(),
+      })),
+    };
+  }
+
   #createCurrentArtifact(): CanonicalComponentData {
     const timestamp = new Date().toISOString();
+    const rawHtml = this.#gjsEditor?.getHtml() ?? this.#state.html;
+    const rawCss = this.#gjsEditor?.getCss() ?? this.#state.css;
+    const { html, css } = transformForDeployment(rawHtml, rawCss);
 
     return createCanonicalComponentData({
       id: createArtifactId(this.#state.componentPath),
       type: 'component-instance',
-      content: {},
-      snapshot: {
-        html: this.#state.html,
-        css: this.#state.css,
-      },
+      content: this.#collectContent(),
+      snapshot: { html, css },
       config: {
         componentPath: [...this.#state.componentPath],
       },

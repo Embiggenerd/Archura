@@ -33,7 +33,12 @@
     <archura-editor id="editor"></archura-editor>
     <script>
       const component = new URLSearchParams(location.search).get('component');
-      if (component) document.getElementById('editor').setAttribute('component-path', component);
+      const editor = document.getElementById('editor');
+      if (component) editor.setAttribute('component-path', component);
+      editor.addEventListener('artifactsave', (e) => {
+        if (!component) return;
+        localStorage.setItem(`archura:artifact:${component}`, JSON.stringify(e.detail.artifacts[0]));
+      });
     </script>
   </body>
 </html>
