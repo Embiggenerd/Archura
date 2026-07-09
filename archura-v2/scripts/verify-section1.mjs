@@ -74,7 +74,7 @@ try {
   await fontSize.fill('24');
   await fontSize.press('Enter');
 
-  await page.getByRole('button', { name: 'Save' }).click();
+  await page.getByRole('button', { name: /Save|Publish/ }).click();
   await page.waitForFunction(() => window.__artifacts !== null, null, { timeout: 10000 });
   const artifact = (await page.evaluate(() => window.__artifacts))[0];
 

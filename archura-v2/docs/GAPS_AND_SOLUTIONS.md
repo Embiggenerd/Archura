@@ -204,6 +204,10 @@ deleted; save; reload; deploy snapshot renders both correctly standalone.
 
 ## 5. Contract gaps (save vs publish, errors, lifecycle)
 
+**Status: implemented** on `persistence-adapter` — verified by `scripts/verify-section5.mjs`
+(10 checks: publish through the filesystem adapter, load-on-open, preview from the store,
+toolbar state cycle, failure handling, R2 adapter round trip + auth), §1–§3 as regression.
+
 ### Problems
 
 - Single "Save" button with no deployment semantics, while the product requires
@@ -229,9 +233,14 @@ deleted; save; reload; deploy snapshot renders both correctly standalone.
   button, awaiting both — which drives the toolbar's
   `Publish → Publishing… → Published` (or failure) states. S3, R2, a local database: all
   just adapter implementations in host code; the editor cannot tell them apart.
-  - The package ships **the type only** — no reference adapters. The demo page implements
-    its own trivial inline adapter (it happens to use localStorage because a static demo
-    has nothing else; that is a demo detail, not a pattern).
+  - The package ships the type plus two adapters (decision amended by product feedback):
+    `createFileSystemAdapter()` for local testing (backed by the dev server's
+    `artifact-store` middleware, which writes `artifacts/<componentPath>.json`) and
+    `createR2Adapter({ endpoint, token })` for Cloudflare R2, which talks to a Worker
+    fronting the bucket (reference implementation: `workers/r2-artifact-worker.js`;
+    browser code never holds R2 credentials). Both are thin HTTP clients over the same
+    GET/PUT JSON contract; `/mock-r2` in vite.config.ts mimics the Worker so the R2
+    adapter is testable offline.
   - **No `saveDraft` yet.** The product flow is load → edit → publish. Add a draft method
     when drafts become a real requirement; adding later is painless, removing is not.
   - `onChange`/`onError` remain as notification hooks — they are not persistence.

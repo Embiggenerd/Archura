@@ -55,31 +55,33 @@
     <div id="root"></div>
     <script type="module">
       const component = new URLSearchParams(location.search).get('component');
-      const key = `archura:artifact:${component}`;
       document.getElementById('target').textContent = component ?? '(no component)';
       document.getElementById('editor-link').href = component ? `/?component=${component}` : '/';
 
       // The only editor-independent runtime dependency: the component's own module
       if (component) import(`/src/components/${component}.js`);
 
-      function render() {
+      let lastUpdated = null;
+
+      async function render() {
         const root = document.getElementById('root');
-        const raw = component && localStorage.getItem(key);
-        if (!raw) {
-          root.innerHTML = `<p class="empty">No saved artifact yet. Open the editor and click Save.</p>`;
+        const response = component && (await fetch(`/api/artifacts/${component}`).catch(() => null));
+        if (!response?.ok) {
+          root.innerHTML = `<p class="empty">No published artifact yet. Open the editor and click Publish.</p>`;
           document.getElementById('meta').textContent = '';
+          lastUpdated = null;
           return;
         }
-        const artifact = JSON.parse(raw);
+        const artifact = await response.json();
+        if (artifact.meta.updatedAt === lastUpdated) return;
+        lastUpdated = artifact.meta.updatedAt;
         root.innerHTML = `<style>${artifact.snapshot.css}</style>${artifact.snapshot.html}`;
-        document.getElementById('meta').textContent = `saved ${artifact.meta.updatedAt}`;
+        document.getElementById('meta').textContent = `published ${artifact.meta.updatedAt}`;
       }
 
       render();
-      // Fires when the editor tab saves — the preview updates without a refresh
-      window.addEventListener('storage', (e) => {
-        if (e.key === key) render();
-      });
+      // Poll the store so a publish from the editor tab shows up without a refresh
+      setInterval(render, 2000);
     </script>
   </body>
 </html>

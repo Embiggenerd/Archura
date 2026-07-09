@@ -1,0 +1,3 @@
+# Local artifact stores (dev-server persistence adapters)
+/artifacts/
+/.mock-r2/

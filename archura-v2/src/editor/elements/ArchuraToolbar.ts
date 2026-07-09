@@ -2,9 +2,20 @@ import { LitElement, css, html } from 'lit';
 import { property, state } from 'lit/decorators.js';
 import type { ArchuraEditorController } from '../ArchuraEditorController.js';
 
+type PublishState = 'idle' | 'publishing' | 'published' | 'failed';
+
+const PUBLISH_LABELS: Record<PublishState, string> = {
+  idle: 'Publish',
+  publishing: 'Publishing...',
+  published: 'Published',
+  failed: 'Publish failed',
+};
+
 export class ArchuraToolbar extends LitElement {
   @property({ attribute: false }) controller?: ArchuraEditorController;
   @state() private saving = false;
+  @state() private publishState: PublishState = 'idle';
+  #resetTimer?: ReturnType<typeof setTimeout>;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -25,9 +36,21 @@ export class ArchuraToolbar extends LitElement {
             ? html`${target.kind === 'page' ? 'Pages' : 'Components'} / <strong>${target.label}</strong>`
             : ''}
         </span>
-        <button ?disabled=${this.saving} @click=${this.#save}>
-          ${this.saving ? 'Saving...' : 'Save'}
-        </button>
+        ${this.controller?.canPublish
+          ? html`
+              <button
+                class=${this.publishState === 'failed' ? 'failed' : ''}
+                ?disabled=${this.publishState === 'publishing'}
+                @click=${this.#publish}
+              >
+                ${PUBLISH_LABELS[this.publishState]}
+              </button>
+            `
+          : html`
+              <button ?disabled=${this.saving} @click=${this.#save}>
+                ${this.saving ? 'Saving...' : 'Save'}
+              </button>
+            `}
       </div>
     `;
   }
@@ -40,6 +63,22 @@ export class ArchuraToolbar extends LitElement {
     } finally {
       this.saving = false;
     }
+  }
+
+  async #publish() {
+    if (!this.controller) return;
+    clearTimeout(this.#resetTimer);
+    this.publishState = 'publishing';
+    try {
+      await this.controller.publish();
+      this.publishState = 'published';
+    } catch {
+      // The controller already routed the error through onError
+      this.publishState = 'failed';
+    }
+    this.#resetTimer = setTimeout(() => {
+      this.publishState = 'idle';
+    }, 2000);
   }
 
   static override styles = css`
@@ -71,6 +110,11 @@ export class ArchuraToolbar extends LitElement {
       padding: 10px 16px;
       font: 600 0.9rem/1 Helvetica, Arial, sans-serif;
       cursor: pointer;
+    }
+
+    button.failed {
+      border-color: #dc2626;
+      color: #dc2626;
     }
   `;
 }

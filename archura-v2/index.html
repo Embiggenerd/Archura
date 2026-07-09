@@ -4,7 +4,6 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Archura v2 Demo</title>
-    <script type="module" src="./src/index.ts"></script>
     <style>
       :root {
         color-scheme: light;
@@ -30,15 +29,19 @@
     </style>
   </head>
   <body>
-    <archura-editor id="editor"></archura-editor>
-    <script>
+    <script type="module">
+      import './src/index.ts';
+      import { createFileSystemAdapter } from './src/adapters/index.ts';
+
+      // This page is the reference host: it wires a persistence adapter and
+      // owns nothing else. Created programmatically so every property is set
+      // before the element's first render.
+      const editor = document.createElement('archura-editor');
+      editor.id = 'editor';
       const component = new URLSearchParams(location.search).get('component');
-      const editor = document.getElementById('editor');
-      if (component) editor.setAttribute('component-path', component);
-      editor.addEventListener('artifactsave', (e) => {
-        if (!component) return;
-        localStorage.setItem(`archura:artifact:${component}`, JSON.stringify(e.detail.artifacts[0]));
-      });
+      if (component) editor.componentPath = component.split('/');
+      editor.persistence = createFileSystemAdapter();
+      document.body.appendChild(editor);
     </script>
   </body>
 </html>

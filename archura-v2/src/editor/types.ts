@@ -16,9 +16,19 @@ export type ArchuraEditTarget = {
   label: string;
 };
 
+/**
+ * The editor's entire knowledge of storage. Implemented by the host;
+ * S3, R2, a local database — the editor cannot tell them apart.
+ */
+export type ArchuraPersistenceAdapter = {
+  load(target: ArchuraEditTarget): Promise<CanonicalComponentData | null>;
+  publish(artifact: CanonicalComponentData): Promise<void>;
+};
+
 export type ArchuraEditorConfig = {
   componentPath?: string[];
   components?: ArchuraComponentDefinition[];
+  persistence?: ArchuraPersistenceAdapter;
   initialArtifact?: CanonicalComponentData | null;
   onReady?: () => void;
   onChange?: (artifacts: CanonicalComponentData[]) => void;

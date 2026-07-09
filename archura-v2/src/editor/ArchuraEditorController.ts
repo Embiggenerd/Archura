@@ -164,6 +164,31 @@ export class ArchuraEditorController {
     return Promise.resolve(this.#artifacts);
   }
 
+  get canPublish(): boolean {
+    return !!this.#config.persistence;
+  }
+
+  async publish(): Promise<CanonicalComponentData[]> {
+    const persistence = this.#config.persistence;
+    if (!persistence) {
+      throw new Error('No persistence adapter configured.');
+    }
+
+    const artifact = this.#createCurrentArtifact();
+    try {
+      await persistence.publish(artifact);
+    } catch (error) {
+      this.#config.onError?.(error);
+      throw error;
+    }
+
+    this.#artifacts = [artifact];
+    this.#config.onSave?.({ artifacts: this.#artifacts });
+    this.#config.onChange?.(this.#artifacts);
+    this.#notify();
+    return [...this.#artifacts];
+  }
+
   getArtifacts(): CanonicalComponentData[] {
     return [...this.#artifacts];
   }
@@ -513,6 +538,27 @@ export class ArchuraEditorController {
     const canvasDocument = editor.Canvas.getDocument();
     if (!canvasDocument) return;
 
+    // Boot from the host's stored artifact when one exists; a failed load
+    // reports through onError and falls back to template defaults
+    if (!this.#hasSnapshot && this.#config.persistence) {
+      try {
+        const target = this.getTarget();
+        const artifact = target ? await this.#config.persistence.load(target) : null;
+        if (artifact) {
+          this.#state = {
+            componentPath: [...artifact.config.componentPath],
+            html: artifact.snapshot.html,
+            css: artifact.snapshot.css,
+            ready: this.#state.ready,
+          };
+          this.#hasSnapshot = true;
+          this.#artifacts = [artifact];
+        }
+      } catch (error) {
+        this.#config.onError?.(error);
+      }
+    }
+
     try {
       const modules = definition.kind === 'page' ? [...leafDefinitions, definition] : leafDefinitions;
       await Promise.all(modules.map((def) => this.#injectModule(canvasDocument, def.moduleUrl)));
@@ -631,6 +677,10 @@ export class ArchuraEditorController {
     }
     this.#gjsEditor?.destroy();
     this.#gjsEditor = null;
+    this.#canvasContainer = null;
+    this.#stylePanelContainer = null;
+    this.#traitsPanelContainer = null;
+    this.#initScheduled = false;
     this.#renderables.clear();
   }
 

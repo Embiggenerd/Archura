@@ -5,6 +5,7 @@ export type {
   ArchuraEditTarget,
   ArchuraEditorConfig,
   ArchuraEditorState,
+  ArchuraPersistenceAdapter,
 } from './types.js';
 import './elements/ArchuraCanvas.js';
 import './elements/ArchuraStylingPanel.js';
