@@ -10,4 +10,22 @@ export const defaultComponents: ArchuraComponentDefinition[] = [
     moduleUrl: new URL('./cards/Card.js', import.meta.url).href,
     label: 'Card',
   },
+  {
+    kind: 'component',
+    path: ['heroes', 'Hero'],
+    tagName: 'archura-hero',
+    moduleUrl: new URL('./heroes/Hero.js', import.meta.url).href,
+    label: 'Hero',
+  },
+  {
+    kind: 'page',
+    path: ['pages', 'Landing'],
+    tagName: 'archura-landing',
+    moduleUrl: new URL('./pages/Landing.js', import.meta.url).href,
+    label: 'Landing',
+    uses: [
+      ['heroes', 'Hero'],
+      ['cards', 'Card'],
+    ],
+  },
 ];

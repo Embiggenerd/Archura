@@ -107,6 +107,11 @@ the Card loads and is editable.
 
 ## 3. Page composition — in code, no drag-and-drop
 
+**Status: implemented** on `page-editing` — verified by `scripts/verify-section3.mjs`
+(10 checks: expansion, locked structure, per-card styling, content collection, breadcrumb,
+round trip, standalone deploy), with §1/§2 suites as regression. First page:
+`src/components/pages/Landing.js` (Hero + two Cards) via `PageBase`.
+
 ### Decision (product feedback)
 
 No blocks panel. No drag-and-drop. Developers compose pages as Lit elements whose templates

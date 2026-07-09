@@ -7,6 +7,7 @@ import {
 import { defaultComponents } from '../components/index.js';
 import type {
   ArchuraComponentDefinition,
+  ArchuraEditTarget,
   ArchuraEditorConfig,
   ArchuraEditorState,
   ArchuraRenderable,
@@ -195,6 +196,7 @@ export class ArchuraEditorController {
     // setComponents derives from inline styles in the snapshot html
     editor.setStyle(this.#state.css);
     editor.setComponents(this.#state.html);
+    if (this.#definition?.kind === 'page') this.#lockStructure(editor);
   }
 
   mountCanvas(container: HTMLElement): void {
@@ -469,80 +471,157 @@ export class ArchuraEditorController {
     document.addEventListener('click', this.#colorPickerListener, true);
   }
 
-  #componentPlugin(editor: GrapesEditor, definition: ArchuraComponentDefinition): void {
-    const { tagName, moduleUrl } = definition;
+  #resolveLeafDefinitions(definition: ArchuraComponentDefinition): ArchuraComponentDefinition[] {
+    if (definition.kind !== 'page') return [definition];
+    return (definition.uses ?? [])
+      .map((path) => this.#resolveDefinition(path))
+      .filter((def): def is ArchuraComponentDefinition => def !== null);
+  }
 
-    editor.Components.addType(tagName, {
-      isComponent: (el: Element) => el.tagName?.toLowerCase() === tagName,
-      model: {
-        defaults: {
-          tagName,
-          draggable: true,
-          droppable: false,
-          stylable: true,
+  #componentPlugin(editor: GrapesEditor, definition: ArchuraComponentDefinition): void {
+    const isPage = definition.kind === 'page';
+    const leafDefinitions = this.#resolveLeafDefinitions(definition);
+
+    for (const def of leafDefinitions) {
+      editor.Components.addType(def.tagName, {
+        isComponent: (el: Element) => el.tagName?.toLowerCase() === def.tagName,
+        model: {
+          defaults: {
+            tagName: def.tagName,
+            draggable: !isPage,
+            droppable: false,
+            stylable: true,
+            ...(isPage && { removable: false, copyable: false }),
+          },
         },
-      },
-    });
+      });
+    }
 
     editor.on('load', () => {
-      const canvasDocument = editor.Canvas.getDocument();
-      if (!canvasDocument) return;
-
-      const script = canvasDocument.createElement('script');
-      script.type = 'module';
-      script.src = moduleUrl;
-      script.onerror = () => {
-        this.#config.onError?.(new Error(`Failed to load component module "${moduleUrl}"`));
-      };
-      script.onload = () => {
-        const iframeWindow = canvasDocument.defaultView as (Window & { customElements: CustomElementRegistry }) | null;
-        type LitCtor = CustomElementConstructor & { properties?: Record<string, { type?: unknown }> };
-        const ctor = iframeWindow?.customElements.get(tagName) as LitCtor | undefined;
-
-        // Use own static properties only (not inherited) to avoid showing base-class internals
-        const ownProps = ctor?.properties ? Object.entries(ctor.properties) : [];
-
-        // Create a detached instance to read constructor default values
-        const tempEl = canvasDocument.createElement(tagName) as HTMLElement & Record<string, unknown>;
-
-        const traits = ownProps
-          .filter(([, cfg]) => {
-            // Use .name comparison to avoid cross-realm (iframe vs main window) === failure
-            const n = (cfg.type as { name?: string } | undefined)?.name;
-            return !cfg.type || n === 'String' || n === 'Number' || n === 'Boolean';
-          })
-          .map(([name, cfg]) => {
-            const n = (cfg.type as { name?: string } | undefined)?.name;
-            const defaultVal = tempEl[name];
-            return {
-              type: n === 'Number' ? 'number' : n === 'Boolean' ? 'checkbox' : 'text',
-              name,
-              label: name.charAt(0).toUpperCase() + name.slice(1),
-              value: defaultVal !== undefined ? String(defaultVal) : '',
-            };
-          });
-
-        if (traits.length > 0) {
-          editor.Components.addType(tagName, { model: { defaults: { traits } } });
-        }
-
-        if (this.#hasSnapshot) {
-          this.#applySnapshot();
-        } else {
-          // Render with default attribute values so GrapesJS picks them up
-          const attrs = traits
-            .filter(t => t.value !== '')
-            .map(t => `${t.name}="${t.value}"`)
-            .join(' ');
-          editor.setComponents(`<${tagName}${attrs ? ' ' + attrs : ''}></${tagName}>`);
-        }
-        this.#notify();
-      };
-      canvasDocument.head.appendChild(script);
+      void this.#populateCanvas(editor, definition, leafDefinitions);
     });
 
     editor.on('component:update', () => this.#notify());
     editor.on('style:change', () => this.#notify());
+  }
+
+  async #populateCanvas(
+    editor: GrapesEditor,
+    definition: ArchuraComponentDefinition,
+    leafDefinitions: ArchuraComponentDefinition[]
+  ): Promise<void> {
+    const canvasDocument = editor.Canvas.getDocument();
+    if (!canvasDocument) return;
+
+    try {
+      const modules = definition.kind === 'page' ? [...leafDefinitions, definition] : leafDefinitions;
+      await Promise.all(modules.map((def) => this.#injectModule(canvasDocument, def.moduleUrl)));
+
+      const traitsByTag = new Map(
+        leafDefinitions.map((def) => [def.tagName, this.#registerTraits(editor, canvasDocument, def.tagName)])
+      );
+
+      if (this.#hasSnapshot) {
+        this.#applySnapshot();
+      } else if (definition.kind === 'page') {
+        editor.setComponents(await this.#expandPage(canvasDocument, definition.tagName));
+        this.#lockStructure(editor);
+      } else {
+        // Render with default attribute values so GrapesJS picks them up
+        const attrs = (traitsByTag.get(definition.tagName) ?? [])
+          .filter((t) => t.value !== '')
+          .map((t) => `${t.name}="${t.value}"`)
+          .join(' ');
+        editor.setComponents(`<${definition.tagName}${attrs ? ' ' + attrs : ''}></${definition.tagName}>`);
+      }
+      this.#notify();
+    } catch (error) {
+      this.#config.onError?.(error);
+    }
+  }
+
+  #injectModule(canvasDocument: Document, moduleUrl: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const script = canvasDocument.createElement('script');
+      script.type = 'module';
+      script.src = moduleUrl;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error(`Failed to load component module "${moduleUrl}"`));
+      canvasDocument.head.appendChild(script);
+    });
+  }
+
+  #registerTraits(
+    editor: GrapesEditor,
+    canvasDocument: Document,
+    tagName: string
+  ): Array<{ type: string; name: string; label: string; value: string }> {
+    const iframeWindow = canvasDocument.defaultView as (Window & { customElements: CustomElementRegistry }) | null;
+    type LitCtor = CustomElementConstructor & { properties?: Record<string, { type?: unknown }> };
+    const ctor = iframeWindow?.customElements.get(tagName) as LitCtor | undefined;
+
+    // Use own static properties only (not inherited) to avoid showing base-class internals
+    const ownProps = ctor?.properties ? Object.entries(ctor.properties) : [];
+
+    // Create a detached instance to read constructor default values
+    const tempEl = canvasDocument.createElement(tagName) as HTMLElement & Record<string, unknown>;
+
+    const traits = ownProps
+      .filter(([, cfg]) => {
+        // Use .name comparison to avoid cross-realm (iframe vs main window) === failure
+        const n = (cfg.type as { name?: string } | undefined)?.name;
+        return !cfg.type || n === 'String' || n === 'Number' || n === 'Boolean';
+      })
+      .map(([name, cfg]) => {
+        const n = (cfg.type as { name?: string } | undefined)?.name;
+        const defaultVal = tempEl[name];
+        return {
+          type: n === 'Number' ? 'number' : n === 'Boolean' ? 'checkbox' : 'text',
+          name,
+          label: name.charAt(0).toUpperCase() + name.slice(1),
+          value: defaultVal !== undefined ? String(defaultVal) : '',
+        };
+      });
+
+    if (traits.length > 0) {
+      editor.Components.addType(tagName, { model: { defaults: { traits } } });
+    }
+    return traits;
+  }
+
+  async #expandPage(canvasDocument: Document, tagName: string): Promise<string> {
+    // The page element is a dev-time authoring construct: serialize only its
+    // rendered children, never the element itself — re-parsing a live page
+    // element would upgrade it and re-render over GrapesJS-owned DOM
+    const host = canvasDocument.createElement('div');
+    host.style.display = 'none';
+    const pageEl = canvasDocument.createElement(tagName) as HTMLElement & {
+      updateComplete?: Promise<unknown>;
+    };
+    host.appendChild(pageEl);
+    canvasDocument.body.appendChild(host);
+    await pageEl.updateComplete;
+    const markup = pageEl.innerHTML.replace(/<!--[\s\S]*?-->/g, '');
+    host.remove();
+    return markup;
+  }
+
+  #lockStructure(editor: GrapesEditor): void {
+    const wrapper = editor.getWrapper();
+    if (!wrapper) return;
+    wrapper.set({ droppable: false });
+    wrapper.onAll((component) => {
+      const isArchura = String(component.get('tagName') ?? '').startsWith('archura-');
+      component.set({
+        draggable: false,
+        droppable: false,
+        removable: false,
+        copyable: false,
+        // Layout wrappers from the page template are pure structure: clients
+        // interact only with the components on the page
+        ...(isArchura ? {} : { selectable: false, hoverable: false, editable: false, layerable: false }),
+      });
+    });
   }
 
   destroy(): void {
@@ -561,6 +640,16 @@ export class ArchuraEditorController {
 
   unregisterRenderable(renderable: ArchuraRenderable): void {
     this.#renderables.delete(renderable);
+  }
+
+  getTarget(): ArchuraEditTarget | null {
+    const definition = this.#definition;
+    if (!definition) return null;
+    return {
+      kind: definition.kind,
+      path: [...definition.path],
+      label: definition.label ?? definition.path.at(-1) ?? '',
+    };
   }
 
   getState(): ArchuraEditorState {
@@ -603,18 +692,19 @@ export class ArchuraEditorController {
     const editor = this.#gjsEditor;
     const definition = this.#definition;
     if (!editor || !definition) return {};
+    const wrapper = editor.getWrapper();
+    if (!wrapper) return {};
 
-    const instances = editor.getWrapper()?.find(definition.tagName) ?? [];
-    if (instances.length === 0) return {};
-
-    return {
-      components: instances.map((instance) => ({
-        componentPath: [...definition.path],
-        tagName: definition.tagName,
+    const components = this.#resolveLeafDefinitions(definition).flatMap((def) =>
+      wrapper.find(def.tagName).map((instance) => ({
+        componentPath: [...def.path],
+        tagName: def.tagName,
         instanceId: instance.getId(),
         attributes: instance.getAttributes(),
-      })),
-    };
+      }))
+    );
+
+    return components.length > 0 ? { components } : {};
   }
 
   #createCurrentArtifact(): CanonicalComponentData {

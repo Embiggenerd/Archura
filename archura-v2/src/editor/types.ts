@@ -6,6 +6,14 @@ export type ArchuraComponentDefinition = {
   tagName: string;
   moduleUrl: string;
   label?: string;
+  /** Page definitions list the paths of the component definitions they compose. */
+  uses?: string[][];
+};
+
+export type ArchuraEditTarget = {
+  kind: 'component' | 'page';
+  path: string[];
+  label: string;
 };
 
 export type ArchuraEditorConfig = {

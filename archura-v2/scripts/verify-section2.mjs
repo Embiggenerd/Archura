@@ -21,12 +21,12 @@ try {
     const { defaultComponents } = await import('/src/editor/index.ts');
     return defaultComponents;
   });
+  const cardDef = defs.find((d) => d.path.join('/') === 'cards/Card');
   check(
     'registry: defaultComponents ships Card with absolute module URL',
-    defs.length === 1 &&
-      defs[0].tagName === 'archura-card' &&
-      defs[0].moduleUrl.startsWith('http') &&
-      defs[0].moduleUrl.endsWith('/src/components/cards/Card.js'),
+    cardDef?.tagName === 'archura-card' &&
+      cardDef?.moduleUrl.startsWith('http') &&
+      cardDef?.moduleUrl.endsWith('/src/components/cards/Card.js'),
     JSON.stringify(defs)
   );
 

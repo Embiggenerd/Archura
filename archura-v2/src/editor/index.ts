@@ -1,6 +1,11 @@
 export { ArchuraEditorController } from './ArchuraEditorController.js';
 export { defaultComponents } from '../components/index.js';
-export type { ArchuraComponentDefinition, ArchuraEditorConfig, ArchuraEditorState } from './types.js';
+export type {
+  ArchuraComponentDefinition,
+  ArchuraEditTarget,
+  ArchuraEditorConfig,
+  ArchuraEditorState,
+} from './types.js';
 import './elements/ArchuraCanvas.js';
 import './elements/ArchuraStylingPanel.js';
 import './elements/ArchuraToolbar.js';

@@ -6,9 +6,25 @@ export class ArchuraToolbar extends LitElement {
   @property({ attribute: false }) controller?: ArchuraEditorController;
   @state() private saving = false;
 
+  connectedCallback(): void {
+    super.connectedCallback();
+    this.controller?.registerRenderable(this);
+  }
+
+  disconnectedCallback(): void {
+    this.controller?.unregisterRenderable(this);
+    super.disconnectedCallback();
+  }
+
   override render() {
+    const target = this.controller?.getTarget();
     return html`
       <div class="toolbar">
+        <span class="breadcrumb">
+          ${target
+            ? html`${target.kind === 'page' ? 'Pages' : 'Components'} / <strong>${target.label}</strong>`
+            : ''}
+        </span>
         <button ?disabled=${this.saving} @click=${this.#save}>
           ${this.saving ? 'Saving...' : 'Save'}
         </button>
@@ -34,7 +50,17 @@ export class ArchuraToolbar extends LitElement {
     .toolbar {
       display: flex;
       align-items: center;
+      justify-content: space-between;
       gap: 12px;
+    }
+
+    .breadcrumb {
+      font: 0.9rem/1 Helvetica, Arial, sans-serif;
+      color: #6b7280;
+    }
+
+    .breadcrumb strong {
+      color: #111827;
     }
 
     button {
