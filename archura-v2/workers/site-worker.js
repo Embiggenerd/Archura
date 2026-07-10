@@ -58,8 +58,31 @@ export default {
   },
 };
 
+/**
+ * Claim gating: when CLAIM_IP_ALLOWLIST is set (comma-separated; entries may
+ * end in `*` for prefix match, e.g. an IPv6 /64), only those IPs may claim
+ * sites. Loopback is exempt so `wrangler dev` keeps working — in production
+ * Cloudflare sets CF-Connecting-IP itself, so it can never be loopback.
+ */
+function claimAllowed(request, env) {
+  const allowlist = (env.CLAIM_IP_ALLOWLIST ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (allowlist.length === 0) return true;
+
+  const ip = request.headers.get('CF-Connecting-IP') ?? '';
+  if (ip === '127.0.0.1' || ip === '::1') return true;
+  return allowlist.some((entry) =>
+    entry.endsWith('*') ? ip.startsWith(entry.slice(0, -1)) : ip === entry
+  );
+}
+
 async function serveApi(request, env, url) {
   if (url.pathname === '/api/sites' && request.method === 'POST') {
+    if (!claimAllowed(request, env)) {
+      return json({ error: 'Claiming is restricted' }, 403);
+    }
     let site;
     try {
       ({ site } = await request.json());

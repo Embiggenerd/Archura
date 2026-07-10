@@ -20,3 +20,6 @@ bucket_name = "archura-artifacts"
 [vars]
 # Cloudflare zone serving wildcard subdomains; empty = path-based sites only (/s/<name>/)
 ROOT_DOMAIN = "archura.ai"
+# IPs allowed to claim new sites (comma-separated, trailing * = prefix match).
+# Empty = open claiming. Loopback is always allowed for local dev.
+CLAIM_IP_ALLOWLIST = "72.132.36.124,2603:8001:2400:2ac0:*"

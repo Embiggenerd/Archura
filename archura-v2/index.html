@@ -143,7 +143,11 @@
             });
             if (!response.ok) {
               errorEl.textContent =
-                response.status === 409 ? 'That name is taken.' : 'Invalid name — lowercase letters, digits, dashes.';
+                response.status === 409
+                  ? 'That name is taken.'
+                  : response.status === 403
+                    ? 'Claiming new sites is currently restricted.'
+                    : 'Invalid name — lowercase letters, digits, dashes.';
               return;
             }
             const { site, token, url } = await response.json();
