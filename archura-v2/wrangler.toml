@@ -1,0 +1,22 @@
+name = "archura-sites"
+main = "workers/site-worker.js"
+compatibility_date = "2026-07-01"
+workers_dev = true
+
+routes = [
+  { pattern = "archura.ai/*", zone_name = "archura.ai" },
+  { pattern = "*.archura.ai/*", zone_name = "archura.ai" },
+]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+run_worker_first = true
+
+[[r2_buckets]]
+binding = "ARTIFACTS"
+bucket_name = "archura-artifacts"
+
+[vars]
+# Cloudflare zone serving wildcard subdomains; empty = path-based sites only (/s/<name>/)
+ROOT_DOMAIN = "archura.ai"

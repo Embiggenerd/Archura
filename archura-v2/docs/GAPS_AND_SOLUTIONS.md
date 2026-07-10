@@ -282,6 +282,45 @@ Publish with a rejecting callback → error surfaces via `editorerror`, editor r
 
 ---
 
+## 7. Serving layer — claim a subdomain, publish, live site
+
+**Status: implemented** on `demo-deploy` — verified by `scripts/verify-deploy.mjs`
+(8 checks against `wrangler dev`: claim flow, bundled modules, publish, served site,
+live update without reload, token/claim security, placeholder page, editor restore).
+
+### Product goal (2026-07-10)
+
+A user claims a custom subdomain, edits their page, clicks publish, and the page is live
+at `<name>.<domain>` — with open viewers seeing re-publishes without refreshing.
+
+### Solution
+
+- **One Worker, three jobs** (`workers/site-worker.js`), routed by hostname:
+  editor app + `/api/*` on the apex; published sites on wildcard subdomains;
+  `/s/<name>/` path fallback serves sites on workers.dev and under `wrangler dev`.
+- **Claim tokens**: `POST /api/sites` reserves a name, stores a SHA-256 hash of a random
+  token in `sites/<name>/meta.json` (R2), returns the token once; the browser keeps it in
+  localStorage. Publishes require it as a bearer header; reads are public. No accounts —
+  upgrade path is swapping the ownership check, nothing else changes.
+- **Same adapter contract**: the editor talks to the Worker through the §5 `createR2Adapter`
+  pointed at `/api/artifacts/<site>` — the serving layer required zero editor changes.
+- **Component modules built for the world**: `scripts/build-components.mjs` bundles each
+  leaf component (and the Landing page module for the editor canvas) as self-contained ESM
+  (lit inlined) into `dist/components/*`, served as Worker assets. Component classes now
+  guard their `customElements.define` since bundling means a class can arrive via two URLs.
+- **Site shell**: the Worker renders `<style>` + snapshot html + one module script per
+  unique `content.components[].componentPath`, plus a poll script comparing
+  `meta.updatedAt` every 3s that swaps css/html in place — live updates, no reload.
+- **Deploy**: `npm run deploy` (vite build + component bundles + `wrangler deploy`);
+  `wrangler.toml` needs `ROOT_DOMAIN` + zone routes filled in for real subdomains.
+
+### Still ahead (vision layers, undesigned)
+
+Site-level artifact (multi-page + routing), versioned CDN component distribution,
+composer mode (agents/templates may create structure), real accounts, §4 npm packaging.
+
+---
+
 ## Suggested order
 
 1. §1 save/load + deployment transform (current `deployable-styles` branch finishes here)

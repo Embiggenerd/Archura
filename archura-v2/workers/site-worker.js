@@ -1,0 +1,184 @@
+/**
+ * Archura site Worker: editor hosting, claim/publish API, and published-site
+ * serving in one deployment.
+ *
+ * Routing by hostname:
+ * - `<name>.<ROOT_DOMAIN>`  → the published site for `name` (wildcard DNS route)
+ * - anything else           → the editor app (static assets) + /api/*
+ * - `/s/<name>/` also serves a published site on any host — the fallback used
+ *   on workers.dev and under `wrangler dev`, where wildcard hosts don't exist.
+ *
+ * Storage (R2 binding ARTIFACTS):
+ * - sites/<name>/meta.json               → { site, tokenHash, createdAt }
+ * - sites/<name>/pages/Landing.json      → published CanonicalComponentData
+ */
+
+const RESERVED = new Set(['www', 'api', 'app', 'editor', 'assets', 'components', 's']);
+const SITE_NAME = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
+const HOME_ARTIFACT = 'pages/Landing';
+
+const BASE_RESET_CSS = `*, *::before, *::after { box-sizing: border-box; } body { margin: 0; }`;
+
+async function sha256Hex(text) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+const json = (data, status = 200) =>
+  new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const root = env.ROOT_DOMAIN;
+
+    // Published site via wildcard subdomain
+    if (root && url.hostname !== root && url.hostname.endsWith(`.${root}`)) {
+      const sub = url.hostname.slice(0, -(root.length + 1));
+      if (SITE_NAME.test(sub) && !RESERVED.has(sub)) {
+        return serveSite(request, env, sub, url.pathname, '/');
+      }
+    }
+
+    // Published site via path fallback (workers.dev, wrangler dev)
+    if (url.pathname.startsWith('/s/')) {
+      const [, , site, ...rest] = url.pathname.split('/');
+      if (SITE_NAME.test(site ?? '')) {
+        return serveSite(request, env, site, `/${rest.join('/')}`, `/s/${site}/`);
+      }
+      return new Response('Not found', { status: 404 });
+    }
+
+    if (url.pathname.startsWith('/api/')) {
+      return serveApi(request, env, url);
+    }
+
+    // Editor app + built component modules
+    return env.ASSETS.fetch(request);
+  },
+};
+
+async function serveApi(request, env, url) {
+  if (url.pathname === '/api/sites' && request.method === 'POST') {
+    let site;
+    try {
+      ({ site } = await request.json());
+    } catch {
+      return json({ error: 'Invalid body' }, 400);
+    }
+    if (typeof site !== 'string' || !SITE_NAME.test(site) || RESERVED.has(site)) {
+      return json({ error: 'Invalid site name' }, 400);
+    }
+    if (await env.ARTIFACTS.head(`sites/${site}/meta.json`)) {
+      return json({ error: 'Site already claimed' }, 409);
+    }
+
+    const token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '');
+    await env.ARTIFACTS.put(
+      `sites/${site}/meta.json`,
+      JSON.stringify({ site, tokenHash: await sha256Hex(token), createdAt: new Date().toISOString() })
+    );
+    const siteUrl = env.ROOT_DOMAIN ? `https://${site}.${env.ROOT_DOMAIN}/` : `/s/${site}/`;
+    return json({ site, token, url: siteUrl }, 201);
+  }
+
+  const artifactMatch = url.pathname.match(/^\/api\/artifacts\/([^/]+)\/(.+)$/);
+  if (artifactMatch) {
+    const [, site, artifactPath] = artifactMatch;
+    if (!SITE_NAME.test(site) || artifactPath.includes('..')) {
+      return json({ error: 'Bad request' }, 400);
+    }
+    const key = `sites/${site}/${decodeURIComponent(artifactPath)}.json`;
+
+    if (request.method === 'GET') {
+      const object = await env.ARTIFACTS.get(key);
+      if (!object) return json({ error: 'Not found' }, 404);
+      return new Response(object.body, { headers: { 'Content-Type': 'application/json' } });
+    }
+
+    if (request.method === 'PUT') {
+      const meta = await env.ARTIFACTS.get(`sites/${site}/meta.json`);
+      if (!meta) return json({ error: 'Unknown site' }, 404);
+      const { tokenHash } = await meta.json();
+      const auth = request.headers.get('Authorization') ?? '';
+      const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+      if (!token || (await sha256Hex(token)) !== tokenHash) {
+        return json({ error: 'Unauthorized' }, 401);
+      }
+      await env.ARTIFACTS.put(key, request.body);
+      return new Response(null, { status: 204 });
+    }
+  }
+
+  return json({ error: 'Not found' }, 404);
+}
+
+async function serveSite(request, env, site, path, base) {
+  // Component modules resolve on the site host too (shared assets)
+  if (path.startsWith('/components/')) {
+    return env.ASSETS.fetch(new Request(new URL(path, request.url), request));
+  }
+
+  const object = await env.ARTIFACTS.get(`sites/${site}/${HOME_ARTIFACT}.json`);
+
+  if (path === '/artifact.json') {
+    if (!object) return json({ error: 'Not published' }, 404);
+    return new Response(object.body, {
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+    });
+  }
+
+  const artifact = object ? await object.json() : null;
+  return new Response(renderSiteShell(site, artifact, base), {
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
+}
+
+function renderSiteShell(site, artifact, base) {
+  const modulePaths = [
+    ...new Set((artifact?.content?.components ?? []).map((c) => c.componentPath.join('/'))),
+  ];
+  const moduleScripts = modulePaths
+    .map((p) => `<script type="module" src="${base}components/${p}.js"></script>`)
+    .join('\n    ');
+
+  const body = artifact
+    ? artifact.snapshot.html
+    : `<p style="font-family: sans-serif; color: #6b7280; padding: 48px;">
+         Nothing published to <strong>${site}</strong> yet — it will appear here the moment it is.
+       </p>`;
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${site}</title>
+    <style>${BASE_RESET_CSS}</style>
+    <style id="archura-css">${artifact?.snapshot.css ?? ''}</style>
+  </head>
+  <body>
+    <div id="archura-root">${body}</div>
+    ${moduleScripts}
+    <script type="module">
+      // Live updates: poll the artifact and re-render in place on re-publish
+      let lastUpdated = ${JSON.stringify(artifact?.meta.updatedAt ?? null)};
+      setInterval(async () => {
+        try {
+          const response = await fetch('${base}artifact.json', { cache: 'no-store' });
+          if (!response.ok) return;
+          const artifact = await response.json();
+          if (artifact.meta.updatedAt === lastUpdated) return;
+          lastUpdated = artifact.meta.updatedAt;
+          document.getElementById('archura-css').textContent = artifact.snapshot.css;
+          document.getElementById('archura-root').innerHTML = artifact.snapshot.html;
+          const paths = [...new Set((artifact.content?.components ?? []).map((c) => c.componentPath.join('/')))];
+          await Promise.all(paths.map((p) => import(\`${base}components/\${p}.js\`)));
+        } catch {
+          // transient network failure: try again next tick
+        }
+      }, 3000);
+    </script>
+  </body>
+</html>`;
+}

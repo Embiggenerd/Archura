@@ -47,4 +47,6 @@ export class Card extends Base {
   }
 }
 
-customElements.define(Card.grapesTagName, Card);
+if (!customElements.get(Card.grapesTagName)) {
+  customElements.define(Card.grapesTagName, Card);
+}

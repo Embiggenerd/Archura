@@ -50,4 +50,6 @@ export class Hero extends Base {
   }
 }
 
-customElements.define(Hero.grapesTagName, Hero);
+if (!customElements.get(Hero.grapesTagName)) {
+  customElements.define(Hero.grapesTagName, Hero);
+}

@@ -5,6 +5,11 @@ import { defineConfig, type Connect } from 'vite';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+const buildInputs = {
+  main: path.join(here, 'index.html'),
+  demo: path.join(here, 'demo/index.html'),
+};
+
 // Dev-only JSON artifact store: GET/PUT /<key> ↔ <rootDir>/<key>.json.
 // Mirrors the contract of workers/r2-artifact-worker.js.
 function artifactStore(rootDir: string, options: { bearerToken?: string } = {}): Connect.NextHandleFunction {
@@ -48,6 +53,9 @@ function artifactStore(rootDir: string, options: { bearerToken?: string } = {}):
 }
 
 export default defineConfig({
+  build: {
+    rollupOptions: { input: buildInputs },
+  },
   plugins: [
     {
       // Without this, /demo (no trailing slash) hits the SPA fallback and

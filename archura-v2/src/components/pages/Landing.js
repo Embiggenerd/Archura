@@ -31,4 +31,6 @@ export class Landing extends PageBase {
   }
 }
 
-customElements.define(Landing.grapesTagName, Landing);
+if (!customElements.get(Landing.grapesTagName)) {
+  customElements.define(Landing.grapesTagName, Landing);
+}
