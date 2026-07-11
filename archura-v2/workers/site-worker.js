@@ -19,8 +19,18 @@ const HOME_ARTIFACT = 'pages/Landing';
 
 const BASE_RESET_CSS = `*, *::before, *::after { box-sizing: border-box; } body { margin: 0; }`;
 
-async function sha256Hex(text) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+const ASSET_TYPES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
+
+// Keep in sync with GOOGLE_FONTS in src/editor/ArchuraEditorController.ts
+const GOOGLE_FONTS = ['Inter', 'Poppins', 'Roboto', 'Montserrat', 'Playfair Display', 'Lora', 'Merriweather', 'DM Sans'];
+
+function escapeHtml(text) {
+  return String(text).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
+}
+
+async function sha256Hex(data) {
+  const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
@@ -54,9 +64,21 @@ export default {
     }
 
     // Editor app + built component modules
-    return env.ASSETS.fetch(request);
+    const assetResponse = await env.ASSETS.fetch(request);
+    if (url.pathname.startsWith('/components/')) {
+      return withCors(assetResponse);
+    }
+    return assetResponse;
   },
 };
+
+// White-label embeds load component modules from foreign origins, and module
+// scripts require CORS
+function withCors(response) {
+  const headers = new Headers(response.headers);
+  headers.set('Access-Control-Allow-Origin', '*');
+  return new Response(response.body, { status: response.status, headers });
+}
 
 /**
  * Claim gating: when CLAIM_IP_ALLOWLIST is set (comma-separated; entries may
@@ -105,6 +127,44 @@ async function serveApi(request, env, url) {
     return json({ site, token, url: siteUrl }, 201);
   }
 
+  const assetMatch = url.pathname.match(/^\/api\/assets\/([^/]+)\/(.+)$/);
+  if (assetMatch) {
+    const [, site, name] = assetMatch;
+    const ext = name.split('.').pop()?.toLowerCase() ?? '';
+    if (!SITE_NAME.test(site) || name.includes('..') || !ASSET_TYPES[ext]) {
+      return json({ error: 'Bad request' }, 400);
+    }
+
+    if (request.method === 'GET') {
+      const object = await env.ARTIFACTS.get(`sites/${site}/assets/${name}`);
+      if (!object) return json({ error: 'Not found' }, 404);
+      return new Response(object.body, {
+        headers: {
+          'Content-Type': ASSET_TYPES[ext],
+          'Cache-Control': 'public, max-age=31536000, immutable',
+        },
+      });
+    }
+
+    if (request.method === 'PUT') {
+      const meta = await env.ARTIFACTS.get(`sites/${site}/meta.json`);
+      if (!meta) return json({ error: 'Unknown site' }, 404);
+      const { tokenHash } = await meta.json();
+      const auth = request.headers.get('Authorization') ?? '';
+      const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+      if (!token || (await sha256Hex(token)) !== tokenHash) {
+        return json({ error: 'Unauthorized' }, 401);
+      }
+      const body = await request.arrayBuffer();
+      const hash = (await sha256Hex(body)).slice(0, 12);
+      const finalName = `${hash}.${ext}`;
+      await env.ARTIFACTS.put(`sites/${site}/assets/${finalName}`, body, {
+        httpMetadata: { contentType: ASSET_TYPES[ext] },
+      });
+      return json({ url: `${url.origin}/api/assets/${site}/${finalName}` }, 201);
+    }
+  }
+
   const artifactMatch = url.pathname.match(/^\/api\/artifacts\/([^/]+)\/(.+)$/);
   if (artifactMatch) {
     const [, site, artifactPath] = artifactMatch;
@@ -139,7 +199,7 @@ async function serveApi(request, env, url) {
 async function serveSite(request, env, site, path, base) {
   // Component modules resolve on the site host too (shared assets)
   if (path.startsWith('/components/')) {
-    return env.ASSETS.fetch(new Request(new URL(path, request.url), request));
+    return withCors(await env.ASSETS.fetch(new Request(new URL(path, request.url), request)));
   }
 
   const object = await env.ARTIFACTS.get(`sites/${site}/${HOME_ARTIFACT}.json`);
@@ -171,12 +231,32 @@ function renderSiteShell(site, artifact, base) {
          Nothing published to <strong>${site}</strong> yet — it will appear here the moment it is.
        </p>`;
 
+  const page = artifact?.content?.page ?? {};
+  const title = escapeHtml(page.title || site);
+  const description = page.description
+    ? `<meta name="description" content="${escapeHtml(page.description)}" />
+    <meta property="og:description" content="${escapeHtml(page.description)}" />`
+    : '';
+
+  const snapshotText = `${artifact?.snapshot.css ?? ''}\n${artifact?.snapshot.html ?? ''}`;
+  const usedFonts = GOOGLE_FONTS.filter((f) => snapshotText.includes(f));
+  const fontLinks = usedFonts.length
+    ? `<link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?${usedFonts
+      .map((f) => `family=${f.replaceAll(' ', '+')}:wght@400;700`)
+      .join('&')}&display=swap" />`
+    : '';
+
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${site}</title>
+    <title>${title}</title>
+    <meta property="og:title" content="${title}" />
+    ${description}
+    ${fontLinks}
     <style>${BASE_RESET_CSS}</style>
     <style id="archura-css">${artifact?.snapshot.css ?? ''}</style>
   </head>

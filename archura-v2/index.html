@@ -109,12 +109,26 @@
         ? defaultComponents.map((def) => ({ ...def, moduleUrl: `/components/${def.path.join('/')}.js` }))
         : undefined;
 
+      async function uploadAsset(blob, name) {
+        const ext = (name.split('.').pop() || 'png').toLowerCase();
+        const targetSite = site ?? 'dev';
+        const token = site ? localStorage.getItem(`archura:site-token:${site}`) : null;
+        const response = await fetch(`/api/assets/${targetSite}/upload.${ext}`, {
+          method: 'PUT',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: blob,
+        });
+        if (!response.ok) throw new Error(`Asset upload failed (${response.status})`);
+        return (await response.json()).url;
+      }
+
       function mountEditor(persistence) {
         const editor = document.createElement('archura-editor');
         editor.id = 'editor';
         if (component) editor.componentPath = component.split('/');
         if (components) editor.components = components;
         editor.persistence = persistence;
+        editor.uploadAsset = uploadAsset;
         document.body.appendChild(editor);
       }
 

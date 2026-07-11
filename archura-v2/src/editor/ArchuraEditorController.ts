@@ -1,4 +1,4 @@
-import grapesjs, { type Editor as GrapesEditor } from 'grapesjs';
+import grapesjs, { type Component, type Editor as GrapesEditor, type Trait } from 'grapesjs';
 import 'grapesjs/dist/css/grapes.min.css';
 import {
   createCanonicalComponentData,
@@ -10,8 +10,22 @@ import type {
   ArchuraEditTarget,
   ArchuraEditorConfig,
   ArchuraEditorState,
+  ArchuraPageMeta,
   ArchuraRenderable,
 } from './types.js';
+
+type ArchuraTrait = {
+  type: string;
+  name: string;
+  label: string;
+  value: string;
+  options?: Array<{ id: string; label: string }>;
+};
+
+type ArchuraStyleParts = Record<string, string[]>;
+type ArchuraResize = { width?: boolean; height?: boolean; min?: number; max?: number };
+
+const ALL_STYLE_GROUPS = ['typography', 'spacing', 'dimension', 'decorations', 'hover', 'flex'];
 
 function createDefaultHtml(componentPath: string[]) {
   const componentName = componentPath.at(-1)?.toLowerCase() ?? 'component';
@@ -46,6 +60,10 @@ p {
 export const BASE_RESET_CSS = `*, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; }`;
 
+// Theme rules target elements outside the snapshot fragment (body/:root); they
+// must stay in css untouched — inlining onto the parsed doc's body would lose them
+const THEME_SELECTOR = /(?:^|,)\s*(?:body|html|:root)(?![\w-])/;
+
 export function transformForDeployment(html: string, css: string): { html: string; css: string } {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const sheet = new CSSStyleSheet();
@@ -55,15 +73,37 @@ export function transformForDeployment(html: string, css: string): { html: strin
     return { html, css };
   }
 
+  // Read names from cssText: some engines don't enumerate custom props by index
+  const customPropNames = (style: CSSStyleDeclaration) =>
+    [...style.cssText.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]);
+
+  // A prop overridden inside a media query must not be inlined anywhere:
+  // inline styles would beat the media rule at every viewport
+  const responsiveProps = new Set<string>();
+  for (const rule of sheet.cssRules) {
+    if (!(rule instanceof CSSMediaRule)) continue;
+    for (const inner of rule.cssRules) {
+      if (!(inner instanceof CSSStyleRule)) continue;
+      for (const prop of customPropNames(inner.style)) {
+        responsiveProps.add(`${inner.selectorText}||${prop}`);
+      }
+    }
+  }
+
   const keptRules: string[] = [];
   for (const rule of sheet.cssRules) {
     if (!(rule instanceof CSSStyleRule)) {
       keptRules.push(rule.cssText);
       continue;
     }
+    if (THEME_SELECTOR.test(rule.selectorText)) {
+      keptRules.push(rule.cssText);
+      continue;
+    }
 
-    // Read names from cssText: some engines don't enumerate custom props by index
-    const propNames = [...rule.style.cssText.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]);
+    const propNames = customPropNames(rule.style).filter(
+      (prop) => !responsiveProps.has(`${rule.selectorText}||${prop}`)
+    );
 
     let targets: HTMLElement[] = [];
     if (propNames.length > 0) {
@@ -92,6 +132,35 @@ export function transformForDeployment(html: string, css: string): { html: strin
   return { html: doc.body.innerHTML, css: keptRules.join('\n') };
 }
 
+async function downscaleImage(file: Blob, maxDim: number): Promise<Blob> {
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (!bitmap) return file;
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+  if (scale >= 1) return file;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve) =>
+    canvas.toBlob((blob) => resolve(blob ?? file), file.type || 'image/png', 0.9)
+  );
+}
+
+export const GOOGLE_FONTS = [
+  'Inter',
+  'Poppins',
+  'Roboto',
+  'Montserrat',
+  'Playfair Display',
+  'Lora',
+  'Merriweather',
+  'DM Sans',
+];
+
+export const GOOGLE_FONTS_CSS_URL = `https://fonts.googleapis.com/css2?${GOOGLE_FONTS.map(
+  (f) => `family=${f.replaceAll(' ', '+')}:wght@400;700`
+).join('&')}&display=swap`;
+
 function createArtifactId(componentPath: string[]) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const scope = componentPath.join('-').toLowerCase().replace(/[^a-z0-9-]+/g, '-');
@@ -112,6 +181,9 @@ export class ArchuraEditorController {
   #hasSnapshot = false;
   #components: ArchuraComponentDefinition[];
   #definition: ArchuraComponentDefinition | null = null;
+  #dirty = false;
+  #stylePartsByTag = new Map<string, ArchuraStyleParts>();
+  #activePart: { component: Component; part: string } | null = null;
 
   constructor(config: ArchuraEditorConfig = {}) {
     const componentPath = config.initialArtifact?.config.componentPath ?? config.componentPath ?? [];
@@ -127,6 +199,7 @@ export class ArchuraEditorController {
       html,
       css,
       ready: false,
+      pageMeta: (config.initialArtifact?.content?.page as ArchuraPageMeta | undefined) ?? undefined,
     };
   }
 
@@ -157,11 +230,147 @@ export class ArchuraEditorController {
 
   save(): Promise<CanonicalComponentData[]> {
     this.#artifacts = [this.#createCurrentArtifact()];
+    this.#dirty = false;
     this.#config.onSave?.({ artifacts: this.#artifacts });
     this.#config.onChange?.(this.#artifacts);
     this.#notify();
 
     return Promise.resolve(this.#artifacts);
+  }
+
+  get dirty(): boolean {
+    return this.#dirty;
+  }
+
+  #markDirty(): void {
+    this.#dirty = true;
+  }
+
+  undo(): void {
+    this.#gjsEditor?.UndoManager.undo();
+  }
+
+  redo(): void {
+    this.#gjsEditor?.UndoManager.redo();
+  }
+
+  setDevice(name: string): void {
+    this.#gjsEditor?.setDevice(name);
+    this.#notify();
+  }
+
+  getDevice(): string {
+    return this.#gjsEditor?.getDevice() || 'Desktop';
+  }
+
+  getPageMeta(): ArchuraPageMeta {
+    return { ...(this.#state.pageMeta ?? {}) };
+  }
+
+  setPageMeta(meta: ArchuraPageMeta): void {
+    this.#state = { ...this.#state, pageMeta: { ...this.#state.pageMeta, ...meta } };
+    this.#markDirty();
+    this.#notify();
+  }
+
+  getThemeTokens(): Record<string, string> {
+    const style = this.#gjsEditor?.Css.getRule('body')?.getStyle() ?? {};
+    return { ...(style as Record<string, string>) };
+  }
+
+  setThemeTokens(tokens: Record<string, string>): void {
+    const editor = this.#gjsEditor;
+    if (!editor) return;
+    const current = this.getThemeTokens();
+    for (const [key, value] of Object.entries(tokens)) {
+      if (value) current[key] = value;
+      else delete current[key];
+    }
+    editor.Css.setRule('body', current);
+    this.#markDirty();
+    this.#notify();
+  }
+
+  getActivePart(): string | null {
+    return this.#activePart?.part ?? null;
+  }
+
+  clearActivePart(): void {
+    const active = this.#activePart;
+    this.#activePart = null;
+    const editor = this.#gjsEditor;
+    if (!editor) return;
+    if (active) {
+      editor.StyleManager.select(active.component as never);
+    }
+    this.#notify();
+  }
+
+  #propGroupVisible(group: string): boolean {
+    if (this.#activePart) return group === 'part';
+    if (group === 'part') return false;
+    const selected = this.#gjsEditor?.getSelected();
+    const styleParts = this.#stylePartsByTag.get(String(selected?.get('tagName') ?? '').toLowerCase());
+    return (styleParts?.host ?? ALL_STYLE_GROUPS).includes(group);
+  }
+
+  #activatePart(component: Component, part: string): void {
+    const editor = this.#gjsEditor;
+    if (!editor) return;
+    // The ::part rule needs the element id in the exported html
+    component.addAttributes({ id: component.getId() });
+    this.#activePart = { component, part };
+    // Create the rule explicitly: selecting by string loses the ::part()
+    // pseudo when the selector round-trips through the selector parser
+    const selector = `#${component.getId()}::part(${part})`;
+    const rule = editor.Css.getRule(selector) ?? editor.Css.setRule(selector, {});
+    editor.StyleManager.select(rule as never);
+    this.#notify();
+  }
+
+  #handleCanvasClick(editor: GrapesEditor, event: Event, selectedAtMousedown: Component | null): void {
+    // Duck-type: path nodes belong to the iframe realm, so `instanceof
+    // Element` against the main window's Element fails
+    const path = event.composedPath();
+    const partEl = path.find(
+      (node): node is Element =>
+        typeof (node as Element)?.getAttribute === 'function' && !!(node as Element).getAttribute('part')
+    );
+    if (!partEl) {
+      if (this.#activePart) this.clearActivePart();
+      return;
+    }
+    const part = partEl.getAttribute('part')!;
+    const host = (partEl.getRootNode() as ShadowRoot).host;
+    const declared = this.#stylePartsByTag.get(host.tagName.toLowerCase());
+    if (!declared?.[part]) {
+      if (this.#activePart) this.clearActivePart();
+      return;
+    }
+    const component = this.#findComponentForElement(editor, host);
+    if (!component) return;
+    // Drill-down: only enter the part if this component was already selected
+    // when the click began
+    if (selectedAtMousedown !== component) return;
+    // After GrapesJS finishes its own click/selection handling
+    setTimeout(() => this.#activatePart(component, part), 0);
+  }
+
+  #findComponentForElement(editor: GrapesEditor, el: Element): Component | null {
+    let found: Component | null = null;
+    editor.getWrapper()?.onAll((component) => {
+      if (component.getEl() === el) found = component;
+    });
+    return found;
+  }
+
+  async uploadAsset(file: Blob, name = 'asset.png'): Promise<string> {
+    const upload = this.#config.uploadAsset;
+    if (!upload) {
+      throw new Error('No uploadAsset handler configured.');
+    }
+    const scaled = await downscaleImage(file, 1024);
+    return upload(scaled, name);
   }
 
   get canPublish(): boolean {
@@ -183,6 +392,7 @@ export class ArchuraEditorController {
     }
 
     this.#artifacts = [artifact];
+    this.#dirty = false;
     this.#config.onSave?.({ artifacts: this.#artifacts });
     this.#config.onChange?.(this.#artifacts);
     this.#notify();
@@ -199,6 +409,7 @@ export class ArchuraEditorController {
       html: artifact.snapshot.html,
       css: artifact.snapshot.css,
       ready: this.#state.ready,
+      pageMeta: (artifact.content?.page as ArchuraPageMeta | undefined) ?? undefined,
     };
     this.#hasSnapshot = true;
     this.#definition = this.#resolveDefinition(this.#state.componentPath);
@@ -270,10 +481,18 @@ export class ArchuraEditorController {
       width: '100%',
       storageManager: false,
       protectedCss: BASE_RESET_CSS,
+      // Canvas-only (not exported): keeps full-width components off the
+      // clipped canvas edge so resize handles stay reachable
+      canvasCss: 'body { padding: 12px; }',
       panels: { defaults: [] },
       deviceManager: {
-        devices: [{ name: 'Desktop', width: '' }],
+        devices: [
+          { id: 'Desktop', name: 'Desktop', width: '' },
+          { id: 'Tablet', name: 'Tablet', width: '768px', widthMedia: '991px' },
+          { id: 'Mobile', name: 'Mobile', width: '375px', widthMedia: '767px' },
+        ],
       },
+      canvas: { styles: [GOOGLE_FONTS_CSS_URL] },
       colorPicker: { appendTo: 'body' },
       ...(this.#traitsPanelContainer && {
         traitManager: { appendTo: this.#traitsPanelContainer },
@@ -292,6 +511,7 @@ export class ArchuraEditorController {
                   type: 'select',
                   options: [
                     { id: 'system-ui, -apple-system, sans-serif', label: 'System UI' },
+                    ...GOOGLE_FONTS.map((f) => ({ id: `'${f}', sans-serif`, label: f })),
                     { id: 'Arial, Helvetica, sans-serif', label: 'Arial' },
                     { id: 'Helvetica, Arial, sans-serif', label: 'Helvetica' },
                     { id: 'Verdana, Geneva, sans-serif', label: 'Verdana' },
@@ -389,6 +609,78 @@ export class ArchuraEditorController {
               ],
             },
             {
+              // Shown only while a shadow part is active; writes real CSS
+              // properties into a `#id::part(name)` rule (outer ::part
+              // declarations beat shadow-tree defaults in the cascade)
+              name: 'Selected Part',
+              open: true,
+              visible: false,
+              properties: [
+                { label: 'Color', property: 'color', type: 'color' },
+                { label: 'Font Size', property: 'font-size', type: 'number', units: ['px', 'rem', 'em'] },
+                {
+                  label: 'Font Weight',
+                  property: 'font-weight',
+                  type: 'select',
+                  options: [
+                    { id: '300', label: 'Light' },
+                    { id: '400', label: 'Normal' },
+                    { id: '600', label: 'Semibold' },
+                    { id: '700', label: 'Bold' },
+                  ],
+                },
+                {
+                  label: 'Font Family',
+                  property: 'font-family',
+                  type: 'select',
+                  options: [
+                    { id: 'inherit', label: 'Inherit' },
+                    ...GOOGLE_FONTS.map((f) => ({ id: `'${f}', sans-serif`, label: f })),
+                  ],
+                },
+                { label: 'Line Height', property: 'line-height', type: 'number', units: ['', 'px'] },
+                { label: 'Letter Spacing', property: 'letter-spacing', type: 'number', units: ['px', 'em'] },
+                {
+                  label: 'Text Align',
+                  property: 'text-align',
+                  type: 'select',
+                  options: [
+                    { id: 'left', label: 'Left' },
+                    { id: 'center', label: 'Center' },
+                    { id: 'right', label: 'Right' },
+                  ],
+                },
+                {
+                  label: 'Font Style',
+                  property: 'font-style',
+                  type: 'select',
+                  options: [
+                    { id: 'normal', label: 'Normal' },
+                    { id: 'italic', label: 'Italic' },
+                  ],
+                },
+                {
+                  label: 'Text Decoration',
+                  property: 'text-decoration',
+                  type: 'select',
+                  options: [
+                    { id: 'none', label: 'None' },
+                    { id: 'underline', label: 'Underline' },
+                    { id: 'line-through', label: 'Line Through' },
+                  ],
+                },
+              ],
+            },
+            {
+              name: 'Hover',
+              properties: [
+                { label: 'Background', property: '--hover-background-color', type: 'color' },
+                { label: 'Text Color', property: '--hover-color', type: 'color' },
+                { label: 'Box Shadow', property: '--hover-box-shadow', type: 'base' },
+                { label: 'Transform', property: '--hover-transform', type: 'base' },
+              ],
+            },
+            {
               name: 'Flex',
               properties: [
                 {
@@ -470,7 +762,79 @@ export class ArchuraEditorController {
       this.#gjsEditor.onReady(() => this.#applySnapshot());
     }
 
+    // Property visibility is a pure function of our scoping state; GrapesJS
+    // re-derives sector visibility from it on every refresh, so this stays
+    // correct without fighting the StyleManager's own passes
+    const sectors = this.#gjsEditor.StyleManager.getSectors() as unknown as {
+      forEach: (fn: (s: { get: (k: string) => unknown; getProperties: () => Array<{ set: (k: string, v: unknown) => void }> }) => void) => void;
+    };
+    sectors.forEach((sector) => {
+      const name = String(sector.get('name')).toLowerCase();
+      const group = name === 'selected part' ? 'part' : name;
+      sector.getProperties().forEach((prop) => {
+        prop.set('isVisible', () => this.#propGroupVisible(group));
+      });
+    });
+
+    this.#registerAssetTrait(this.#gjsEditor);
     this.#setupColorPickerFix();
+  }
+
+  #registerAssetTrait(editor: GrapesEditor): void {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const controller = this;
+    type TraitArgs = { component: Component; trait: Trait; elInput: HTMLInputElement };
+    editor.TraitManager.addType('asset', {
+      createInput({ trait }: TraitArgs) {
+        const el = document.createElement('div');
+        el.dataset.traitName = String(trait.get('name') ?? '');
+        el.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+        el.innerHTML = `
+          <img data-preview style="display:none;max-width:100%;max-height:64px;object-fit:contain;border:1px solid #ddd;border-radius:4px;background:#fff;" />
+          <div style="display:flex;gap:6px;">
+            <button type="button" data-upload style="flex:1;">Upload image</button>
+            <button type="button" data-clear style="display:none;">✕</button>
+          </div>
+          <input data-file type="file" accept="image/png,image/jpeg,image/webp"
+                 style="position:absolute;width:1px;height:1px;opacity:0;" />`;
+        const fileInput = el.querySelector<HTMLInputElement>('[data-file]')!;
+        el.querySelector('[data-upload]')!.addEventListener('click', (e) => {
+          e.preventDefault();
+          fileInput.click();
+        });
+        fileInput.addEventListener('change', async () => {
+          const file = fileInput.files?.[0];
+          fileInput.value = '';
+          if (!file) return;
+          try {
+            el.dataset.value = await controller.uploadAsset(file, file.name);
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          } catch (error) {
+            controller.#config.onError?.(error);
+          }
+        });
+        el.querySelector('[data-clear]')!.addEventListener('click', (e) => {
+          e.preventDefault();
+          el.dataset.value = '';
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        return el;
+      },
+      onEvent({ elInput, component }: TraitArgs) {
+        const name = elInput.dataset.traitName;
+        if (name) component.addAttributes({ [name]: elInput.dataset.value ?? '' });
+      },
+      onUpdate({ elInput, component }: TraitArgs) {
+        const name = elInput.dataset.traitName;
+        const value = name ? String(component.getAttributes()[name] ?? '') : '';
+        const preview = elInput.querySelector<HTMLImageElement>('[data-preview]')!;
+        const clear = elInput.querySelector<HTMLElement>('[data-clear]')!;
+        preview.style.display = value ? 'block' : 'none';
+        if (value) preview.src = value;
+        clear.style.display = value ? 'block' : 'none';
+        elInput.dataset.value = value;
+      },
+    });
   }
 
   #setupColorPickerFix(): void {
@@ -526,8 +890,35 @@ export class ArchuraEditorController {
       void this.#populateCanvas(editor, definition, leafDefinitions);
     });
 
-    editor.on('component:update', () => this.#notify());
-    editor.on('style:change', () => this.#notify());
+    editor.on('component:update', () => {
+      this.#markDirty();
+      this.#notify();
+    });
+    editor.on('style:change', () => {
+      this.#markDirty();
+      this.#notify();
+    });
+    editor.on('component:selected', () => {
+      this.#activePart = null;
+      this.#notify();
+    });
+    editor.on('component:deselected', () => {
+      if (this.#activePart) this.clearActivePart();
+    });
+    // Seed enabled resize axes so GrapesJS's unit detection reads the value
+    // from the model instead of bracket-accessing computed style (which
+    // returns undefined for custom props and throws upstream)
+    editor.on('component:resize:init', (opts: { component?: Component }) => {
+      const component = opts.component;
+      const el = component?.getEl();
+      const resizableConfig = component?.get('resizable') as { cr?: boolean; bc?: boolean } | boolean | undefined;
+      if (!component || !el || typeof resizableConfig !== 'object') return;
+      const style = component.getStyle() as Record<string, string>;
+      const seeds: Record<string, string> = {};
+      if (resizableConfig.cr && !style['--width']) seeds['--width'] = '100%';
+      if (resizableConfig.bc && !style['--height']) seeds['--height'] = `${el.offsetHeight}px`;
+      if (Object.keys(seeds).length > 0) component.addStyle(seeds, { avoidStore: true });
+    });
   }
 
   async #populateCanvas(
@@ -550,6 +941,7 @@ export class ArchuraEditorController {
             html: artifact.snapshot.html,
             css: artifact.snapshot.css,
             ready: this.#state.ready,
+            pageMeta: (artifact.content?.page as ArchuraPageMeta | undefined) ?? undefined,
           };
           this.#hasSnapshot = true;
           this.#artifacts = [artifact];
@@ -567,6 +959,29 @@ export class ArchuraEditorController {
         leafDefinitions.map((def) => [def.tagName, this.#registerTraits(editor, canvasDocument, def.tagName)])
       );
 
+      // Part selection is a drill-down: first click selects the component,
+      // clicking again while selected enters the part under the cursor
+      let selectedAtMousedown: Component | null = null;
+      canvasDocument.addEventListener(
+        'mousedown',
+        () => {
+          selectedAtMousedown = (editor.getSelected() as Component | undefined) ?? null;
+        },
+        true
+      );
+      // Capture phase: GrapesJS stops propagation of component clicks
+      canvasDocument.addEventListener(
+        'click',
+        (event) => this.#handleCanvasClick(editor, event, selectedAtMousedown),
+        true
+      );
+      canvasDocument.addEventListener('archura:text-edit', (event) => {
+        const { trait, value } = (event as CustomEvent<{ trait: string; value: string }>).detail;
+        const host = event.target as Element;
+        const component = this.#findComponentForElement(editor, host);
+        component?.addAttributes({ [trait]: value });
+      });
+
       if (this.#hasSnapshot) {
         this.#applySnapshot();
       } else if (definition.kind === 'page') {
@@ -580,6 +995,8 @@ export class ArchuraEditorController {
           .join(' ');
         editor.setComponents(`<${definition.tagName}${attrs ? ' ' + attrs : ''}></${definition.tagName}>`);
       }
+      // Loading/expansion fires component:update; the canvas isn't user-dirty yet
+      this.#dirty = false;
       this.#notify();
     } catch (error) {
       this.#config.onError?.(error);
@@ -597,14 +1014,17 @@ export class ArchuraEditorController {
     });
   }
 
-  #registerTraits(
-    editor: GrapesEditor,
-    canvasDocument: Document,
-    tagName: string
-  ): Array<{ type: string; name: string; label: string; value: string }> {
+  #registerTraits(editor: GrapesEditor, canvasDocument: Document, tagName: string): ArchuraTrait[] {
     const iframeWindow = canvasDocument.defaultView as (Window & { customElements: CustomElementRegistry }) | null;
-    type LitCtor = CustomElementConstructor & { properties?: Record<string, { type?: unknown }> };
+    type LitPropConfig = { type?: unknown; asset?: boolean; options?: string[] };
+    type LitCtor = CustomElementConstructor & {
+      properties?: Record<string, LitPropConfig>;
+      styleParts?: ArchuraStyleParts;
+      resize?: ArchuraResize;
+    };
     const ctor = iframeWindow?.customElements.get(tagName) as LitCtor | undefined;
+
+    if (ctor?.styleParts) this.#stylePartsByTag.set(tagName, ctor.styleParts);
 
     // Use own static properties only (not inherited) to avoid showing base-class internals
     const ownProps = ctor?.properties ? Object.entries(ctor.properties) : [];
@@ -612,7 +1032,7 @@ export class ArchuraEditorController {
     // Create a detached instance to read constructor default values
     const tempEl = canvasDocument.createElement(tagName) as HTMLElement & Record<string, unknown>;
 
-    const traits = ownProps
+    const traits: ArchuraTrait[] = ownProps
       .filter(([, cfg]) => {
         // Use .name comparison to avoid cross-realm (iframe vs main window) === failure
         const n = (cfg.type as { name?: string } | undefined)?.name;
@@ -621,18 +1041,58 @@ export class ArchuraEditorController {
       .map(([name, cfg]) => {
         const n = (cfg.type as { name?: string } | undefined)?.name;
         const defaultVal = tempEl[name];
-        return {
-          type: n === 'Number' ? 'number' : n === 'Boolean' ? 'checkbox' : 'text',
+        const base = {
           name,
           label: name.charAt(0).toUpperCase() + name.slice(1),
           value: defaultVal !== undefined ? String(defaultVal) : '',
         };
+        if (cfg.asset) return { ...base, type: 'asset' };
+        if (cfg.options) {
+          return { ...base, type: 'select', options: cfg.options.map((o) => ({ id: o, label: o })) };
+        }
+        return { ...base, type: n === 'Number' ? 'number' : n === 'Boolean' ? 'checkbox' : 'text' };
       });
 
-    if (traits.length > 0) {
-      editor.Components.addType(tagName, { model: { defaults: { traits } } });
+    // Drag-to-resize: components opt in per axis; the Resizer writes the
+    // same knobs the style panel edits (--width/--height), device-aware
+    const resize = ctor?.resize;
+    const resizable = resize
+      ? {
+          tl: false, tc: false, tr: false, cl: false, bl: false,
+          cr: !!resize.width,
+          bc: !!resize.height,
+          br: !!(resize.width && resize.height),
+          // Disabled axes keep the real CSS property: GrapesJS's unit lookup
+          // bracket-accesses computed style, which fails for custom props
+          keyWidth: resize.width ? '--width' : 'width',
+          keyHeight: resize.height ? '--height' : 'height',
+          ...(resize.min && { minDim: resize.min }),
+          ...(resize.max && { maxDim: resize.max }),
+          // GrapesJS binds the resizer's pointer listeners on `document`, but
+          // our handles live inside the shell's shadow root — events reaching
+          // the document are retargeted to the host and never match a handler.
+          // Listen inside the shadow root instead.
+          docs: [this.#resizerListenerRoot()],
+        }
+      : undefined;
+
+    if (traits.length > 0 || resizable) {
+      editor.Components.addType(tagName, {
+        model: { defaults: { ...(traits.length > 0 && { traits }), ...(resizable && { resizable }) } },
+      });
     }
     return traits;
+  }
+
+  #resizerListenerRoot(): Document | ShadowRoot {
+    const root = this.#canvasContainer?.getRootNode();
+    if (root instanceof ShadowRoot) {
+      // GrapesJS's toggleBodyClass expects `doc.body`; point it at the host
+      const shadow = root as ShadowRoot & { body?: Element };
+      if (!shadow.body) shadow.body = root.host;
+      return root;
+    }
+    return document;
   }
 
   async #expandPage(canvasDocument: Document, tagName: string): Promise<string> {
@@ -757,16 +1217,41 @@ export class ArchuraEditorController {
     return components.length > 0 ? { components } : {};
   }
 
+  // Durable instance identity: content.components entries must keep their
+  // instanceIds across publish → reload → publish, so ids are stamped as
+  // attributes before the html snapshot is taken
+  #ensureInstanceIds(): void {
+    const editor = this.#gjsEditor;
+    const definition = this.#definition;
+    if (!editor || !definition) return;
+    const wrapper = editor.getWrapper();
+    if (!wrapper) return;
+    for (const def of this.#resolveLeafDefinitions(definition)) {
+      for (const instance of wrapper.find(def.tagName)) {
+        if (!instance.getAttributes().id) {
+          instance.addAttributes({ id: instance.getId() });
+        }
+      }
+    }
+  }
+
   #createCurrentArtifact(): CanonicalComponentData {
+    this.#ensureInstanceIds();
     const timestamp = new Date().toISOString();
     const rawHtml = this.#gjsEditor?.getHtml() ?? this.#state.html;
     const rawCss = this.#gjsEditor?.getCss() ?? this.#state.css;
     const { html, css } = transformForDeployment(rawHtml, rawCss);
 
+    const content = this.#collectContent();
+    const pageMeta = this.#state.pageMeta;
+    if (pageMeta && (pageMeta.title || pageMeta.description)) {
+      content.page = { ...pageMeta };
+    }
+
     return createCanonicalComponentData({
       id: createArtifactId(this.#state.componentPath),
       type: 'component-instance',
-      content: this.#collectContent(),
+      content,
       snapshot: { html, css },
       config: {
         componentPath: [...this.#state.componentPath],

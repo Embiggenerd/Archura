@@ -1,6 +1,12 @@
 // Verification for GAPS_AND_SOLUTIONS §3: code-composed pages, locked structure,
 // editing-target breadcrumb. Usage: node scripts/verify-section3.mjs (vite on :5199)
+import { rmSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { chromium } from 'playwright';
+
+// Start from template defaults, not a previously published artifact
+rmSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'artifacts'), { recursive: true, force: true });
 
 const BASE = 'http://localhost:5199';
 const results = [];
@@ -31,7 +37,7 @@ try {
 
   // --- 3. Structure is locked ---
   const firstCard = frame.locator('archura-card').first();
-  await firstCard.click();
+  await firstCard.click({ position: { x: 10, y: 10 } });
   await page.keyboard.press('Delete');
   await page.keyboard.press('Backspace');
   await page.waitForTimeout(300);

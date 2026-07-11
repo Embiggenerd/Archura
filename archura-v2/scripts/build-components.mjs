@@ -3,7 +3,7 @@
 // Output: dist/components/<path>.js, served by the site Worker.
 import { build } from 'esbuild';
 
-const entries = ['cards/Card', 'heroes/Hero', 'pages/Landing'];
+const entries = ['cards/Card', 'heroes/Hero', 'media/Image', 'pages/Landing'];
 
 await Promise.all(
   entries.map((entry) =>

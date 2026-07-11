@@ -261,6 +261,15 @@ Publish with a rejecting callback → error surfaces via `editorerror`, editor r
 
 ## 6. Verification and documentation
 
+**Status: regression system in place** — `npm run verify:all` builds, starts fresh
+servers, and runs all 8 suites (74 checks, ~35s): the per-phase suites
+(`verify-section*`, `verify-parity*`, `verify-deploy`) plus `verify-invariants`, which
+holds properties independent of any feature: publish → reload → publish idempotence
+(this forced durable instance ids — stamped before snapshot), a hit-test sweep (every
+visible interactive element must win `elementFromPoint` at its own center; guards
+invisible-overlay regressions), and a foreign-origin white-label embed render (caught a
+real bug: component-module assets needed CORS headers for cross-origin module scripts).
+
 ### Problems
 
 - Playwright is installed but there are zero tests.

@@ -52,6 +52,8 @@ export class ArchuraEditorShell extends LitElement {
 
     .sidebar {
       min-width: 0;
+      max-height: 600px;
+      overflow-y: auto;
     }
 
     .gjs-cv-canvas__frames,

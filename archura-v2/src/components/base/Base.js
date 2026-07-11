@@ -1,71 +1,49 @@
 import { LitElement, css, html } from 'lit';
 
 export class Base extends LitElement {
+  // Defaults live in var() fallbacks (not :host declarations) so site-level
+  // theme tokens set on <body> inherit through; an instance-level custom prop
+  // still wins over both.
   static styles = css`
     :host {
-      --display: block;
-      --position: relative;
-      --top: auto;
-      --right: auto;
-      --bottom: auto;
-      --left: auto;
-      --width: 100%;
-      --min-width: auto;
-      --max-width: none;
-      --height: auto;
-      --min-height: auto;
-      --max-height: none;
-      --margin: 0;
-      --padding: 1.5rem;
-      --border: 1px solid #e5e7eb;
-      --border-radius: 12px;
-      --background-color: #ffffff;
-      --color: #111827;
-      --box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
-      --opacity: 1;
-      --cursor: default;
-      --transition: all 0.2s ease;
-      --transform: none;
-      --font-family: system-ui, -apple-system, sans-serif;
-      --font-size: 1rem;
-      --font-weight: 400;
-      --line-height: 1.5;
-      --text-align: left;
-      --flex-direction: row;
-      --justify-content: flex-start;
-      --align-items: stretch;
+      display: var(--display, block);
+      position: var(--position, relative);
+      top: var(--top, auto);
+      right: var(--right, auto);
+      bottom: var(--bottom, auto);
+      left: var(--left, auto);
+      width: var(--width, 100%);
+      min-width: var(--min-width, auto);
+      max-width: var(--max-width, none);
+      height: var(--height, auto);
+      min-height: var(--min-height, auto);
+      max-height: var(--max-height, none);
+      margin: var(--margin, 0);
+      padding: var(--padding, 1.5rem);
+      border: var(--border, 1px solid #e5e7eb);
+      border-radius: var(--border-radius, 12px);
+      background-color: var(--background-color, #ffffff);
+      color: var(--color, #111827);
+      box-shadow: var(--box-shadow, 0 10px 15px -3px rgb(0 0 0 / 0.1));
+      opacity: var(--opacity, 1);
+      cursor: var(--cursor, default);
+      transition: var(--transition, all 0.2s ease);
+      transform: var(--transform, none);
+      font-family: var(--font-family, system-ui, -apple-system, sans-serif);
+      font-size: var(--font-size, 1rem);
+      font-weight: var(--font-weight, 400);
+      line-height: var(--line-height, 1.5);
+      text-align: var(--text-align, left);
+      flex-direction: var(--flex-direction, row);
+      justify-content: var(--justify-content, flex-start);
+      align-items: var(--align-items, stretch);
+    }
 
-      display: var(--display);
-      position: var(--position);
-      top: var(--top);
-      right: var(--right);
-      bottom: var(--bottom);
-      left: var(--left);
-      width: var(--width);
-      min-width: var(--min-width);
-      max-width: var(--max-width);
-      height: var(--height);
-      min-height: var(--min-height);
-      max-height: var(--max-height);
-      margin: var(--margin);
-      padding: var(--padding);
-      border: var(--border);
-      border-radius: var(--border-radius);
-      background-color: var(--background-color);
-      color: var(--color);
-      box-shadow: var(--box-shadow);
-      opacity: var(--opacity);
-      cursor: var(--cursor);
-      transition: var(--transition);
-      transform: var(--transform);
-      font-family: var(--font-family);
-      font-size: var(--font-size);
-      font-weight: var(--font-weight);
-      line-height: var(--line-height);
-      text-align: var(--text-align);
-      flex-direction: var(--flex-direction);
-      justify-content: var(--justify-content);
-      align-items: var(--align-items);
+    :host(:hover) {
+      background-color: var(--hover-background-color, var(--background-color, #ffffff));
+      color: var(--hover-color, var(--color, #111827));
+      box-shadow: var(--hover-box-shadow, var(--box-shadow, 0 10px 15px -3px rgb(0 0 0 / 0.1)));
+      transform: var(--hover-transform, var(--transform, none));
     }
   `;
 
@@ -76,6 +54,93 @@ export class Base extends LitElement {
   constructor() {
     super();
     this.variant = 'default';
+  }
+
+  firstUpdated() {
+    this.#setupAnimation();
+    this.#setupInlineEditing();
+  }
+
+  // Double-click a [data-edit] element to edit its text in place. The commit
+  // is an event, not a DOM/attribute write: the editor bridges it into the
+  // GrapesJS model so export, undo, and the traits panel stay authoritative.
+  #setupInlineEditing() {
+    for (const el of this.renderRoot.querySelectorAll('[data-edit]')) {
+      el.addEventListener('dblclick', () => this.#beginEdit(el));
+    }
+  }
+
+  #beginEdit(el) {
+    if (el.isContentEditable) return;
+    const trait = el.getAttribute('data-edit');
+    const original = el.innerText;
+    let done = false;
+
+    el.setAttribute('contenteditable', 'plaintext-only');
+    if (!el.isContentEditable) el.setAttribute('contenteditable', 'true');
+    el.focus();
+    const doc = el.ownerDocument;
+    const range = doc.createRange();
+    range.selectNodeContents(el);
+    const selection = doc.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const finish = (commit) => {
+      if (done) return;
+      done = true;
+      el.removeAttribute('contenteditable');
+      el.removeEventListener('blur', onBlur);
+      el.removeEventListener('keydown', onKey);
+      const value = el.innerText.trim();
+      if (!commit || value === original.trim()) {
+        el.innerText = original;
+        return;
+      }
+      this.dispatchEvent(
+        new CustomEvent('archura:text-edit', {
+          bubbles: true,
+          composed: true,
+          detail: { trait, value },
+        })
+      );
+    };
+    const onBlur = () => finish(true);
+    const onKey = (event) => {
+      event.stopPropagation();
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === 'Escape') {
+        finish(false);
+      }
+    };
+    el.addEventListener('blur', onBlur);
+    el.addEventListener('keydown', onKey);
+  }
+
+  #setupAnimation() {
+    if (this.getAttribute('animation') !== 'fade-up') return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    this.style.opacity = '0';
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          observer.disconnect();
+          this.style.opacity = '';
+          this.animate(
+            [
+              { opacity: 0, transform: 'translateY(16px)' },
+              { opacity: 1, transform: 'none' },
+            ],
+            { duration: 500, easing: 'ease-out' }
+          );
+        }
+      },
+      { threshold: 0.15 }
+    );
+    observer.observe(this);
   }
 
   render() {

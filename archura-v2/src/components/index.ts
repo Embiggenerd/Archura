@@ -18,6 +18,13 @@ export const defaultComponents: ArchuraComponentDefinition[] = [
     label: 'Hero',
   },
   {
+    kind: 'component',
+    path: ['media', 'Image'],
+    tagName: 'archura-image',
+    moduleUrl: new URL('./media/Image.js', import.meta.url).href,
+    label: 'Image',
+  },
+  {
     kind: 'page',
     path: ['pages', 'Landing'],
     tagName: 'archura-landing',

@@ -4,23 +4,18 @@ import { Base } from '../base/Base.js';
 export class Card extends Base {
   static grapesTagName = 'archura-card';
 
+  // The host paints background/padding/border via the Base contract;
+  // internals must never shadow contract props with their own paint.
   static styles = [
     Base.styles,
     css`
-      :host {
-        --card-bg: #ffffff;
-        --card-padding: 2rem;
-        --card-radius: 16px;
-        --card-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
-        --card-border: 1px solid #e5e7eb;
+      h3 {
+        margin: 0 0 8px;
+        font-size: 1.25rem;
       }
 
-      .card {
-        background: var(--card-bg);
-        padding: var(--card-padding);
-        border-radius: var(--card-radius);
-        box-shadow: var(--card-shadow);
-        border: var(--card-border);
+      p {
+        margin: 0;
       }
     `,
   ];
@@ -28,21 +23,28 @@ export class Card extends Base {
   static properties = {
     title: { type: String },
     content: { type: String },
+    animation: { type: String, options: ['none', 'fade-up'] },
   };
+
+  static styleParts = {
+    title: ['typography'],
+    content: ['typography'],
+  };
+
+  static resize = { width: true, min: 240, max: 1200 };
 
   constructor() {
     super();
     this.title = 'Card Title';
     this.content = 'This is a card component.';
+    this.animation = 'none';
   }
 
   render() {
     return html`
-      <div class="card">
-        <h3 part="title">${this.title}</h3>
-        <p part="content">${this.content}</p>
-        <slot></slot>
-      </div>
+      <h3 part="title" data-edit="title">${this.title}</h3>
+      <p part="content" data-edit="content">${this.content}</p>
+      <slot></slot>
     `;
   }
 }

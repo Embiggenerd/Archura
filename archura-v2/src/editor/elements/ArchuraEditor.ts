@@ -17,6 +17,8 @@ export class ArchuraEditor extends LitElement {
 
   @property({ attribute: false }) persistence: ArchuraEditorConfig['persistence'] = undefined;
 
+  @property({ attribute: false }) uploadAsset: ArchuraEditorConfig['uploadAsset'] = undefined;
+
   @state() private controller: ArchuraEditorController | null = null;
 
   disconnectedCallback(): void {
@@ -50,6 +52,7 @@ export class ArchuraEditor extends LitElement {
       initialArtifact: this.initialArtifact,
       components: this.components,
       persistence: this.persistence,
+      uploadAsset: this.uploadAsset,
       onReady: () => {
         this.dispatchEvent(new CustomEvent('editorready', { detail: {} }));
       },

@@ -16,6 +16,14 @@ export class Hero extends Base {
         text-align: var(--hero-align);
       }
 
+      .logo {
+        display: inline-block;
+        height: var(--logo-height, 48px);
+        width: auto;
+        object-fit: contain;
+        margin-bottom: 12px;
+      }
+
       h1 {
         margin: 0 0 0.5rem;
         font-size: 2.25rem;
@@ -32,19 +40,29 @@ export class Hero extends Base {
   static properties = {
     heading: { type: String },
     subheading: { type: String },
+    logoSrc: { type: String, asset: true },
+    animation: { type: String, options: ['none', 'fade-up'] },
+  };
+
+  static styleParts = {
+    heading: ['typography'],
+    subheading: ['typography'],
   };
 
   constructor() {
     super();
     this.heading = 'Hero Heading';
     this.subheading = 'A short line that supports the heading.';
+    this.logoSrc = '';
+    this.animation = 'none';
   }
 
   render() {
     return html`
       <div class="hero">
-        <h1 part="heading">${this.heading}</h1>
-        <p part="subheading">${this.subheading}</p>
+        ${this.logoSrc ? html`<img class="logo" src=${this.logoSrc} alt="" />` : ''}
+        <h1 part="heading" data-edit="heading">${this.heading}</h1>
+        <p part="subheading" data-edit="subheading">${this.subheading}</p>
       </div>
     `;
   }

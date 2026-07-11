@@ -29,6 +29,8 @@ export type ArchuraEditorConfig = {
   componentPath?: string[];
   components?: ArchuraComponentDefinition[];
   persistence?: ArchuraPersistenceAdapter;
+  /** Host-provided asset upload; returns the absolute URL of the stored asset. */
+  uploadAsset?: (file: Blob, name: string) => Promise<string>;
   initialArtifact?: CanonicalComponentData | null;
   onReady?: () => void;
   onChange?: (artifacts: CanonicalComponentData[]) => void;
@@ -36,11 +38,17 @@ export type ArchuraEditorConfig = {
   onError?: (error: unknown) => void;
 };
 
+export type ArchuraPageMeta = {
+  title?: string;
+  description?: string;
+};
+
 export type ArchuraEditorState = {
   componentPath: string[];
   html: string;
   css: string;
   ready: boolean;
+  pageMeta?: ArchuraPageMeta;
 };
 
 export type ArchuraRenderable = {
