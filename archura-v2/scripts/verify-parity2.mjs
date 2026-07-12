@@ -58,9 +58,16 @@ try {
   // --- §11b. Part drill-down: select card, then click the title ---
   await firstCard.click({ position: { x: 10, y: 10 } });
   check('part: single click selects host, no part chip yet', !(await page.locator('.part-chip').isVisible()));
+  const devicesXBefore = (await page.getByRole('button', { name: 'Tablet' }).boundingBox()).x;
   await frame.locator('archura-card h3').first().click();
   await page.locator('.part-chip', { hasText: 'title' }).waitFor({ timeout: 5000 });
   check('part: second click on the title shows the part chip', true);
+  const devicesXAfter = (await page.getByRole('button', { name: 'Tablet' }).boundingBox()).x;
+  check(
+    'part: chip does not shift the device switcher',
+    Math.abs(devicesXBefore - devicesXAfter) < 2,
+    `${devicesXBefore} → ${devicesXAfter}`
+  );
 
   const sectorVisibility = async (name) =>
     page
@@ -90,11 +97,37 @@ try {
     JSON.stringify(titleStyles)
   );
 
-  // Exit part mode restores host sectors
+  // Active part is visually outlined (editor-only, not in the artifact)
+  const highlight = await frame.locator('archura-card h3').first().evaluate((el) => {
+    const outline = getComputedStyle(el).outlineStyle;
+    return { outline };
+  });
+  check('part: active part shows a dashed outline', highlight.outline === 'dashed', JSON.stringify(highlight));
+
+  // Exit part mode restores host sectors and removes the outline
   await page.locator('.chip-close').click();
+  const clearedOutline = await frame
+    .locator('archura-card h3')
+    .first()
+    .evaluate((el) => getComputedStyle(el).outlineStyle);
   check(
-    'part: closing the chip restores host sectors',
-    !(await page.locator('.part-chip').isVisible()) && (await sectorVisibility('Decorations'))
+    'part: closing the chip restores host sectors and clears the outline',
+    !(await page.locator('.part-chip').isVisible()) &&
+      (await sectorVisibility('Decorations')) &&
+      clearedOutline !== 'dashed',
+    `outline=${clearedOutline}`
+  );
+
+  // Editable text advertises itself: a canvas-only hint sheet gives editable
+  // parts a text cursor + dashed outline on hover
+  const hintCss = await frame
+    .locator('style[data-archura-editor-hints]')
+    .evaluate((el) => el.textContent)
+    .catch(() => '');
+  check(
+    'inline text: editable parts get a hover hint (text cursor)',
+    /archura-card::part\(title\):hover\s*\{[^}]*cursor:\s*text/.test(hintCss),
+    hintCss.slice(0, 120)
   );
 
   // --- §10. Inline text editing on the card title ---
@@ -140,6 +173,13 @@ try {
     artifact.snapshot.css.includes('::part(title)') &&
       /title="Edited By Hand"/.test(artifact.snapshot.html) &&
       (artifact.snapshot.html.includes('--width') || artifact.snapshot.css.includes('--width')),
+    `css: ${artifact.snapshot.css.slice(0, 200)}`
+  );
+  check(
+    'artifact: editor-only affordances (outline/hint) do not leak',
+    !/dashed/.test(artifact.snapshot.css) &&
+      !artifact.snapshot.css.includes('archura-editor-hints') &&
+      !artifact.snapshot.html.includes('data-archura'),
     `css: ${artifact.snapshot.css.slice(0, 200)}`
   );
 

@@ -77,6 +77,7 @@ try {
     await import('/src/index.ts');
     const editor = document.createElement('archura-editor');
     editor.id = 'slow-editor';
+    editor.style.cssText = 'height:700px;flex:none;display:block;';
     editor.componentPath = ['cards', 'Card'];
     editor.persistence = {
       load: async () => null,
@@ -98,6 +99,7 @@ try {
   const failure = await page.evaluate(async () => {
     const editor = document.createElement('archura-editor');
     editor.id = 'failing-editor';
+    editor.style.cssText = 'height:700px;flex:none;display:block;';
     editor.componentPath = ['cards', 'Card'];
     editor.persistence = {
       load: async () => null,

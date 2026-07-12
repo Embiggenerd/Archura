@@ -21,11 +21,22 @@ export class ArchuraEditor extends LitElement {
 
   @state() private controller: ArchuraEditorController | null = null;
 
+  connectedCallback(): void {
+    super.connectedCallback();
+    this.addEventListener('archura:target-select', this.#onTargetSelect);
+  }
+
   disconnectedCallback(): void {
+    this.removeEventListener('archura:target-select', this.#onTargetSelect);
     this.controller?.destroy();
     this.controller = null;
     super.disconnectedCallback();
   }
+
+  #onTargetSelect = (event: Event) => {
+    const { path } = (event as CustomEvent<{ path: string[] }>).detail;
+    this.componentPath = [...path];
+  };
 
   override updated(changedProperties: Map<string, unknown>): void {
     if (
@@ -71,7 +82,12 @@ export class ArchuraEditor extends LitElement {
   static override styles = css`
     :host {
       display: block;
-      min-height: 100%;
+      height: 100%;
+    }
+
+    archura-editor-shell {
+      display: block;
+      height: 100%;
     }
   `;
 }

@@ -31,7 +31,9 @@ export class Card extends Base {
     content: ['typography'],
   };
 
-  static resize = { width: true, min: 240, max: 1200 };
+  // min/max apply to both axes in GrapesJS, so keep the floor low enough
+  // for card heights
+  static resize = { width: true, height: true, min: 60, max: 1400 };
 
   constructor() {
     super();

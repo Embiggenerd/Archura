@@ -35,4 +35,15 @@ export const defaultComponents: ArchuraComponentDefinition[] = [
       ['cards', 'Card'],
     ],
   },
+  {
+    kind: 'page',
+    path: ['pages', 'Cards'],
+    tagName: 'archura-cards',
+    moduleUrl: new URL('./pages/Cards.js', import.meta.url).href,
+    label: 'Cards',
+    uses: [
+      ['heroes', 'Hero'],
+      ['cards', 'Card'],
+    ],
+  },
 ];

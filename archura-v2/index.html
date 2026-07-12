@@ -11,15 +11,18 @@
 
       body {
         margin: 0;
-        min-height: 100vh;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
         background: #f3f4f6;
         font-family: Helvetica, Arial, sans-serif;
       }
 
       archura-editor {
         display: block;
-        min-height: 100vh;
-        padding: 24px;
+        flex: 1;
+        min-height: 0;
+        padding: 16px;
         box-sizing: border-box;
       }
 
@@ -129,6 +132,11 @@
         if (components) editor.components = components;
         editor.persistence = persistence;
         editor.uploadAsset = uploadAsset;
+        editor.addEventListener('archura:target-select', (e) => {
+          const url = new URL(location.href);
+          url.searchParams.set('component', e.detail.path.join('/'));
+          history.replaceState(null, '', url);
+        });
         document.body.appendChild(editor);
       }
 

@@ -303,7 +303,43 @@ export class ArchuraEditorController {
     if (active) {
       editor.StyleManager.select(active.component as never);
     }
+    this.#setPartHighlight(null);
     this.#notify();
+  }
+
+  // Editor-only affordances injected into the canvas document (never into
+  // CssComposer, so they cannot leak into artifacts): hover hints on
+  // editable/stylable parts, and a dashed outline around the active part
+  #injectCanvasHints(editor: GrapesEditor): void {
+    const doc = editor.Canvas.getDocument();
+    if (!doc || doc.querySelector('style[data-archura-editor-hints]')) return;
+    const rules: string[] = [];
+    for (const [tag, parts] of this.#stylePartsByTag) {
+      for (const part of Object.keys(parts)) {
+        if (part === 'host') continue;
+        rules.push(
+          `${tag}::part(${part}):hover { cursor: text; outline: 1px dashed rgba(99, 102, 241, 0.45); outline-offset: 2px; }`
+        );
+      }
+    }
+    const style = doc.createElement('style');
+    style.setAttribute('data-archura-editor-hints', '');
+    style.textContent = rules.join('\n');
+    doc.head.appendChild(style);
+  }
+
+  #setPartHighlight(selector: string | null): void {
+    const doc = this.#gjsEditor?.Canvas.getDocument();
+    if (!doc) return;
+    let style = doc.querySelector<HTMLStyleElement>('style[data-archura-part-highlight]');
+    if (!style) {
+      style = doc.createElement('style');
+      style.setAttribute('data-archura-part-highlight', '');
+      doc.head.appendChild(style);
+    }
+    style.textContent = selector
+      ? `${selector} { outline: 2px dashed #6366f1 !important; outline-offset: 3px; }`
+      : '';
   }
 
   #propGroupVisible(group: string): boolean {
@@ -325,6 +361,7 @@ export class ArchuraEditorController {
     const selector = `#${component.getId()}::part(${part})`;
     const rule = editor.Css.getRule(selector) ?? editor.Css.setRule(selector, {});
     editor.StyleManager.select(rule as never);
+    this.#setPartHighlight(selector);
     this.#notify();
   }
 
@@ -916,7 +953,7 @@ export class ArchuraEditorController {
       const style = component.getStyle() as Record<string, string>;
       const seeds: Record<string, string> = {};
       if (resizableConfig.cr && !style['--width']) seeds['--width'] = '100%';
-      if (resizableConfig.bc && !style['--height']) seeds['--height'] = `${el.offsetHeight}px`;
+      if (resizableConfig.bc && !style['--min-height']) seeds['--min-height'] = `${el.offsetHeight}px`;
       if (Object.keys(seeds).length > 0) component.addStyle(seeds, { avoidStore: true });
     });
   }
@@ -995,6 +1032,7 @@ export class ArchuraEditorController {
           .join(' ');
         editor.setComponents(`<${definition.tagName}${attrs ? ' ' + attrs : ''}></${definition.tagName}>`);
       }
+      this.#injectCanvasHints(editor);
       // Loading/expansion fires component:update; the canvas isn't user-dirty yet
       this.#dirty = false;
       this.#notify();
@@ -1056,16 +1094,20 @@ export class ArchuraEditorController {
     // Drag-to-resize: components opt in per axis; the Resizer writes the
     // same knobs the style panel edits (--width/--height), device-aware
     const resize = ctor?.resize;
+    const bothAxes = !!(resize?.width && resize?.height);
     const resizable = resize
       ? {
-          tl: false, tc: false, tr: false, cl: false, bl: false,
+          cl: !!resize.width,
           cr: !!resize.width,
+          tc: !!resize.height,
           bc: !!resize.height,
-          br: !!(resize.width && resize.height),
+          tl: bothAxes, tr: bothAxes, bl: bothAxes, br: bothAxes,
           // Disabled axes keep the real CSS property: GrapesJS's unit lookup
-          // bracket-accesses computed style, which fails for custom props
+          // bracket-accesses computed style, which fails for custom props.
+          // Height writes --min-height so a taller drag sticks but content
+          // can never be clipped by a fixed height.
           keyWidth: resize.width ? '--width' : 'width',
-          keyHeight: resize.height ? '--height' : 'height',
+          keyHeight: resize.height ? '--min-height' : 'height',
           ...(resize.min && { minDim: resize.min }),
           ...(resize.max && { maxDim: resize.max }),
           // GrapesJS binds the resizer's pointer listeners on `document`, but
@@ -1150,6 +1192,10 @@ export class ArchuraEditorController {
 
   unregisterRenderable(renderable: ArchuraRenderable): void {
     this.#renderables.delete(renderable);
+  }
+
+  getComponents(): ArchuraComponentDefinition[] {
+    return [...this.#components];
   }
 
   getTarget(): ArchuraEditTarget | null {

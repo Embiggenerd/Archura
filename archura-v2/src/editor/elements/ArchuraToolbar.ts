@@ -18,7 +18,7 @@ export class ArchuraToolbar extends LitElement {
   @property({ attribute: false }) controller?: ArchuraEditorController;
   @state() private saving = false;
   @state() private publishState: PublishState = 'idle';
-  @state() private openPanel: 'none' | 'theme' | 'page' = 'none';
+  @state() private openPanel: 'none' | 'theme' | 'page' | 'targets' = 'none';
   #resetTimer?: ReturnType<typeof setTimeout>;
 
   connectedCallback(): void {
@@ -38,7 +38,12 @@ export class ArchuraToolbar extends LitElement {
       <div class="toolbar">
         <span class="breadcrumb">
           ${target
-            ? html`${target.kind === 'page' ? 'Pages' : 'Components'} / <strong>${target.label}</strong>`
+            ? html`
+                <button class="crumb" @click=${() => this.#togglePanel('targets')}>
+                  ${target.kind === 'page' ? 'Pages' : 'Components'} / <strong>${target.label}</strong>
+                  <span class="caret">▾</span>
+                </button>
+              `
             : ''}
           ${this.controller?.getActivePart()
             ? html`
@@ -94,11 +99,46 @@ export class ArchuraToolbar extends LitElement {
       </div>
       ${this.openPanel === 'theme' ? this.#renderThemePanel() : ''}
       ${this.openPanel === 'page' ? this.#renderPagePanel() : ''}
+      ${this.openPanel === 'targets' ? this.#renderTargetsPanel() : ''}
     `;
   }
 
-  #togglePanel(panel: 'theme' | 'page') {
+  #togglePanel(panel: 'theme' | 'page' | 'targets') {
     this.openPanel = this.openPanel === panel ? 'none' : panel;
+  }
+
+  #renderTargetsPanel() {
+    const definitions = this.controller?.getComponents() ?? [];
+    const current = this.controller?.getTarget();
+    const group = (kind: 'page' | 'component', heading: string) => {
+      const items = definitions.filter((d) => d.kind === kind);
+      if (items.length === 0) return '';
+      return html`
+        <div class="targets-group">${heading}</div>
+        ${items.map(
+          (def) => html`
+            <button
+              class="target ${current?.path.join('/') === def.path.join('/') ? 'current' : ''}"
+              @click=${() => this.#selectTarget(def.path)}
+            >
+              ${def.label ?? def.path.at(-1)}
+            </button>
+          `
+        )}
+      `;
+    };
+    return html`<div class="panel left targets">${group('page', 'Pages')} ${group('component', 'Components')}</div>`;
+  }
+
+  #selectTarget(path: string[]) {
+    this.openPanel = 'none';
+    this.dispatchEvent(
+      new CustomEvent('archura:target-select', {
+        detail: { path },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   #renderThemePanel() {
@@ -208,20 +248,91 @@ export class ArchuraToolbar extends LitElement {
       font-family: Helvetica, Arial, sans-serif;
     }
 
+    /* 3-column grid: the breadcrumb (and its part chip) grows inside the
+       left cell without pushing the device switcher or actions */
     .toolbar {
-      display: flex;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
       align-items: center;
-      justify-content: space-between;
       gap: 12px;
     }
 
     .breadcrumb {
+      justify-self: start;
+      min-width: 0;
+      white-space: nowrap;
       font: 0.9rem/1 Helvetica, Arial, sans-serif;
       color: #6b7280;
     }
 
+    .devices {
+      justify-self: center;
+    }
+
+    .actions {
+      justify-self: end;
+    }
+
     .breadcrumb strong {
       color: #111827;
+    }
+
+    .crumb {
+      border: none;
+      background: none;
+      padding: 4px 6px;
+      font: inherit;
+      color: inherit;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+
+    .crumb:hover {
+      background: #f3f4f6;
+    }
+
+    .caret {
+      font-size: 0.7rem;
+      color: #9ca3af;
+    }
+
+    .panel.left {
+      left: 0;
+      right: auto;
+    }
+
+    .panel.targets {
+      gap: 2px;
+      min-width: 180px;
+    }
+
+    .targets-group {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #9ca3af;
+      margin: 6px 0 2px;
+    }
+
+    .target {
+      border: none;
+      background: none;
+      border-radius: 6px;
+      padding: 7px 8px;
+      font: 0.9rem/1 Helvetica, Arial, sans-serif;
+      color: #111827;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .target:hover {
+      background: #f3f4f6;
+    }
+
+    .target.current {
+      background: #eef2ff;
+      color: #3730a3;
+      font-weight: 600;
     }
 
     .dirty {
