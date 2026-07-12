@@ -15,6 +15,8 @@ const SUITES = [
   'verify-parity',
   'verify-parity2',
   'verify-editor-nav',
+  'verify-responsive',
+  'verify-breakpoints',
   'verify-invariants',
   'verify-deploy',
 ];

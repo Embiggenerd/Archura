@@ -64,9 +64,34 @@ export class ArchuraEditorShell extends LitElement {
       overflow-y: auto;
     }
 
+    /* The canvas viewport fills its column; the frame inside is sized by the
+       DeviceManager (full on Desktop, fixed + centered on Tablet/Mobile), so
+       switching device visibly resizes the page and activates its media
+       queries — exactly like a browser's responsive viewport */
+    .gjs-cv-canvas {
+      background: #e5e7eb !important;
+    }
+
     .gjs-cv-canvas__frames,
-    .gjs-frames,
-    .gjs-frame-wrapper,
+    .gjs-frames {
+      display: flex !important;
+      justify-content: center !important;
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    .gjs-frame-wrapper {
+      margin: 0 auto !important;
+      height: 100% !important;
+      transition: width 0.18s ease;
+    }
+
+    /* Desktop device has no set width — fill the viewport; fixed-width
+       devices constrain the wrapper and this yields to it */
+    .gjs-frame-wrapper:not([style*='width']) {
+      width: 100% !important;
+    }
+
     .gjs-frame {
       width: 100% !important;
       height: 100% !important;

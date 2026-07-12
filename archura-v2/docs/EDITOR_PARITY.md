@@ -30,9 +30,32 @@ counterpart to Webflow interactions is §8 presets, not a timeline editor.
 
 ## 1. Responsive editing
 
-**Status: implemented** — device switcher (Desktop/Tablet/Mobile), per-breakpoint style
-writing, per-property deployment split; verified by `scripts/verify-parity.mjs`.
-Remaining polish: style-source indicators ("set here" vs "inherited").
+**Status: implemented** — device switcher (Desktop/Tablet/Mobile) that visibly resizes
+the canvas frame (browser-responsive-mode style: fixed-width devices render as a centered
+column on a gray desk, activating their media queries live), adjustable preview width, and
+the per-property deployment split. Verified by `scripts/verify-responsive.mjs` (frame
+resize, live width edit, mobile edits authoring into `@media (max-width: 767px)`, deployed
+page honoring the breakpoint) and `scripts/verify-parity.mjs`.
+
+Two-width model (mirrors browser DevTools / GrapesJS): a device's `width` is the *preview*
+(adjustable, what the frame renders at) and `widthMedia` is the fixed *authoring bucket*
+(the `@media` a device's edits write into). Changing the preview never moves the bucket.
+Fix that made it real: the canvas `width: 100% !important` overrides were letting the
+frame ignore the DeviceManager; now the viewport fills and the frame is device-sized.
+
+Editable breakpoints (Framer-style, desktop-first, verified by
+`scripts/verify-breakpoints.mjs`): the Breakpoints panel edits each bucket's max-width
+threshold (kept separate from the preview width). Changing a threshold **migrates** every
+rule already authored in that bucket to the new width at once (rekeys the `@media` in
+CssComposer) — no orphaning — and re-bounces the active device so subsequent edits target
+the new bucket. Thresholds are validated (distinct, 40px min gap) and persisted in
+`content.breakpoints`, reconciled on load so CSS media values and stored thresholds can't
+drift. Deliberately scoped: max-width only (no min-width/larger breakpoints), tab-switch
+(no side-by-side frames), ≤3 buckets. Mobile-first cascade is a deferred foundational
+decision (flips base-style meaning + inline-deploy semantics; one-time migration).
+
+Remaining polish: style-source indicators ("set here" vs "inherited"); optional
+DevTools-style drag handle on the frame edge (numeric width control ships today).
 
 ### Problem
 

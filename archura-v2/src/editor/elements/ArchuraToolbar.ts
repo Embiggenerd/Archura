@@ -1,5 +1,6 @@
 import { LitElement, css, html } from 'lit';
 import { property, state } from 'lit/decorators.js';
+import { live } from 'lit/directives/live.js';
 import type { ArchuraEditorController } from '../ArchuraEditorController.js';
 import { GOOGLE_FONTS } from '../ArchuraEditorController.js';
 
@@ -18,7 +19,7 @@ export class ArchuraToolbar extends LitElement {
   @property({ attribute: false }) controller?: ArchuraEditorController;
   @state() private saving = false;
   @state() private publishState: PublishState = 'idle';
-  @state() private openPanel: 'none' | 'theme' | 'page' | 'targets' = 'none';
+  @state() private openPanel: 'none' | 'theme' | 'page' | 'targets' | 'breakpoints' = 'none';
   #resetTimer?: ReturnType<typeof setTimeout>;
 
   connectedCallback(): void {
@@ -70,6 +71,20 @@ export class ArchuraToolbar extends LitElement {
               </button>
             `
           )}
+          ${this.controller?.isDeviceWidthAdjustable()
+            ? html`
+                <span class="width-control" title="Preview width (drag or type)">
+                  <input
+                    type="number"
+                    class="width-input"
+                    .value=${String(this.controller.getDeviceWidth() ?? '')}
+                    @change=${(e: Event) =>
+                      this.controller?.setDeviceWidth(Number((e.target as HTMLInputElement).value))}
+                  />
+                  <span class="width-unit">px</span>
+                </span>
+              `
+            : ''}
         </span>
         <span class="actions">
           <button title="Undo" @click=${() => this.controller?.undo()}>↩</button>
@@ -79,6 +94,12 @@ export class ArchuraToolbar extends LitElement {
           </button>
           <button class=${this.openPanel === 'page' ? 'active' : ''} @click=${() => this.#togglePanel('page')}>
             Page
+          </button>
+          <button
+            class=${this.openPanel === 'breakpoints' ? 'active' : ''}
+            @click=${() => this.#togglePanel('breakpoints')}
+          >
+            Breakpoints
           </button>
           ${this.controller?.canPublish
             ? html`
@@ -100,10 +121,11 @@ export class ArchuraToolbar extends LitElement {
       ${this.openPanel === 'theme' ? this.#renderThemePanel() : ''}
       ${this.openPanel === 'page' ? this.#renderPagePanel() : ''}
       ${this.openPanel === 'targets' ? this.#renderTargetsPanel() : ''}
+      ${this.openPanel === 'breakpoints' ? this.#renderBreakpointsPanel() : ''}
     `;
   }
 
-  #togglePanel(panel: 'theme' | 'page' | 'targets') {
+  #togglePanel(panel: 'theme' | 'page' | 'targets' | 'breakpoints') {
     this.openPanel = this.openPanel === panel ? 'none' : panel;
   }
 
@@ -128,6 +150,33 @@ export class ArchuraToolbar extends LitElement {
       `;
     };
     return html`<div class="panel left targets">${group('page', 'Pages')} ${group('component', 'Components')}</div>`;
+  }
+
+  #renderBreakpointsPanel() {
+    const breakpoints = this.controller?.getBreakpoints() ?? [];
+    return html`
+      <div class="panel">
+        <div class="targets-group">Breakpoints (max-width)</div>
+        ${breakpoints.map(
+          (bp) => html`
+            <label>
+              ${bp.name}
+              <span class="width-control">
+                <input
+                  type="number"
+                  class="width-input"
+                  .value=${live(String(bp.maxWidth))}
+                  @change=${(e: Event) =>
+                    this.controller?.setBreakpointWidth(bp.name, Number((e.target as HTMLInputElement).value))}
+                />
+                <span class="width-unit">px</span>
+              </span>
+            </label>
+          `
+        )}
+        <p class="hint">Changing a breakpoint moves all its styles to the new width.</p>
+      </div>
+    `;
   }
 
   #selectTarget(path: string[]) {
@@ -367,6 +416,45 @@ export class ArchuraToolbar extends LitElement {
       display: flex;
       align-items: center;
       gap: 6px;
+    }
+
+    .width-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      margin-left: 4px;
+      padding: 2px 6px;
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      border-radius: 999px;
+    }
+
+    .width-input {
+      width: 46px;
+      border: none;
+      background: none;
+      font: 600 0.8rem/1 Helvetica, Arial, sans-serif;
+      color: #111827;
+      text-align: right;
+      -moz-appearance: textfield;
+      appearance: textfield;
+    }
+
+    .width-input::-webkit-outer-spin-button,
+    .width-input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    .width-unit {
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+
+    .hint {
+      margin: 6px 0 0;
+      font-size: 0.75rem;
+      color: #9ca3af;
+      max-width: 220px;
     }
 
     button {

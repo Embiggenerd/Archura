@@ -25,6 +25,16 @@ type ArchuraTrait = {
 type ArchuraStyleParts = Record<string, string[]>;
 type ArchuraResize = { width?: boolean; height?: boolean; min?: number; max?: number };
 
+// Editable media-query breakpoints (desktop-first, max-width). The base
+// (Desktop) has no media bucket; these are the narrower override buckets, each
+// with a preview width (cosmetic) distinct from its maxWidth (the @media value).
+export type ArchuraBreakpoint = { name: string; maxWidth: number; previewWidth: number };
+
+const DEFAULT_BREAKPOINTS: ArchuraBreakpoint[] = [
+  { name: 'Tablet', maxWidth: 991, previewWidth: 768 },
+  { name: 'Mobile', maxWidth: 767, previewWidth: 375 },
+];
+
 const ALL_STYLE_GROUPS = ['typography', 'spacing', 'dimension', 'decorations', 'hover', 'flex'];
 
 function createDefaultHtml(componentPath: string[]) {
@@ -184,6 +194,7 @@ export class ArchuraEditorController {
   #dirty = false;
   #stylePartsByTag = new Map<string, ArchuraStyleParts>();
   #activePart: { component: Component; part: string } | null = null;
+  #breakpoints: ArchuraBreakpoint[];
 
   constructor(config: ArchuraEditorConfig = {}) {
     const componentPath = config.initialArtifact?.config.componentPath ?? config.componentPath ?? [];
@@ -194,6 +205,7 @@ export class ArchuraEditorController {
 
     this.#config = config;
     this.#hasSnapshot = !!config.initialArtifact;
+    this.#breakpoints = this.#readBreakpoints(config.initialArtifact);
     this.#state = {
       componentPath,
       html,
@@ -201,6 +213,16 @@ export class ArchuraEditorController {
       ready: false,
       pageMeta: (config.initialArtifact?.content?.page as ArchuraPageMeta | undefined) ?? undefined,
     };
+  }
+
+  #readBreakpoints(artifact?: CanonicalComponentData | null): ArchuraBreakpoint[] {
+    const stored = artifact?.content?.breakpoints as ArchuraBreakpoint[] | undefined;
+    if (!Array.isArray(stored) || stored.length === 0) return DEFAULT_BREAKPOINTS.map((b) => ({ ...b }));
+    // Reconcile against defaults so preview widths survive older artifacts
+    return DEFAULT_BREAKPOINTS.map((def) => {
+      const match = stored.find((s) => s.name === def.name);
+      return match ? { ...def, ...match } : { ...def };
+    });
   }
 
   async init(): Promise<void> {
@@ -261,6 +283,104 @@ export class ArchuraEditorController {
 
   getDevice(): string {
     return this.#gjsEditor?.getDevice() || 'Desktop';
+  }
+
+  // The active device carries two widths: `width` is the preview (what the
+  // frame renders at, adjustable like a browser's responsive viewport) and
+  // `widthMedia` is the fixed @media bucket edits are authored into. Adjusting
+  // the preview never moves the authoring bucket.
+  #activeDevice() {
+    return this.#gjsEditor?.Devices.getSelected() ?? null;
+  }
+
+  getBreakpoints(): ArchuraBreakpoint[] {
+    return this.#breakpoints.map((b) => ({ ...b }));
+  }
+
+  // Change a breakpoint's @media threshold. All rules already authored in that
+  // bucket rekey to the new value at once (no orphaning), as agreed.
+  setBreakpointWidth(name: string, maxWidth: number): void {
+    const editor = this.#gjsEditor;
+    const bp = this.#breakpoints.find((b) => b.name === name);
+    if (!editor || !bp) return;
+
+    const others = this.#breakpoints.filter((b) => b.name !== name).map((b) => b.maxWidth);
+    // Keep buckets distinct and within the base; 40px min gap avoids ambiguity
+    const clamped = Math.max(240, Math.min(1400, Math.round(maxWidth)));
+    if (others.some((w) => Math.abs(w - clamped) < 40)) {
+      this.#notify(); // reject: re-render so the input snaps back to the real value
+      return;
+    }
+
+    const old = bp.maxWidth;
+    if (old === clamped) return;
+    this.#migrateBucket(editor, old, clamped);
+    bp.maxWidth = clamped;
+
+    const device = editor.Devices.get(name);
+    device?.set('widthMedia', `${clamped}px`);
+    // A same-name setDevice is a no-op, so bounce through the base to force
+    // GrapesJS to refresh the authoring media for subsequent edits
+    if (editor.getDevice() === name) {
+      editor.setDevice('Desktop');
+      editor.setDevice(name);
+    }
+    this.#markDirty();
+    this.#notify();
+  }
+
+  // Devices are built at init from #breakpoints; when a load replaces
+  // #breakpoints (persistence/loadArtifact), push the new thresholds onto the
+  // existing device models so the tabs author into the right buckets
+  #applyBreakpointsToDevices(): void {
+    const editor = this.#gjsEditor;
+    if (!editor) return;
+    for (const bp of this.#breakpoints) {
+      editor.Devices.get(bp.name)?.set('widthMedia', `${bp.maxWidth}px`);
+    }
+  }
+
+  #migrateBucket(editor: GrapesEditor, oldPx: number, newPx: number): void {
+    const oldMedia = `(max-width: ${oldPx}px)`;
+    const newParams = `(max-width: ${newPx}px)`;
+    const css = editor.Css;
+    const moving = css
+      .getRules()
+      .filter((rule) => String((rule as { get: (k: string) => unknown }).get('mediaText')) === oldMedia);
+    // Rekey by re-adding under the new media, then removing the old rule
+    for (const rule of moving) {
+      const selector = (rule as { getSelectorsString?: () => string }).getSelectorsString?.() ?? '';
+      const style = { ...(rule as { getStyle: () => Record<string, string> }).getStyle() };
+      if (selector) {
+        css.setRule(selector, style, { atRuleType: 'media', atRuleParams: newParams });
+      }
+      css.remove(rule as never);
+    }
+  }
+
+  isDeviceWidthAdjustable(): boolean {
+    // The base device (no media bucket) is the full-width canvas and is not
+    // preview-adjustable; fixed-width devices are
+    return !!this.#activeDevice()?.get('widthMedia');
+  }
+
+  getDeviceWidth(): number | null {
+    const width = this.#activeDevice()?.get('width');
+    return width ? parseInt(width, 10) : null;
+  }
+
+  setDeviceWidth(px: number): void {
+    const editor = this.#gjsEditor;
+    const device = this.#activeDevice();
+    if (!editor || !device || !device.get('widthMedia')) return;
+    const clamped = Math.max(240, Math.min(1600, Math.round(px)));
+    device.set('width', `${clamped}px`);
+    // Media matching already uses widthMedia (set at setDevice); only the
+    // rendered frame width needs to follow, so update the wrapper directly
+    const wrapper = this.#canvasContainer?.querySelector<HTMLElement>('.gjs-frame-wrapper');
+    if (wrapper) wrapper.style.width = `${clamped}px`;
+    editor.Canvas.refresh();
+    this.#notify();
   }
 
   getPageMeta(): ArchuraPageMeta {
@@ -450,6 +570,8 @@ export class ArchuraEditorController {
     };
     this.#hasSnapshot = true;
     this.#definition = this.#resolveDefinition(this.#state.componentPath);
+    this.#breakpoints = this.#readBreakpoints(artifact);
+    this.#applyBreakpointsToDevices();
     this.#artifacts = [artifact];
     this.#applySnapshot();
     this.#config.onChange?.(this.#artifacts);
@@ -525,8 +647,12 @@ export class ArchuraEditorController {
       deviceManager: {
         devices: [
           { id: 'Desktop', name: 'Desktop', width: '' },
-          { id: 'Tablet', name: 'Tablet', width: '768px', widthMedia: '991px' },
-          { id: 'Mobile', name: 'Mobile', width: '375px', widthMedia: '767px' },
+          ...this.#breakpoints.map((b) => ({
+            id: b.name,
+            name: b.name,
+            width: `${b.previewWidth}px`,
+            widthMedia: `${b.maxWidth}px`,
+          })),
         ],
       },
       canvas: { styles: [GOOGLE_FONTS_CSS_URL] },
@@ -981,6 +1107,8 @@ export class ArchuraEditorController {
             pageMeta: (artifact.content?.page as ArchuraPageMeta | undefined) ?? undefined,
           };
           this.#hasSnapshot = true;
+          this.#breakpoints = this.#readBreakpoints(artifact);
+          this.#applyBreakpointsToDevices();
           this.#artifacts = [artifact];
         }
       } catch (error) {
@@ -1292,6 +1420,11 @@ export class ArchuraEditorController {
     const pageMeta = this.#state.pageMeta;
     if (pageMeta && (pageMeta.title || pageMeta.description)) {
       content.page = { ...pageMeta };
+    }
+    // Persist breakpoints only when customized, so the CSS media values and the
+    // stored thresholds can never drift out of sync on reload
+    if (this.#breakpoints.some((b, i) => b.maxWidth !== DEFAULT_BREAKPOINTS[i]?.maxWidth)) {
+      content.breakpoints = this.#breakpoints.map((b) => ({ ...b }));
     }
 
     return createCanonicalComponentData({
