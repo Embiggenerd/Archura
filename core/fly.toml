@@ -1,0 +1,31 @@
+# Fly.io deployment for the Archura core server. Fill in <app-name>.
+# Secrets (DATABASE_URL, PLATFORM_ADMIN_KEY, CORE_SERVICE_KEY, Stripe keys) are
+# set out-of-band with `fly secrets set`.
+app = "archura-core"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ARCHURA_ENV = "prod"
+  PORT = "8080"
+  METRICS_PORT = "9091"
+
+[metrics]
+  port = 9091
+  path = "/metrics"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/readyz"
+    grace_period = "10s"
+    interval = "15s"
+    timeout = "2s"

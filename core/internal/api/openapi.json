@@ -1,0 +1,259 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Archura Core API",
+    "version": "0.1.0",
+    "description": "Tenant identity and component-session API for Archura's embedded payment components. Production /v1 requests require both the Worker service credential and the endpoint-specific admin or tenant bearer key."
+  },
+  "servers": [
+    { "url": "/", "description": "Current core server" }
+  ],
+  "tags": [
+    { "name": "Operations", "description": "Process and dependency health" },
+    { "name": "Clients", "description": "Platform-admin tenant onboarding" },
+    { "name": "Components", "description": "Tenant-owned payment component configuration" },
+    { "name": "Sessions", "description": "Short-lived component access tokens" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ServiceAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Archura-Service-Authorization",
+        "description": "Worker credential including the Bearer prefix, for example `Bearer svc_live_...`. Required in production and optional in direct local development."
+      },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "adm_... or sk_...",
+        "description": "Platform-admin key for client creation; tenant secret key for component and session operations."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": { "type": "string", "example": "invalid_api_key" },
+              "message": { "type": "string", "example": "The tenant API key is invalid." },
+              "request_id": { "type": "string", "example": "core/abc123-000001" }
+            }
+          }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "required": ["status", "version", "commit", "build_time"],
+        "properties": {
+          "status": { "type": "string", "const": "ok" },
+          "version": { "type": "string" },
+          "commit": { "type": "string" },
+          "build_time": { "type": "string" }
+        }
+      },
+      "Readiness": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string", "enum": ["ready", "no_database", "db_unreachable"] }
+        }
+      },
+      "CreateClientRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "slug", "allowed_origins"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "example": "Mike's Bakery" },
+          "slug": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", "example": "mikes-bakery" },
+          "allowed_origins": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "format": "uri" },
+            "example": ["https://mikesbakery.example"]
+          }
+        }
+      },
+      "ClientCreated": {
+        "type": "object",
+        "required": ["id", "name", "slug", "publishable_key", "secret_key", "created_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "slug": { "type": "string" },
+          "publishable_key": { "type": "string", "pattern": "^pk_(?:test|live)_", "example": "pk_test_..." },
+          "secret_key": { "type": "string", "pattern": "^sk_(?:test|live)_", "example": "sk_test_...", "description": "Returned once. Never place this key in a browser or artifact." },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ComponentConfiguration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mode", "stripe_price_id", "success_url", "cancel_url", "allowed_origins"],
+        "properties": {
+          "mode": { "type": "string", "enum": ["payment", "subscription"] },
+          "stripe_price_id": { "type": "string", "pattern": "^price_", "example": "price_123" },
+          "success_url": { "type": "string", "format": "uri", "example": "https://mikesbakery.example/order/success" },
+          "cancel_url": { "type": "string", "format": "uri", "example": "https://mikesbakery.example/order/cancel" },
+          "allowed_origins": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "format": "uri" },
+            "example": ["https://mikesbakery.example"]
+          },
+          "status": { "type": "string", "enum": ["active", "inactive"], "default": "active" }
+        }
+      },
+      "Component": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ComponentConfiguration" },
+          {
+            "type": "object",
+            "required": ["id", "status", "created_at", "updated_at"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^cmp_(?:test|live)_", "example": "cmp_test_..." },
+              "created_at": { "type": "string", "format": "date-time" },
+              "updated_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        ]
+      },
+      "CreateComponentSessionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["component_id", "origin"],
+        "properties": {
+          "component_id": { "type": "string", "pattern": "^cmp_(?:test|live)_", "example": "cmp_test_..." },
+          "external_user_id": { "type": "string", "description": "Optional tenant-owned user reference. Never written to operational or audit logs." },
+          "origin": { "type": "string", "format": "uri", "example": "https://mikesbakery.example" }
+        }
+      },
+      "ComponentSessionCreated": {
+        "type": "object",
+        "required": ["access_token", "token_type", "expires_in", "expires_at"],
+        "properties": {
+          "access_token": { "type": "string", "pattern": "^ct_(?:test|live)_", "example": "ct_test_...", "description": "Short-lived browser bearer token. Returned once and stored only as a hash." },
+          "token_type": { "type": "string", "const": "Bearer" },
+          "expires_in": { "type": "integer", "const": 600 },
+          "expires_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": { "description": "Invalid request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Unauthorized": { "description": "Missing or invalid service/admin/tenant credential", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Forbidden": { "description": "Authenticated but not allowed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "NotFound": { "description": "Resource not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Conflict": { "description": "Resource conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "RateLimited": { "description": "Rate limit exceeded", "headers": { "Retry-After": { "schema": { "type": "integer" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "InternalError": { "description": "Internal error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Unavailable": { "description": "Database unavailable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+    }
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": ["Operations"],
+        "operationId": "getHealth",
+        "summary": "Process liveness",
+        "security": [],
+        "responses": {
+          "200": { "description": "Core process is running", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" } } } }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "tags": ["Operations"],
+        "operationId": "getReadiness",
+        "summary": "Database readiness",
+        "security": [],
+        "responses": {
+          "200": { "description": "Database is reachable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Readiness" } } } },
+          "503": { "description": "Database is absent or unreachable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Readiness" } } } }
+        }
+      }
+    },
+    "/v1/clients": {
+      "post": {
+        "tags": ["Clients"],
+        "operationId": "createClient",
+        "summary": "Create a tenant and issue API keys",
+        "description": "Requires a platform-admin bearer key. The returned tenant secret is shown once.",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateClientRequest" } } } },
+        "responses": {
+          "201": { "description": "Tenant created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ClientCreated" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/components": {
+      "post": {
+        "tags": ["Components"],
+        "operationId": "createComponent",
+        "summary": "Create a tenant-owned payment component",
+        "description": "Requires the tenant secret. Price and redirect configuration are stored server-side and later bound to component sessions.",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ComponentConfiguration" } } } },
+        "responses": {
+          "201": { "description": "Component created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Component" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/components/{componentID}": {
+      "put": {
+        "tags": ["Components"],
+        "operationId": "updateComponent",
+        "summary": "Update a tenant-owned payment component",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [
+          { "name": "componentID", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^cmp_(?:test|live)_" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ComponentConfiguration" } } } },
+        "responses": {
+          "200": { "description": "Component updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Component" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/component-sessions": {
+      "post": {
+        "tags": ["Sessions"],
+        "operationId": "createComponentSession",
+        "summary": "Mint a short-lived component bearer token",
+        "description": "Called by the tenant backend after it authenticates its own user. The token is bound to the tenant, component, checkout:create scope, checkout audience, origin, and ten-minute expiry.",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateComponentSessionRequest" } } } },
+        "responses": {
+          "201": { "description": "Component session created", "headers": { "Cache-Control": { "schema": { "type": "string", "example": "no-store" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ComponentSessionCreated" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    }
+  }
+}

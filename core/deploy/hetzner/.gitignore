@@ -1,0 +1,4 @@
+.env
+release.env
+release.previous.env
+.release.env.*

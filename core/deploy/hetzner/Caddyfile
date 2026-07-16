@@ -1,0 +1,13 @@
+{
+	admin off
+}
+
+https://{$CORE_HOSTNAME} {
+	tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin-key.pem
+
+	@readiness path /readyz
+	respond @readiness 404
+
+	header -Server
+	reverse_proxy core:8080
+}

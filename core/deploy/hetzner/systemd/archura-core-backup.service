@@ -1,0 +1,9 @@
+[Unit]
+Description=Back up Archura Core PostgreSQL
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/archura/core/deploy/hetzner
+ExecStart=/opt/archura/core/deploy/hetzner/backup-postgres.sh

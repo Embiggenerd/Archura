@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Archura Editor</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+
+      body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: #f3f4f6;
+        font-family: Helvetica, Arial, sans-serif;
+      }
+
+      archura-editor {
+        display: block;
+        flex: 1;
+        min-height: 0;
+        padding: 16px;
+        box-sizing: border-box;
+      }
+
+      archura-canvas .gjs-container {
+        height: 100%;
+        overflow: hidden;
+      }
+
+      .site-bar {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 10px 24px;
+        background: #111827;
+        color: #e5e7eb;
+        font-size: 0.85rem;
+      }
+
+      .site-bar a {
+        color: #93c5fd;
+      }
+
+      .claim,
+      .picker {
+        max-width: 460px;
+        margin: 12vh auto 0;
+        padding: 32px;
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 16px;
+      }
+
+      .claim h1,
+      .picker h1 {
+        margin: 0 0 4px;
+        font-size: 1.4rem;
+      }
+
+      .claim p,
+      .picker p {
+        margin: 0 0 20px;
+        color: #6b7280;
+        font-size: 0.9rem;
+      }
+
+      .claim form {
+        display: flex;
+        gap: 8px;
+      }
+
+      .claim input {
+        flex: 1;
+        padding: 10px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        font-size: 0.95rem;
+      }
+
+      .claim button {
+        padding: 10px 18px;
+        border: none;
+        border-radius: 8px;
+        background: #111827;
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .claim .error {
+        margin: 12px 0 0;
+        color: #dc2626;
+        font-size: 0.85rem;
+        min-height: 1.2em;
+      }
+
+      .picker-group {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #9ca3af;
+        margin: 14px 0 6px;
+      }
+
+      .picker a {
+        display: block;
+        padding: 10px 12px;
+        border-radius: 8px;
+        color: #111827;
+        text-decoration: none;
+        font-size: 0.95rem;
+      }
+
+      .picker a:hover {
+        background: #f3f4f6;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import './../src/index.ts';
+      import { defaultComponents } from './../src/components/index.ts';
+      import { createFileSystemAdapter, createR2Adapter } from './../src/adapters/index.ts';
+
+      const params = new URLSearchParams(location.search);
+      const site = params.get('site');
+      const component = params.get('component') ?? (site ? 'pages/Landing' : null);
+
+      // In the built app, component modules are the self-contained bundles
+      // served by the Worker, not raw Vite source
+      const components = import.meta.env.PROD
+        ? defaultComponents.map((def) => ({ ...def, moduleUrl: `/components/${def.path.join('/')}.js` }))
+        : undefined;
+
+      async function uploadAsset(blob, name) {
+        const ext = (name.split('.').pop() || 'png').toLowerCase();
+        const targetSite = site ?? 'dev';
+        const token = site ? localStorage.getItem(`archura:site-token:${site}`) : null;
+        const response = await fetch(`/api/assets/${targetSite}/upload.${ext}`, {
+          method: 'PUT',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: blob,
+        });
+        if (!response.ok) throw new Error(`Asset upload failed (${response.status})`);
+        return (await response.json()).url;
+      }
+
+      function mountEditor(persistence) {
+        const editor = document.createElement('archura-editor');
+        editor.id = 'editor';
+        if (component) editor.componentPath = component.split('/');
+        if (components) editor.components = components;
+        editor.persistence = persistence;
+        editor.uploadAsset = uploadAsset;
+        editor.addEventListener('archura:target-select', (e) => {
+          const url = new URL(location.href);
+          url.searchParams.set('component', e.detail.path.join('/'));
+          history.replaceState(null, '', url);
+        });
+        document.body.appendChild(editor);
+      }
+
+      function showPicker() {
+        const groups = [
+          ['page', 'Pages'],
+          ['component', 'Components'],
+        ];
+        const el = document.createElement('div');
+        el.className = 'picker';
+        el.innerHTML =
+          '<h1>Pick something to edit</h1><p>Choose a page or component to open in the editor.</p>' +
+          groups
+            .map(([kind, heading]) => {
+              const items = defaultComponents.filter((d) => d.kind === kind);
+              if (!items.length) return '';
+              return (
+                `<div class="picker-group">${heading}</div>` +
+                items
+                  .map((d) => `<a href="?component=${d.path.join('/')}">${d.label ?? d.path.at(-1)}</a>`)
+                  .join('')
+              );
+            })
+            .join('');
+        document.body.appendChild(el);
+      }
+
+      function showClaimScreen() {
+        const el = document.createElement('div');
+        el.className = 'claim';
+        el.innerHTML = `
+          <h1>Claim your site</h1>
+          <p>Pick a name, build your page, hit publish. It goes live immediately.</p>
+          <form>
+            <input name="site" placeholder="my-site" autocomplete="off"
+                   pattern="[a-z0-9][a-z0-9-]{1,38}[a-z0-9]" required />
+            <button type="submit">Claim</button>
+          </form>
+          <p class="error"></p>
+        `;
+        el.querySelector('form').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const name = el.querySelector('input').value.trim().toLowerCase();
+          const errorEl = el.querySelector('.error');
+          try {
+            const response = await fetch('/api/sites', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ site: name }),
+            });
+            if (!response.ok) {
+              errorEl.textContent =
+                response.status === 409
+                  ? 'That name is taken.'
+                  : response.status === 403
+                    ? 'Claiming new sites is currently restricted.'
+                    : 'Invalid name — lowercase letters, digits, dashes.';
+              return;
+            }
+            const { site, token, url } = await response.json();
+            localStorage.setItem(`archura:site-token:${site}`, token);
+            localStorage.setItem(`archura:site-url:${site}`, url);
+            location.href = `/edit/?site=${site}`;
+          } catch {
+            errorEl.textContent = 'Could not reach the server.';
+          }
+        });
+        document.body.appendChild(el);
+      }
+
+      if (site) {
+        const token = localStorage.getItem(`archura:site-token:${site}`);
+        const url = localStorage.getItem(`archura:site-url:${site}`);
+        const bar = document.createElement('div');
+        bar.className = 'site-bar';
+        bar.innerHTML = `<strong>${site}</strong> <span>publishes to</span> <a href="${url ?? `/s/${site}/`}" target="_blank">${url ?? `/s/${site}/`}</a>`;
+        document.body.appendChild(bar);
+        mountEditor(createR2Adapter({ endpoint: `/api/artifacts/${site}`, token: token ?? undefined }));
+      } else if (component) {
+        mountEditor(import.meta.env.PROD ? undefined : createFileSystemAdapter());
+      } else if (import.meta.env.PROD) {
+        showClaimScreen();
+      } else {
+        // Bare /edit in dev: choose what to edit.
+        showPicker();
+      }
+    </script>
+  </body>
+</html>

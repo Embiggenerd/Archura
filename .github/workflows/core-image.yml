@@ -1,0 +1,149 @@
+name: Core image
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "core/**"
+      - ".github/workflows/core-image.yml"
+  pull_request:
+    paths:
+      - "core/**"
+      - ".github/workflows/core-image.yml"
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy this ref to the production environment
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: archura_test
+          POSTGRES_USER: archura
+          POSTGRES_PASSWORD: test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U archura -d archura_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://archura:test-only-password@127.0.0.1:5432/archura_test?sslmode=disable
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+      - run: go test -race ./...
+      - run: go vet ./...
+
+  publish:
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish immutable image
+        id: image
+        env:
+          REGISTRY_OWNER: ${{ github.repository_owner }}
+        run: |
+          owner=$(printf '%s' "$REGISTRY_OWNER" | tr '[:upper:]' '[:lower:]')
+          image="ghcr.io/$owner/archura-core:git-$GITHUB_SHA"
+          docker build \
+            --build-arg VERSION="git-$GITHUB_SHA" \
+            --build-arg COMMIT="$GITHUB_SHA" \
+            --build-arg BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --tag "$image" \
+            core
+          docker push "$image"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "Published $image"
+
+  deploy:
+    needs: publish
+    if: github.event_name == 'push' || inputs.deploy
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: core-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure verified SSH access
+        env:
+          HETZNER_HOST: ${{ secrets.HETZNER_HOST }}
+          HETZNER_SSH_HOST_KEY: ${{ secrets.HETZNER_SSH_HOST_KEY }}
+          HETZNER_SSH_PRIVATE_KEY: ${{ secrets.HETZNER_SSH_PRIVATE_KEY }}
+          HETZNER_USER: ${{ secrets.HETZNER_USER }}
+        run: |
+          test -n "$HETZNER_HOST"
+          test -n "$HETZNER_USER"
+          test -n "$HETZNER_SSH_PRIVATE_KEY"
+          test -n "$HETZNER_SSH_HOST_KEY"
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' "$HETZNER_SSH_PRIVATE_KEY" > "$HOME/.ssh/hetzner"
+          printf '%s\n' "$HETZNER_SSH_HOST_KEY" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/hetzner" "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/hetzner" >/dev/null
+      - name: Deploy exact image to Hetzner
+        env:
+          CORE_IMAGE: ${{ needs.publish.outputs.image }}
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
+          HETZNER_HOST: ${{ secrets.HETZNER_HOST }}
+          HETZNER_USER: ${{ secrets.HETZNER_USER }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$CORE_IMAGE" =~ ^ghcr\.io/[a-z0-9._/-]+:git-[0-9a-f]{40}$ ]]
+          test -n "$GHCR_USER"
+          test "${#GHCR_USER}" -le 100
+
+          target="$HETZNER_USER@$HETZNER_HOST"
+          ssh_options=(
+            -i "$HOME/.ssh/hetzner"
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=yes
+          )
+
+          ssh "${ssh_options[@]}" "$target" \
+            'test -d /opt/archura && test -w /opt/archura && command -v docker >/dev/null'
+
+          tar -czf - core/deploy/hetzner | \
+            ssh "${ssh_options[@]}" "$target" 'tar -xzf - -C /opt/archura'
+
+          printf -v quoted_image '%q' "$CORE_IMAGE"
+          printf -v quoted_user '%q' "$GHCR_USER"
+          printf '%s' "$GHCR_TOKEN" | \
+            ssh "${ssh_options[@]}" "$target" \
+              "/opt/archura/core/deploy/hetzner/release-from-ghcr.sh $quoted_image $quoted_user"

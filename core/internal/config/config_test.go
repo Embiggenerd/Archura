@@ -1,0 +1,82 @@
+package config
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestDevelopmentDefaultsAllowScaffoldMode(t *testing.T) {
+	t.Setenv("ARCHURA_ENV", "")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("PLATFORM_ADMIN_KEY", "")
+	t.Setenv("CORE_SERVICE_KEY", "")
+	t.Setenv("REQUIRE_EDGE_AUTH", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Env != "dev" || cfg.RequireEdgeAuth {
+		t.Fatalf("unexpected development defaults: %+v", cfg)
+	}
+}
+
+func TestDevelopmentEdgeAuthRequiresServiceKey(t *testing.T) {
+	t.Setenv("ARCHURA_ENV", "dev")
+	t.Setenv("REQUIRE_EDGE_AUTH", "true")
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("CORE_SERVICE_KEY", "")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "CORE_SERVICE_KEY") {
+		t.Fatalf("Load error = %v, want missing CORE_SERVICE_KEY", err)
+	}
+}
+
+func TestDevelopmentEdgeAuthRequiresDatabase(t *testing.T) {
+	t.Setenv("ARCHURA_ENV", "dev")
+	t.Setenv("REQUIRE_EDGE_AUTH", "true")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("CORE_SERVICE_KEY", "svc_test_0123456789012345678901234567890123456789012")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
+		t.Fatalf("Load error = %v, want missing DATABASE_URL", err)
+	}
+}
+
+func TestProductionForcesEdgeAuthAndRequiredValues(t *testing.T) {
+	t.Setenv("ARCHURA_ENV", "prod")
+	t.Setenv("REQUIRE_EDGE_AUTH", "false")
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("PLATFORM_ADMIN_KEY", "adm_live_example")
+	t.Setenv("CORE_SERVICE_KEY", "svc_live_0123456789012345678901234567890123456789012")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.RequireEdgeAuth {
+		t.Fatal("production must force edge authentication")
+	}
+}
+
+func TestProductionRejectsMissingValuesAndMismatchedServiceKey(t *testing.T) {
+	t.Setenv("ARCHURA_ENV", "prod")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("PLATFORM_ADMIN_KEY", "")
+	t.Setenv("CORE_SERVICE_KEY", "")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") || !strings.Contains(err.Error(), "PLATFORM_ADMIN_KEY") || !strings.Contains(err.Error(), "CORE_SERVICE_KEY") {
+		t.Fatalf("Load error = %v, want all missing production variables", err)
+	}
+
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("PLATFORM_ADMIN_KEY", "adm_live_example")
+	t.Setenv("CORE_SERVICE_KEY", "svc_test_0123456789012345678901234567890123456789012")
+	_, err = Load()
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("Load error = %v, want environment mismatch", err)
+	}
+}

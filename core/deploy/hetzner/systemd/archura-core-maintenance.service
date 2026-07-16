@@ -1,0 +1,9 @@
+[Unit]
+Description=Remove expired Archura Core sessions and rate-limit buckets
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/archura/core/deploy/hetzner
+ExecStart=/usr/bin/docker compose --env-file .env --env-file release.env --profile jobs run --rm maintenance
