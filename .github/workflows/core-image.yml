@@ -107,15 +107,36 @@ jobs:
           HETZNER_SSH_PRIVATE_KEY: ${{ secrets.HETZNER_SSH_PRIVATE_KEY }}
           HETZNER_USER: ${{ secrets.HETZNER_USER }}
         run: |
-          test -n "$HETZNER_HOST"
-          test -n "$HETZNER_USER"
-          test -n "$HETZNER_SSH_PRIVATE_KEY"
-          test -n "$HETZNER_SSH_HOST_KEY"
+          set -Eeuo pipefail
+
+          require_secret() {
+            local name="$1"
+            local value="$2"
+            if [[ -z "$value" ]]; then
+              echo "::error title=Missing production secret::$name is not available to the production environment"
+              exit 1
+            fi
+          }
+
+          require_secret HETZNER_HOST "$HETZNER_HOST"
+          require_secret HETZNER_USER "$HETZNER_USER"
+          require_secret HETZNER_SSH_PRIVATE_KEY "$HETZNER_SSH_PRIVATE_KEY"
+          require_secret HETZNER_SSH_HOST_KEY "$HETZNER_SSH_HOST_KEY"
+
           install -d -m 0700 "$HOME/.ssh"
           printf '%s\n' "$HETZNER_SSH_PRIVATE_KEY" > "$HOME/.ssh/hetzner"
           printf '%s\n' "$HETZNER_SSH_HOST_KEY" > "$HOME/.ssh/known_hosts"
           chmod 0600 "$HOME/.ssh/hetzner" "$HOME/.ssh/known_hosts"
-          ssh-keygen -y -f "$HOME/.ssh/hetzner" >/dev/null
+
+          if ! ssh-keygen -y -P "" -f "$HOME/.ssh/hetzner" >/dev/null 2>&1; then
+            echo "::error title=Invalid SSH private key::HETZNER_SSH_PRIVATE_KEY is malformed or requires a passphrase"
+            exit 1
+          fi
+
+          if ! ssh-keygen -F "$HETZNER_HOST" -f "$HOME/.ssh/known_hosts" >/dev/null; then
+            echo "::error title=Invalid SSH host key::HETZNER_SSH_HOST_KEY has no entry matching HETZNER_HOST"
+            exit 1
+          fi
       - name: Deploy exact image to Hetzner
         env:
           CORE_IMAGE: ${{ needs.publish.outputs.image }}
