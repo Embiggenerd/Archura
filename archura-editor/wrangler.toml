@@ -32,4 +32,4 @@ ROOT_DOMAIN = "archura.ai"
 CLAIM_IP_ALLOWLIST = "72.132.36.124,2603:8001:2400:2ac0:*"
 # Core proxy target. CORE_SERVICE_KEY must be set with `wrangler secret put` in
 # production or in `.dev.vars` for local Worker→core verification.
-CORE_URL = "https://archura-core.fly.dev"
+CORE_URL = "https://core.archura.ai"
