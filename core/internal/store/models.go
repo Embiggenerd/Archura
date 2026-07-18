@@ -17,6 +17,7 @@ type CreateTenantParams struct {
 	PublishableKey string
 	SecretKeyHash  string
 	AllowedOrigins []string
+	EdgeClaimToken string
 }
 
 type AuditEvent struct {
@@ -33,6 +34,10 @@ type AuditEvent struct {
 type ComponentAuditMetadata struct {
 	Mode   string `json:"mode"`
 	Status string `json:"status"`
+}
+
+type ClientAuditMetadata struct {
+	NamespaceBound bool `json:"namespace_bound"`
 }
 
 type ComponentSessionAuditMetadata struct {

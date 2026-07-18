@@ -34,10 +34,9 @@ func insertAudit(ctx context.Context, tx pgx.Tx, event AuditEvent) error {
 func auditMetadata(event AuditEvent) ([]byte, error) {
 	switch event.Action {
 	case "client.created":
-		if event.Metadata != nil {
-			return nil, errors.New("client.created audit metadata must be empty")
+		if _, ok := event.Metadata.(ClientAuditMetadata); !ok {
+			return nil, errors.New("client.created requires ClientAuditMetadata")
 		}
-		return []byte(`{}`), nil
 	case "component.created", "component.updated":
 		if _, ok := event.Metadata.(ComponentAuditMetadata); !ok {
 			return nil, fmt.Errorf("%s requires ComponentAuditMetadata", event.Action)

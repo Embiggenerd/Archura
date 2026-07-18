@@ -91,6 +91,36 @@ token claims, plus a consent record and an audit-log entry written by the author
 server at mint/use time. So building this identity spine (with the Stripe demo as the gated
 resource) *is* building the credit component's auth, minus the provider integration.
 
+## Namespaces & the tenant → namespace binding
+
+How identity (core) ties to content (edge/local) — added once per-client publishing became
+real. **Auth stays deliberately simple for now: claim token + platform admin key.**
+Accounts/passwords attach later, if we go that route — and then they live only in core,
+hashed, never at the edge.
+
+- **One identity authority, N content stores.** A client's content lives in a
+  **namespace** addressed by their slug, in whichever store the persistence adapter
+  targets: R2 via the Worker (`sites/<slug>/...`) in production, the local filesystem
+  (`artifacts/sites/<slug>/...`) for dev and tests. Adapters share one canonical path
+  scheme and one interface — `load` / `publish` / `list(namespace)` — so the dashboard
+  (and any agent driving the controller) enumerates a client's components identically
+  regardless of adapter. Core never stores content; content stores never hold identity
+  data.
+- **The binding.** Core stores the client's actual data (name, keys, and later account
+  credentials / end-user data) plus the binding: tenant → namespace slug + that
+  namespace's edge credential (the claim token). Registration is **one flow**: claim
+  `sites/<slug>/` at the edge, create the tenant in core, store the binding.
+  (Prototype: the claim token is stored plainly in core so it can be released to
+  sessions later; encrypt it before real merchants.)
+- **Who reaches which namespace.** A client resolves to their own binding. Platform
+  admins/devs resolve **all** bindings — access to every namespace comes from core
+  knowing every binding, never from an edge-side bypass; the Worker keeps enforcing
+  plain claim-token auth. Locally the FS adapter has no auth at all: a dev running it
+  is implicitly admin of every local namespace, which is the intended behavior.
+- **Invariants.** Edge/local stores hold nothing secret beyond token hashes; core holds
+  no presentation data; the edge credential is released by core, never baked into an
+  artifact or embed.
+
 ## Seed → target migration
 
 1. **Now:** per-site claim token (one shared secret per site). "Site" is a proto-tenant.

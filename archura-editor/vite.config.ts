@@ -124,6 +124,97 @@ function assetStore(rootDir: string): Connect.NextHandleFunction {
   };
 }
 
+// Dev-only embed-module store: PUT/GET /<site>/<name>.js ↔
+// <rootDir>/sites/<site>/embed/<name>.js. Mirrors the Worker's /api/embeds
+// contract (text/javascript, CORS, no-store) so adapters can't tell backends apart.
+function embedStore(rootDir: string): Connect.NextHandleFunction {
+  return (req, res, next) => {
+    void (async () => {
+      const key = decodeURIComponent((req.url ?? '/').split('?')[0]).replace(/^\/+/, '');
+      const [site, name] = key.split('/');
+      if (!site || !name || key.includes('..') || !/^[A-Za-z0-9_-]+\.js$/.test(name)) {
+        res.statusCode = 400;
+        return res.end('Bad embed key');
+      }
+      const file = path.join(rootDir, 'sites', site, 'embed', name);
+
+      if (req.method === 'GET') {
+        try {
+          const data = await fs.readFile(file, 'utf8');
+          res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Cache-Control', 'no-store');
+          return res.end(data);
+        } catch {
+          res.statusCode = 404;
+          return res.end('Not found');
+        }
+      }
+      if (req.method === 'PUT') {
+        const chunks: Buffer[] = [];
+        for await (const chunk of req as AsyncIterable<Buffer>) chunks.push(chunk);
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await fs.writeFile(file, Buffer.concat(chunks));
+        res.statusCode = 204;
+        return res.end();
+      }
+      next();
+    })().catch(() => {
+      res.statusCode = 500;
+      res.end('Embed store error');
+    });
+  };
+}
+
+// Dev-only namespace listing: GET /<site>/list enumerates artifacts + embeds
+// under <rootDir>/sites/<site>/, same response shape as the Worker route.
+function namespaceListing(rootDir: string): Connect.NextHandleFunction {
+  return (req, res, next) => {
+    void (async () => {
+      const match = (req.url ?? '').split('?')[0].match(/^\/([^/]+)\/list$/);
+      if (!match || req.method !== 'GET') return next();
+      const site = decodeURIComponent(match[1]);
+      if (site.includes('..')) {
+        res.statusCode = 400;
+        return res.end('Bad site');
+      }
+
+      const root = path.join(rootDir, 'sites', site);
+      const entries: Array<{ path: string[]; kind: string; updatedAt: string | null }> = [];
+      const walk = async (dir: string, rel: string[]) => {
+        let dirents;
+        try {
+          dirents = await fs.readdir(dir, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const dirent of dirents) {
+          const relPath = [...rel, dirent.name];
+          if (dirent.isDirectory()) {
+            if (relPath[0] === 'assets') continue;
+            await walk(path.join(dir, dirent.name), relPath);
+            continue;
+          }
+          const stat = await fs.stat(path.join(dir, dirent.name));
+          const updatedAt = stat.mtime.toISOString();
+          if (relPath[0] === 'embed' && dirent.name.endsWith('.js')) {
+            entries.push({ path: relPath, kind: 'embed', updatedAt });
+          } else if (dirent.name.endsWith('.json') && relPath.join('/') !== 'meta.json') {
+            const jsonPath = [...relPath.slice(0, -1), dirent.name.slice(0, -'.json'.length)];
+            entries.push({ path: jsonPath, kind: 'artifact', updatedAt });
+          }
+        }
+      };
+      await walk(root, []);
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ site, entries }));
+    })().catch(() => {
+      res.statusCode = 500;
+      res.end('List error');
+    });
+  };
+}
+
 export default defineConfig({
   define: {
     __DEMO_STRIPE_PK__: JSON.stringify(demoStripePk()),
@@ -154,6 +245,8 @@ export default defineConfig({
       configureServer(server) {
         server.middlewares.use('/api/artifacts', artifactStore(path.join(here, 'artifacts')));
         server.middlewares.use('/api/assets', assetStore(path.join(here, 'artifacts', 'assets')));
+        server.middlewares.use('/api/embeds', embedStore(path.join(here, 'artifacts')));
+        server.middlewares.use('/api/sites', namespaceListing(path.join(here, 'artifacts')));
         // Local stand-in for the R2 Worker so createR2Adapter is testable offline
         server.middlewares.use('/mock-r2', artifactStore(path.join(here, '.mock-r2'), { bearerToken: 'dev-token' }));
       },

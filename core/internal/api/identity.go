@@ -30,6 +30,7 @@ type createClientRequest struct {
 	Name           string   `json:"name"`
 	Slug           string   `json:"slug"`
 	AllowedOrigins []string `json:"allowed_origins"`
+	EdgeClaimToken string   `json:"edge_claim_token"`
 }
 
 func (s *Server) handleCreateClient(w http.ResponseWriter, r *http.Request) {
@@ -53,8 +54,9 @@ func (s *Server) handleCreateClient(w http.ResponseWriter, r *http.Request) {
 	}
 	input.Name = strings.TrimSpace(input.Name)
 	input.Slug = strings.TrimSpace(input.Slug)
-	if input.Name == "" || !slugPattern.MatchString(input.Slug) || !validOrigins(input.AllowedOrigins, s.cfg.Env) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "Name, slug, or allowed origins are invalid.")
+	if input.Name == "" || !slugPattern.MatchString(input.Slug) || !validOrigins(input.AllowedOrigins, s.cfg.Env) ||
+		len(input.EdgeClaimToken) > 128 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "The client registration fields are invalid.")
 		return
 	}
 
@@ -71,9 +73,11 @@ func (s *Server) handleCreateClient(w http.ResponseWriter, r *http.Request) {
 	tenant, err := s.store.CreateTenant(r.Context(), store.CreateTenantParams{
 		Name: input.Name, Slug: input.Slug, AllowedOrigins: input.AllowedOrigins,
 		PublishableKey: publishableKey, SecretKeyHash: archauth.Hash(secretKey),
+		EdgeClaimToken: input.EdgeClaimToken,
 	}, store.AuditEvent{
 		ActorType: "platform_admin", Action: "client.created",
 		ResourceType: "client", RequestID: middleware.GetReqID(r.Context()),
+		Metadata: store.ClientAuditMetadata{NamespaceBound: input.EdgeClaimToken != ""},
 	})
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, r, http.StatusConflict, "client_exists", "A client with that slug already exists.")

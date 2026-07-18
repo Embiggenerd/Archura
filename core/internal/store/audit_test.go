@@ -6,6 +6,16 @@ import (
 )
 
 func TestAuditMetadataIsActionAllowlisted(t *testing.T) {
+	clientEncoded, err := auditMetadata(AuditEvent{Action: "client.created", Metadata: ClientAuditMetadata{
+		NamespaceBound: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(clientEncoded) != `{"namespace_bound":true}` {
+		t.Fatalf("client metadata = %s", clientEncoded)
+	}
+
 	encoded, err := auditMetadata(AuditEvent{Action: "component.created", Metadata: ComponentAuditMetadata{
 		Mode: "payment", Status: "active",
 	}})
@@ -31,6 +41,6 @@ func TestAuditMetadataRejectsUnknownShapesAndActions(t *testing.T) {
 		t.Fatal("unknown audit action must be rejected")
 	}
 	if _, err := auditMetadata(AuditEvent{Action: "client.created", Metadata: struct{}{}}); err == nil {
-		t.Fatal("client audit metadata must remain empty")
+		t.Fatal("arbitrary client audit metadata must be rejected")
 	}
 }

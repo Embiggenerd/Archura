@@ -4,6 +4,7 @@ import {
   createCanonicalComponentData,
   type CanonicalComponentData,
 } from '../component-data/canonical.js';
+import { extractInstanceEmbed, generateEmbedModule, type EmbedInstance } from '../component-data/embed.js';
 import { defaultComponents } from '../components/index.js';
 import type {
   ArchuraComponentDefinition,
@@ -11,6 +12,7 @@ import type {
   ArchuraEditorConfig,
   ArchuraEditorState,
   ArchuraPageMeta,
+  ArchuraPersistenceAdapter,
   ArchuraRenderable,
 } from './types.js';
 
@@ -559,6 +561,7 @@ export class ArchuraEditorController {
     const artifact = this.#createCurrentArtifact();
     try {
       await persistence.publish(artifact);
+      await this.#publishEmbeds(persistence, artifact);
     } catch (error) {
       this.#config.onError?.(error);
       throw error;
@@ -570,6 +573,23 @@ export class ArchuraEditorController {
     this.#config.onChange?.(this.#artifacts);
     this.#notify();
     return [...this.#artifacts];
+  }
+
+  // Per-client embed modules: one generated JS file per component instance,
+  // named by component (later instances of the same component win). Skipped
+  // for adapters without namespace support.
+  async #publishEmbeds(persistence: ArchuraPersistenceAdapter, artifact: CanonicalComponentData): Promise<void> {
+    if (!persistence.publishEmbed) return;
+    const instances = (artifact.content.components ?? []) as EmbedInstance[];
+    for (const instance of instances) {
+      const definition = this.#resolveDefinition(instance.componentPath);
+      if (!definition) continue;
+      const { css, traits } = extractInstanceEmbed(artifact, instance);
+      // Foreign-origin pages need an absolute import URL for the shared module
+      const moduleUrl = new URL(definition.moduleUrl, globalThis.location?.href).href;
+      const source = generateEmbedModule({ moduleUrl, tag: instance.tagName, css, traits });
+      await persistence.publishEmbed(`${instance.componentPath.at(-1)}.js`, source);
+    }
   }
 
   getArtifacts(): CanonicalComponentData[] {

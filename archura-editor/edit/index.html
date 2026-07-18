@@ -238,7 +238,7 @@
         bar.className = 'site-bar';
         bar.innerHTML = `<strong>${site}</strong> <span>publishes to</span> <a href="${url ?? `/s/${site}/`}" target="_blank">${url ?? `/s/${site}/`}</a>`;
         document.body.appendChild(bar);
-        mountEditor(createR2Adapter({ endpoint: `/api/artifacts/${site}`, token: token ?? undefined }));
+        mountEditor(createR2Adapter({ endpoint: `/api/artifacts/${site}`, token: token ?? undefined, site }));
       } else if (component) {
         mountEditor(import.meta.env.PROD ? undefined : createFileSystemAdapter());
       } else if (import.meta.env.PROD) {

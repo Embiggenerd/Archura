@@ -29,7 +29,7 @@ namespace_id = "1001"
 ROOT_DOMAIN = "archura.ai"
 # IPs allowed to claim new sites (comma-separated, trailing * = prefix match).
 # Empty = open claiming. Loopback is always allowed for local dev.
-CLAIM_IP_ALLOWLIST = "72.132.36.124,2603:8001:2400:2ac0:*"
+CLAIM_IP_ALLOWLIST = "72.132.36.124,2603:8001:2400:2ac0:*,216.61.150.99,2600:387:15:4a18:*"
 # Core proxy target. CORE_SERVICE_KEY must be set with `wrangler secret put` in
 # production or in `.dev.vars` for local Worker→core verification.
 CORE_URL = "https://core.archura.ai"

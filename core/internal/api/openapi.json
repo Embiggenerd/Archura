@@ -74,6 +74,12 @@
             "minItems": 1,
             "items": { "type": "string", "format": "uri" },
             "example": ["https://mikesbakery.example"]
+          },
+          "edge_claim_token": {
+            "type": "string",
+            "maxLength": 128,
+            "writeOnly": true,
+            "description": "Optional opaque edge namespace credential, limited to 128 UTF-8 bytes. Stored for the tenant binding and never returned."
           }
         }
       },

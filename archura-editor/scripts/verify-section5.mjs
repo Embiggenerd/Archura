@@ -38,7 +38,7 @@ try {
   check('publish: button reaches Published state', true);
 
   const stored = await page.evaluate(async () => {
-    const res = await fetch('/api/artifacts/pages/Landing');
+    const res = await fetch('/api/artifacts/sites/dev/pages/Landing');
     return res.ok ? res.json() : null;
   });
   check(
@@ -65,7 +65,7 @@ try {
   const demo = await browser.newPage();
   await demo.goto(`${BASE}/blank.html`, { waitUntil: 'domcontentloaded' });
   const demoProp = await demo.evaluate(async () => {
-    const artifact = await (await fetch('/api/artifacts/pages/Landing')).json();
+    const artifact = await (await fetch('/api/artifacts/sites/dev/pages/Landing')).json();
     document.body.innerHTML = `<style>${artifact.snapshot.css}</style>${artifact.snapshot.html}`;
     await import('/src/components/heroes/Hero.js');
     await import('/src/components/cards/Card.js');

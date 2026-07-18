@@ -11,6 +11,7 @@
  * Storage (R2 binding ARTIFACTS):
  * - sites/<name>/meta.json               → { site, tokenHash, createdAt }
  * - sites/<name>/pages/Landing.json      → published CanonicalComponentData
+ * - sites/<name>/embed/<Component>.js    → generated per-client embed module
  */
 
 const RESERVED = new Set(['www', 'api', 'app', 'editor', 'assets', 'components', 's']);
@@ -102,6 +103,22 @@ function claimAllowed(request, env) {
   );
 }
 
+// Publish auth: the bearer token must hash to the claimed site's tokenHash.
+// Returns null when authorized, or the error Response to return.
+async function requireClaimToken(request, env, site) {
+  const meta = await env.ARTIFACTS.get(`sites/${site}/meta.json`);
+  if (!meta) return json({ error: 'Unknown site' }, 404);
+  const { tokenHash } = await meta.json();
+  const auth = request.headers.get('Authorization') ?? '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!token || (await sha256Hex(token)) !== tokenHash) {
+    return json({ error: 'Unauthorized' }, 401);
+  }
+  return null;
+}
+
+const EMBED_NAME = /^[A-Za-z0-9_-]+\.js$/;
+
 async function serveApi(request, env, url) {
   if (url.pathname.startsWith('/api/core/')) {
     return proxyCore(request, env, url);
@@ -153,14 +170,8 @@ async function serveApi(request, env, url) {
     }
 
     if (request.method === 'PUT') {
-      const meta = await env.ARTIFACTS.get(`sites/${site}/meta.json`);
-      if (!meta) return json({ error: 'Unknown site' }, 404);
-      const { tokenHash } = await meta.json();
-      const auth = request.headers.get('Authorization') ?? '';
-      const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-      if (!token || (await sha256Hex(token)) !== tokenHash) {
-        return json({ error: 'Unauthorized' }, 401);
-      }
+      const denied = await requireClaimToken(request, env, site);
+      if (denied) return denied;
       const body = await request.arrayBuffer();
       const hash = (await sha256Hex(body)).slice(0, 12);
       const finalName = `${hash}.${ext}`;
@@ -186,20 +197,76 @@ async function serveApi(request, env, url) {
     }
 
     if (request.method === 'PUT') {
-      const meta = await env.ARTIFACTS.get(`sites/${site}/meta.json`);
-      if (!meta) return json({ error: 'Unknown site' }, 404);
-      const { tokenHash } = await meta.json();
-      const auth = request.headers.get('Authorization') ?? '';
-      const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-      if (!token || (await sha256Hex(token)) !== tokenHash) {
-        return json({ error: 'Unauthorized' }, 401);
-      }
+      const denied = await requireClaimToken(request, env, site);
+      if (denied) return denied;
       await env.ARTIFACTS.put(key, request.body);
       return new Response(null, { status: 204 });
     }
   }
 
+  // Per-client embed modules: published by the editor, fetched cross-origin
+  // by embedding pages (also served on site hosts as /embed/<name>.js)
+  const embedMatch = url.pathname.match(/^\/api\/embeds\/([^/]+)\/([^/]+)$/);
+  if (embedMatch) {
+    const [, site, rawName] = embedMatch;
+    const name = decodeURIComponent(rawName);
+    if (!SITE_NAME.test(site) || !EMBED_NAME.test(name)) {
+      return json({ error: 'Bad request' }, 400);
+    }
+    if (request.method === 'GET') {
+      return serveEmbed(env, site, name);
+    }
+    if (request.method === 'PUT') {
+      const denied = await requireClaimToken(request, env, site);
+      if (denied) return denied;
+      await env.ARTIFACTS.put(`sites/${site}/embed/${name}`, request.body, {
+        httpMetadata: { contentType: 'text/javascript; charset=utf-8' },
+      });
+      return new Response(null, { status: 204 });
+    }
+  }
+
+  // Namespace listing: everything published under a site, for the dashboard
+  // and agents. Same shape as the Vite dev store's listing, so adapters
+  // cannot tell the backends apart.
+  const listMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/list$/);
+  if (listMatch && request.method === 'GET') {
+    const site = listMatch[1];
+    if (!SITE_NAME.test(site)) return json({ error: 'Bad request' }, 400);
+    const denied = await requireClaimToken(request, env, site);
+    if (denied) return denied;
+
+    const prefix = `sites/${site}/`;
+    const listed = await env.ARTIFACTS.list({ prefix });
+    const entries = [];
+    for (const object of listed.objects) {
+      const key = object.key.slice(prefix.length);
+      if (key === 'meta.json' || key.startsWith('assets/')) continue;
+      const updatedAt = object.uploaded?.toISOString?.() ?? null;
+      if (key.startsWith('embed/') && key.endsWith('.js')) {
+        entries.push({ path: key.split('/'), kind: 'embed', updatedAt });
+      } else if (key.endsWith('.json')) {
+        entries.push({ path: key.slice(0, -'.json'.length).split('/'), kind: 'artifact', updatedAt });
+      }
+    }
+    return json({ site, entries });
+  }
+
   return json({ error: 'Not found' }, 404);
+}
+
+async function serveEmbed(env, site, name) {
+  const object = await env.ARTIFACTS.get(`sites/${site}/embed/${name}`);
+  if (!object) return json({ error: 'Not found' }, 404);
+  return withCors(
+    new Response(object.body, {
+      headers: {
+        'Content-Type': 'text/javascript; charset=utf-8',
+        // Mutable by design: re-publishing must reach every embed on next load
+        'Cache-Control': 'no-store',
+      },
+    })
+  );
 }
 
 async function proxyCore(request, env, url) {
@@ -257,6 +324,12 @@ async function serveSite(request, env, site, path, base) {
   // Component modules resolve on the site host too (shared assets)
   if (path.startsWith('/components/')) {
     return withCors(await env.ASSETS.fetch(new Request(new URL(path, request.url), request)));
+  }
+
+  // Per-client embed modules on the site host: /embed/<Component>.js
+  const embedMatch = path.match(/^\/embed\/([^/]+)$/);
+  if (embedMatch && EMBED_NAME.test(embedMatch[1])) {
+    return serveEmbed(env, site, embedMatch[1]);
   }
 
   const object = await env.ARTIFACTS.get(`sites/${site}/${HOME_ARTIFACT}.json`);

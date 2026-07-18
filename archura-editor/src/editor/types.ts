@@ -16,13 +16,26 @@ export type ArchuraEditTarget = {
   label: string;
 };
 
+/** One stored item in a client's namespace, as returned by adapter list(). */
+export type ArchuraNamespaceEntry = {
+  path: string[];
+  kind: 'artifact' | 'embed';
+  updatedAt: string | null;
+};
+
 /**
  * The editor's entire knowledge of storage. Implemented by the host;
  * S3, R2, a local database — the editor cannot tell them apart.
+ * Namespace-aware adapters (bound to a client's site) additionally expose
+ * list() and publishEmbed(); bespoke host adapters may omit them.
  */
 export type ArchuraPersistenceAdapter = {
   load(target: ArchuraEditTarget): Promise<CanonicalComponentData | null>;
   publish(artifact: CanonicalComponentData): Promise<void>;
+  /** Enumerate everything stored in this adapter's namespace. */
+  list?(): Promise<ArchuraNamespaceEntry[]>;
+  /** Store a generated per-client embed module (JS source) under the namespace. */
+  publishEmbed?(name: string, source: string): Promise<void>;
 };
 
 export type ArchuraEditorConfig = {

@@ -23,10 +23,10 @@ func (s *Store) CreateTenant(ctx context.Context, p CreateTenantParams, audit Au
 
 	var tenant Tenant
 	err = tx.QueryRow(ctx, `
-		INSERT INTO tenants (name, slug, allowed_origins)
-		VALUES ($1, $2, $3)
+		INSERT INTO tenants (name, slug, allowed_origins, edge_claim_token)
+		VALUES ($1, $2, $3, NULLIF($4, ''))
 		RETURNING id::text, name, slug, allowed_origins, status, created_at`,
-		p.Name, p.Slug, p.AllowedOrigins,
+		p.Name, p.Slug, p.AllowedOrigins, p.EdgeClaimToken,
 	).Scan(&tenant.ID, &tenant.Name, &tenant.Slug, &tenant.AllowedOrigins, &tenant.Status, &tenant.CreatedAt)
 	if err != nil {
 		return Tenant{}, mapStoreError("insert tenant", err)

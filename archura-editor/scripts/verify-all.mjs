@@ -20,6 +20,7 @@ const SUITES = [
   'verify-stripe',
   'verify-invariants',
   'verify-deploy',
+  'verify-client-styling',
 ];
 
 const startServer = (args) =>

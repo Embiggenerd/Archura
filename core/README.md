@@ -67,6 +67,8 @@ keys are generated randomly and are valid only when their hashes exist in the lo
 
 - `POST /v1/clients` — platform-admin authenticated; creates a tenant and returns its
   publishable and secret keys. The secret is returned once and stored only as a hash.
+  An optional `edge_claim_token` binds the tenant slug to its edge content namespace;
+  the credential is stored but never returned.
 - `POST /v1/components` — tenant-secret authenticated; creates a `cmp_test_...` component
   identifier and stores its Stripe Price, mode, redirect URLs, and allowed origins.
 - `PUT /v1/components/{componentID}` — updates an existing tenant-owned component.

@@ -26,6 +26,7 @@ type fakeRepository struct {
 	tenant           store.Tenant
 	secretHash       string
 	publishableKey   string
+	edgeClaimToken   string
 	component        store.PaymentComponent
 	session          store.ComponentSession
 	componentSession map[string]store.ComponentSession
@@ -47,6 +48,7 @@ func (f *fakeRepository) CreateTenant(_ context.Context, p store.CreateTenantPar
 	}
 	f.secretHash = p.SecretKeyHash
 	f.publishableKey = p.PublishableKey
+	f.edgeClaimToken = p.EdgeClaimToken
 	audit.TenantID = f.tenant.ID
 	audit.ResourceID = f.tenant.ID
 	f.audits = append(f.audits, audit)
@@ -108,11 +110,16 @@ func TestClientComponentAndSessionContract(t *testing.T) {
 	clientBody := `{
 		"name":"Mike's Bakery",
 		"slug":"mikes-bakery",
-		"allowed_origins":["http://localhost:5173"]
+		"allowed_origins":["http://localhost:5173"],
+		"edge_claim_token":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	}`
 	clientResponse := performRequest(router, http.MethodPost, "/v1/clients", clientBody, testAdminKey)
 	if clientResponse.Code != http.StatusCreated {
 		t.Fatalf("create client status = %d, body = %s", clientResponse.Code, clientResponse.Body.String())
+	}
+	if strings.Contains(clientResponse.Body.String(), "edge_claim_token") ||
+		strings.Contains(clientResponse.Body.String(), repo.edgeClaimToken) {
+		t.Fatalf("create client response exposed edge credential: %s", clientResponse.Body.String())
 	}
 	var createdClient struct {
 		PublishableKey string `json:"publishable_key"`
@@ -126,6 +133,9 @@ func TestClientComponentAndSessionContract(t *testing.T) {
 	}
 	if repo.secretHash == createdClient.SecretKey || repo.secretHash != archauth.Hash(createdClient.SecretKey) {
 		t.Fatal("tenant secret must be stored only as its hash")
+	}
+	if repo.edgeClaimToken != "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" {
+		t.Fatalf("edge claim token was not passed to storage: %q", repo.edgeClaimToken)
 	}
 
 	componentBody := `{
@@ -183,6 +193,9 @@ func TestClientComponentAndSessionContract(t *testing.T) {
 		repo.audits[1].Action != "component.created" || repo.audits[2].Action != "component_session.created" {
 		t.Fatalf("unexpected audit sequence: %+v", repo.audits)
 	}
+	if metadata, ok := repo.audits[0].Metadata.(store.ClientAuditMetadata); !ok || !metadata.NamespaceBound {
+		t.Fatalf("unexpected client audit metadata: %#v", repo.audits[0].Metadata)
+	}
 	if metadata, ok := repo.audits[2].Metadata.(store.ComponentSessionAuditMetadata); !ok ||
 		len(metadata.Scopes) != 1 || metadata.ExpiresInSeconds != 600 {
 		t.Fatalf("unexpected session audit metadata: %#v", repo.audits[2].Metadata)
@@ -193,6 +206,48 @@ func TestClientComponentAndSessionContract(t *testing.T) {
 	request.Header.Set("Origin", "http://localhost:5173")
 	if _, ok := server.authenticateComponentSession(httptest.NewRecorder(), request, "checkout:create"); !ok {
 		t.Fatal("fresh component token should authorize its bound action")
+	}
+}
+
+func TestCreateClientWithoutNamespaceBinding(t *testing.T) {
+	repo := &fakeRepository{}
+	server := NewServer(config.Config{Env: "dev", PlatformAdminKey: testAdminKey}, repo, slog.Default())
+	response := performRequest(server.Router(), http.MethodPost, "/v1/clients", `{
+		"name":"Unbound Client",
+		"slug":"unbound-client",
+		"allowed_origins":["http://localhost:5173"]
+	}`, testAdminKey)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create unbound client status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if repo.edgeClaimToken != "" {
+		t.Fatalf("unbound client edge token = %q, want empty", repo.edgeClaimToken)
+	}
+	if len(repo.audits) != 1 {
+		t.Fatalf("audit count = %d, want 1", len(repo.audits))
+	}
+	if metadata, ok := repo.audits[0].Metadata.(store.ClientAuditMetadata); !ok || metadata.NamespaceBound {
+		t.Fatalf("unexpected unbound client audit metadata: %#v", repo.audits[0].Metadata)
+	}
+}
+
+func TestCreateClientRejectsOversizedEdgeClaimToken(t *testing.T) {
+	repo := &fakeRepository{}
+	server := NewServer(config.Config{Env: "dev", PlatformAdminKey: testAdminKey}, repo, slog.Default())
+	body, err := json.Marshal(map[string]any{
+		"name": "Oversized Token", "slug": "oversized-token",
+		"allowed_origins":  []string{"http://localhost:5173"},
+		"edge_claim_token": strings.Repeat("x", 129),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := performRequest(server.Router(), http.MethodPost, "/v1/clients", string(body), testAdminKey)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("oversized edge token status = %d, want 400; body = %s", response.Code, response.Body.String())
+	}
+	if repo.tenant.ID != "" {
+		t.Fatal("oversized edge token must not create a tenant")
 	}
 }
 
