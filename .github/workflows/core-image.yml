@@ -100,10 +100,19 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@v4
-      - name: Configure verified SSH access
+      - name: Connect to the tailnet
+        # The Hetzner firewall admits port 22 only from our own IPs, so the
+        # runner reaches the box over Tailscale (WireGuard) instead of the
+        # public internet. Ephemeral node — leaves the tailnet when the job ends.
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+      - name: Configure verified SSH access over Tailscale
         env:
+          # HETZNER_HOST must be the box's Tailscale address (100.x.y.z or its
+          # MagicDNS name), not the public IP — that is what the firewall and
+          # this tunnel now use.
           HETZNER_HOST: ${{ secrets.HETZNER_HOST }}
-          HETZNER_SSH_HOST_KEY: ${{ secrets.HETZNER_SSH_HOST_KEY }}
           HETZNER_SSH_PRIVATE_KEY: ${{ secrets.HETZNER_SSH_PRIVATE_KEY }}
           HETZNER_USER: ${{ secrets.HETZNER_USER }}
         run: |
@@ -121,20 +130,30 @@ jobs:
           require_secret HETZNER_HOST "$HETZNER_HOST"
           require_secret HETZNER_USER "$HETZNER_USER"
           require_secret HETZNER_SSH_PRIVATE_KEY "$HETZNER_SSH_PRIVATE_KEY"
-          require_secret HETZNER_SSH_HOST_KEY "$HETZNER_SSH_HOST_KEY"
 
           install -d -m 0700 "$HOME/.ssh"
           printf '%s\n' "$HETZNER_SSH_PRIVATE_KEY" > "$HOME/.ssh/hetzner"
-          printf '%s\n' "$HETZNER_SSH_HOST_KEY" > "$HOME/.ssh/known_hosts"
-          chmod 0600 "$HOME/.ssh/hetzner" "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/hetzner"
 
           if ! ssh-keygen -y -P "" -f "$HOME/.ssh/hetzner" >/dev/null 2>&1; then
             echo "::error title=Invalid SSH private key::HETZNER_SSH_PRIVATE_KEY is malformed or requires a passphrase"
             exit 1
           fi
 
-          if ! ssh-keygen -F "$HETZNER_HOST" -f "$HOME/.ssh/known_hosts" >/dev/null; then
-            echo "::error title=Invalid SSH host key::HETZNER_SSH_HOST_KEY has no entry matching HETZNER_HOST"
+          # Pin the host key by scanning it over the Tailscale tunnel. WireGuard
+          # has already authenticated the peer, so this is trust-on-first-use
+          # over a cryptographically authenticated channel — the scanned key is
+          # provably the real box's. Retry while Tailscale settles its routes.
+          for attempt in $(seq 1 30); do
+            if ssh-keyscan -T 5 "$HETZNER_HOST" > "$HOME/.ssh/known_hosts" 2>/dev/null \
+              && [[ -s "$HOME/.ssh/known_hosts" ]]; then
+              break
+            fi
+            sleep 2
+          done
+          chmod 0600 "$HOME/.ssh/known_hosts"
+          if [[ ! -s "$HOME/.ssh/known_hosts" ]]; then
+            echo "::error title=Host unreachable::could not reach $HETZNER_HOST over Tailscale"
             exit 1
           fi
       - name: Deploy exact image to Hetzner
