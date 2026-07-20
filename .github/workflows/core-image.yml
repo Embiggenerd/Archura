@@ -107,6 +107,23 @@ jobs:
         uses: tailscale/github-action@v3
         with:
           authkey: ${{ secrets.TS_AUTHKEY }}
+      - name: Diagnose tailnet reachability
+        env:
+          HETZNER_HOST: ${{ secrets.HETZNER_HOST }}
+        run: |
+          set +e
+          echo "== runner tailscale IPs =="
+          tailscale ip
+          echo "== tailnet peers =="
+          tailscale status
+          echo "== is HETZNER_HOST a tailnet address? =="
+          case "$HETZNER_HOST" in
+            100.*) echo "HETZNER_HOST looks like a Tailscale IP ($HETZNER_HOST) — good" ;;
+            *) echo "WARNING: HETZNER_HOST=$HETZNER_HOST is NOT a 100.x Tailscale IP. Set it to the box's 'tailscale ip -4'." ;;
+          esac
+          echo "== tailscale ping to $HETZNER_HOST =="
+          tailscale ping -c 4 "$HETZNER_HOST"
+          echo "(diagnostics only; the SSH step below is what gates the deploy)"
       - name: Configure verified SSH access over Tailscale
         env:
           # HETZNER_HOST must be the box's Tailscale address (100.x.y.z or its
