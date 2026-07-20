@@ -131,9 +131,10 @@
               res?.status === 503 ? 'Unavailable — core is not running.' : 'Could not send the link.';
             return;
           }
+          const localHint = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+            ? ' <a href="/dev-mail/">Running locally? Open the dev mailbox.</a>' : '';
           main.innerHTML = `<div class="card"><h2>Check your email</h2>
-            <p class="hint">We sent a sign-in link to <strong>${email}</strong>.
-            <a href="/dev-mail/">Running locally? Open the dev mailbox.</a></p></div>`;
+            <p class="hint">We sent a sign-in link to <strong>${email}</strong>.${localHint}</p></div>`;
         });
       }
 
@@ -142,22 +143,26 @@
         card.className = 'card';
         card.innerHTML = `
           <h2>${site}</h2>
-          <div class="actions"></div>
+          <div class="actions">
+            <a href="/edit/?site=${site}" data-edit>Edit</a>
+            <a class="secondary" href="${siteUrl}" target="_blank">Open site</a>
+          </div>
           <ul class="entries"><li>Loading…</li></ul>`;
         main.appendChild(card);
 
+        // The "Open site" link is always present — a site the user owns is
+        // reachable even before we can load its contents (e.g. a fresh deploy
+        // they navigated away from). The list only enriches Edit + embed code.
         const list = await fetch(`/api/sites/${site}/list`)
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null);
         const ul = card.querySelector('.entries');
         if (!list) {
-          ul.innerHTML = '<li>Could not load contents.</li>';
+          ul.innerHTML = '<li>Not published yet — open the site to finish deploying.</li>';
           return;
         }
         const componentPath = list.componentPath ?? ['pages', 'Landing'];
-        card.querySelector('.actions').innerHTML =
-          `<a href="/edit/?site=${site}&component=${componentPath.join('/')}">Edit component</a>
-           <a class="secondary" href="${siteUrl}" target="_blank">Open preview</a>`;
+        card.querySelector('[data-edit]').setAttribute('href', `/edit/?site=${site}&component=${componentPath.join('/')}`);
         ul.innerHTML =
           list.entries.map((e) => `<li>${e.kind}: ${e.path.join('/')}</li>`).join('') ||
           '<li>Nothing published yet.</li>';

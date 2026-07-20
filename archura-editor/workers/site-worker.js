@@ -129,6 +129,15 @@ export default {
       return serveApi(request, env, url);
     }
 
+    // Signed-in visitors to the marketing homepage go straight to their
+    // dashboard. Cookie-presence only (no core round-trip on an anonymous
+    // marketing page); a stale cookie just lands on the dashboard's own
+    // sign-in. Bare "/" only — legacy /?site= /?component= deep links are
+    // left for index.html to route into the editor.
+    if (url.pathname === '/' && url.search === '' && sessionTokenFromRequest(request)) {
+      return Response.redirect(new URL('/dashboard/', url.origin), 302);
+    }
+
     // Editor app + built component modules
     const assetResponse = await env.ASSETS.fetch(request);
     if (url.pathname.startsWith('/components/')) {
@@ -271,7 +280,11 @@ async function organizationEntitlement(env, organizationId, { fresh = false } = 
     const cached = await cache.match(cacheKey);
     if (cached) return cached.json();
   }
-  const response = await coreRequest(env, `/v1/organizations/${encodeURIComponent(organizationId)}/entitlement`);
+  // Machine-invoked (serve time, no user session): authenticated by the
+  // internal key — the core no longer serves entitlement to bare callers.
+  const response = await coreRequest(env, `/v1/organizations/${encodeURIComponent(organizationId)}/entitlement`, {
+    bearer: env.CORE_INTERNAL_KEY,
+  });
   if (!response.ok) {
     const error = new Error(`billing_${response.status}`);
     error.status = response.status;
@@ -1038,7 +1051,6 @@ async function handleConfirm(request, env, url) {
   }
 
   const { account, organization, subdomain, session } = await response.json();
-  let embedSnippet = '';
   let publishingDelayed = false;
   if (subdomain) {
     const metaKey = `sites/${subdomain}/meta.json`;
@@ -1071,39 +1083,36 @@ async function handleConfirm(request, env, url) {
           publishingDelayed = true;
         }
       }
+      // Bind the pk → site embed projection; the user finds the embed code
+      // itself in their dashboard now, not on this page.
       if (!publishingDelayed) await bindEmbedIdentity(env, subdomain, organization);
-      if (!publishingDelayed && meta.embedName && meta.embedTag) {
-        const artifactPath = Array.isArray(meta.componentPath) && meta.componentPath.length > 0
-          ? meta.componentPath.join('/')
-          : HOME_ARTIFACT;
-        const artifactObject = await env.ARTIFACTS.get(`sites/${subdomain}/${artifactPath}.json`);
-        const artifact = artifactObject ? await artifactObject.json() : null;
-        const attributes = embedAttributesForArtifact(artifact, meta.embedName);
-        const embedBase = embedBaseFor(request, env, organization.publishable_key, meta.siteId);
-        embedSnippet = `<script type="module" src="${embedBase}/${meta.embedName}"></script>\n` +
-          `<${meta.embedTag}${attributes ? ` ${attributes}` : ''}></${meta.embedTag}>`;
-      }
     }
   }
 
   const siteUrl = subdomain ? siteUrlFor(request, env, subdomain) : null;
+  const secure = url.protocol === 'https:' ? '; Secure' : '';
+  const sessionCookie = `${SESSION_COOKIE}=${session.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${secure}`;
+
+  // Success with a published site: drop the user straight onto their page —
+  // they'll find the dashboard (and its embed code) themselves. The message
+  // page is kept only for email-only sign-in and the delayed-publish case.
+  if (siteUrl && !publishingDelayed) {
+    return new Response(null, {
+      status: 302,
+      headers: { Location: siteUrl, 'Set-Cookie': sessionCookie, 'Cache-Control': 'no-store' },
+    });
+  }
+
   const page = messagePage(
     'Email confirmed',
     publishingDelayed
       ? 'Your account is ready, but publishing is temporarily delayed. Open your account and try publishing again.'
-      : subdomain
-      ? 'Your component is published. Preview it or copy its embed code below.'
       : 'You are signed in.',
-    [...(siteUrl && !publishingDelayed ? [[siteUrl, 'Open preview']] : []), ['/account/', 'Go to your account']],
-    publishingDelayed ? 503 : 200,
-    embedSnippet
+    [['/account/', 'Go to your account']],
+    publishingDelayed ? 503 : 200
   );
   const headers = new Headers(page.headers);
-  const secure = url.protocol === 'https:' ? '; Secure' : '';
-  headers.append(
-    'Set-Cookie',
-    `${SESSION_COOKIE}=${session.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${secure}`
-  );
+  headers.append('Set-Cookie', sessionCookie);
   return new Response(page.body, { status: page.status, headers });
 }
 
@@ -1119,26 +1128,6 @@ async function serveEmbed(env, site, name) {
       },
     })
   );
-}
-
-function embedAttributesForArtifact(artifact, embedName) {
-  const instance = [...(artifact?.content?.components ?? [])]
-    .reverse()
-    .find((component) => `${component.componentPath?.at(-1)}.js` === embedName);
-  if (!instance) return '';
-  return Object.entries(instance.attributes ?? {})
-    .filter(([name, value]) =>
-      /^[A-Za-z_:][A-Za-z0-9_.:-]*$/.test(name) &&
-      !['id', 'class', 'style'].includes(name) &&
-      !name.startsWith('data-gjs') && value !== false && value != null
-    )
-    .map(([name, value]) => value === true
-      ? name
-      : `${name}="${String(value)
-          .replaceAll('&', '&amp;')
-          .replaceAll('"', '&quot;')
-          .replaceAll('<', '&lt;')}"`)
-    .join(' ');
 }
 
 async function bindEmbedIdentity(env, site, organization) {
@@ -1225,7 +1214,7 @@ async function cleanupExpiredSites(env) {
     const released = await coreRequest(
       env,
       `/v1/organizations/${encodeURIComponent(meta.organizationId)}/sites/${encodeURIComponent(site)}`,
-      { method: 'DELETE' }
+      { method: 'DELETE', bearer: env.CORE_INTERNAL_KEY }
     ).catch(() => null);
     if (!released?.ok) continue;
     const siteObjects = await listAllObjects(env.ARTIFACTS, `sites/${site}/`);
@@ -1241,6 +1230,14 @@ async function cleanupExpiredSites(env) {
 }
 
 async function proxyCore(request, env, url) {
+  // Dev-only. In production this forward does not exist: browsers reach core
+  // exclusively through the purpose-built BFF routes above, each of which
+  // authenticates the actual principal before the service key is attached.
+  // A blanket forward would hand the Worker's transport credential to any
+  // caller for any /v1 path — the vulnerability class this gate closes.
+  if (env.ALLOW_CORE_DEV_PROXY !== 'true') {
+    return json({ error: 'Not found' }, 404);
+  }
   if (!env.CORE_URL || !env.CORE_SERVICE_KEY) {
     return json({ error: 'Core unavailable' }, 503);
   }

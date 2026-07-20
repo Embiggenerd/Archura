@@ -32,6 +32,7 @@ is added to chi without being documented.
 | `DATABASE_URL`       | —       | Postgres; empty = scaffold mode        |
 | `PLATFORM_ADMIN_KEY` | —       | gates client-onboarding endpoints (M1) |
 | `CORE_SERVICE_KEY`   | —       | authenticates the Worker to core       |
+| `CORE_INTERNAL_KEY`  | —       | per-request auth for machine endpoints |
 | `CONFIRM_URL_BASE`   | —       | public Worker magic-link target (for example, `http://localhost:8787/confirm`) |
 | `CLOUDFLARE_EMAIL_ACCOUNT_ID` | — | Cloudflare account used for production transactional email |
 | `CLOUDFLARE_EMAIL_API_TOKEN` | — | Email Service API token; keep secret |

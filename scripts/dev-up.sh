@@ -99,11 +99,13 @@ createdb -h /tmp -p "$pgport" -U postgres archura 2>/dev/null || true
 cd "$core_dir"
 admin=$(go run ./cmd/devkeys admin | cut -d= -f2)
 service=$(go run ./cmd/devkeys service | cut -d= -f2)
+internal=$(go run ./cmd/devkeys internal | cut -d= -f2)
 moderation=$(openssl rand -hex 32)
 
 # --- Core (background) ---
 DATABASE_URL="postgres://postgres@/archura?host=/tmp&port=$pgport" \
 PLATFORM_ADMIN_KEY="$admin" CORE_SERVICE_KEY="$service" \
+CORE_INTERNAL_KEY="$internal" \
 REQUIRE_EDGE_AUTH=true PORT=8080 ARCHURA_ENV=dev \
 CONFIRM_URL_BASE="http://localhost:8787/confirm" \
   go run ./cmd/server > /tmp/core-run.log 2>&1 &
@@ -150,6 +152,11 @@ PUBLIC_ORIGIN=http://localhost:8787
 # Explicit local compatibility for claim-token-only sites. Never set in prod.
 ALLOW_ANONYMOUS_SITE_CLAIMS=true
 MODERATION_ADMIN_KEY=$moderation
+# Machine credential for the core's internal endpoints (entitlement, release).
+CORE_INTERNAL_KEY=$internal
+# Dev-only blanket /api/core/* forward for local scripts. Never set in prod —
+# production browsers reach core only through the purpose-built BFF routes.
+ALLOW_CORE_DEV_PROXY=true
 VARS
 
 "$av2/node_modules/.bin/wrangler" dev --port 8787 --live-reload > /tmp/archura-wrangler.log 2>&1 &

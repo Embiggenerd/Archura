@@ -16,6 +16,7 @@ import (
 	"github.com/stripe/stripe-go/v86"
 	"github.com/stripe/stripe-go/v86/webhook"
 
+	archauth "github.com/archura/core/internal/auth"
 	"github.com/archura/core/internal/store"
 )
 
@@ -211,8 +212,30 @@ func (s *Server) handleStartTrial(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, billingResponse(billing, organization.Role, s.now().UTC()))
 }
 
+// authenticateInternal verifies the machine credential for endpoints invoked
+// by our own infrastructure (Worker serving/cron). Doctrine: the service
+// header is transport proof only — machine endpoints still need per-request
+// principal auth, and this key is that principal.
+func (s *Server) authenticateInternal(r *http.Request) bool {
+	token, ok := bearerToken(r)
+	return ok && s.cfg.CoreInternalKey != "" &&
+		archauth.HasKindForEnv(token, "int", s.cfg.Env) &&
+		archauth.Equal(token, s.cfg.CoreInternalKey)
+}
+
 func (s *Server) handleOrganizationEntitlement(w http.ResponseWriter, r *http.Request) {
 	organizationID := chi.URLParam(r, "organizationID")
+	// Internal callers (Worker at serve time) read any organization's
+	// entitlement; otherwise a member session for this organization is
+	// required — billing state is not public.
+	role := ""
+	if !s.authenticateInternal(r) {
+		_, organization, ok := s.accountOrganization(w, r, false)
+		if !ok {
+			return
+		}
+		role = organization.Role
+	}
 	billing, err := s.store.BillingForOrganization(r.Context(), organizationID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, r, http.StatusNotFound, "organization_not_found", "The organization was not found.")
@@ -223,10 +246,17 @@ func (s *Server) handleOrganizationEntitlement(w http.ResponseWriter, r *http.Re
 		return
 	}
 	w.Header().Set("Cache-Control", "private, max-age=60")
-	writeJSON(w, http.StatusOK, entitlementResponse(store.OrganizationEntitlementFor(billing, "", s.now().UTC())))
+	writeJSON(w, http.StatusOK, entitlementResponse(store.OrganizationEntitlementFor(billing, role, s.now().UTC())))
 }
 
 func (s *Server) handleReleaseOrganizationSite(w http.ResponseWriter, r *http.Request) {
+	// Destructive and machine-only: releasing a binding frees the subdomain
+	// for anyone to claim, so reachability is not authorization here.
+	if !s.authenticateInternal(r) {
+		s.securityEvent(r, "invalid_internal_key")
+		writeError(w, r, http.StatusUnauthorized, "invalid_internal_key", "The internal credential is invalid.")
+		return
+	}
 	organizationID := chi.URLParam(r, "organizationID")
 	subdomain := chi.URLParam(r, "subdomain")
 	if !slugPattern.MatchString(subdomain) {
@@ -234,7 +264,7 @@ func (s *Server) handleReleaseOrganizationSite(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if err := s.store.ReleaseOrganizationSite(r.Context(), subdomain, organizationID, store.AuditEvent{
-		ActorType: "platform_admin", ActorID: "billing_recovery",
+		ActorType: "internal", ActorID: "billing_recovery",
 		RequestID: middleware.GetReqID(r.Context()), Metadata: store.EmptyAuditMetadata{},
 	}); err != nil {
 		s.internalError(w, r, err)

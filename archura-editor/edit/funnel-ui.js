@@ -54,13 +54,19 @@ export function showOverlay(innerHtml) {
   return overlay;
 }
 
+// The dev mailbox is a local-testing convenience and does not exist in
+// production; only surface it when the page is actually served from localhost.
+export function isLocalDev() {
+  return location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+}
+
 export function checkEmailHtml(email) {
   return `
     <h2>Check your email</h2>
     <div class="spin"></div>
     <p>We sent a confirmation link to <strong>${email}</strong>.
        Click it to publish your component — your work is safe until then.</p>
-    <p><a href="/dev-mail/">Running locally? Open the dev mailbox.</a></p>`;
+    ${isLocalDev() ? '<p><a href="/dev-mail/">Running locally? Open the dev mailbox.</a></p>' : ''}`;
 }
 
 export function showRegisterModal() {

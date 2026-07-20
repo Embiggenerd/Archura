@@ -129,6 +129,38 @@ token claims, plus a consent record and an audit-log entry written by the author
 server at mint/use time. So building this identity spine (with the Stripe demo as the gated
 resource) *is* building the credit component's auth, minus the provider integration.
 
+## Transport vs. authorization (decided 2026-07-20)
+
+The posture, settled after the proxied-release-endpoint finding — recorded so it
+is not re-litigated per review:
+
+- **Every core endpoint self-defends with per-request principal auth** —
+  account session + membership/role, platform admin key, Stripe HMAC
+  signature, or the internal machine key (`CORE_INTERNAL_KEY`, used by the
+  Worker's serve-time entitlement reads and billing-recovery cron). Transport
+  (the service header, the Hetzner Cloudflare-IP firewall, proxied DNS) is
+  defense-in-depth for a one-box origin — **never authorization**.
+  Reachability is not permission; audit actors must name the real principal
+  (`internal` for machine calls, never a borrowed human/admin identity).
+- **Core has exactly two doors.** `/v1/*`: service key (transport) + the
+  endpoint's own principal auth; reachable only via the Worker.
+  `/stripe/webhooks`: public by design, authenticated per delivery by
+  Stripe's signature over the raw body, idempotent via the event ledger.
+- **No blanket forwarding.** Browsers reach core exclusively through
+  purpose-built BFF routes on the Worker, each of which authenticates the
+  actual principal before the service key is attached. The dev-only
+  `/api/core/*` forward exists behind `ALLOW_CORE_DEV_PROXY` (never set in
+  production) for local scripts; `verify-core-proxy.mjs` asserts it is absent
+  in the production shape.
+- **Core is not a public API today.** When merchant backends holding `sk_`
+  become real (component-session minting for identity-bound scopes), a
+  deliberate, versioned public surface (`api.archura.ai`) is opened for
+  exactly those routes — public by decision and documentation, never by
+  forward rule.
+- **Test convention:** authorization tests must pass with edge auth disabled
+  (`RequireEdgeAuth=false`, as the API test server runs) — an endpoint that
+  leans on the perimeter cannot pass its own tests.
+
 ## Namespaces & the tenant → namespace binding
 
 How identity (core) ties to content (edge/local) — added once per-client publishing became

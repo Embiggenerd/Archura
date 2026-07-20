@@ -51,12 +51,21 @@ const { site, token, url } = await claimRes.json();
 console.log(`claimed namespace: sites/${site} → ${url}`);
 
 // --- 2. Create the core tenant + binding (optional) ---
+// Talks to the local core DIRECTLY (the blanket /api/core proxy is dev-only
+// and this script has the keys anyway): CORE_URL + CORE_SERVICE_KEY as
+// printed by dev-up.sh, same convention as verify-core-identity.mjs.
 const admin = envValue('CORE_ADMIN_KEY');
+const CORE = process.env.CORE_URL || 'http://localhost:8080';
+const service = envValue('CORE_SERVICE_KEY');
 if (admin) {
   const origin = new URL(WORKER).origin;
-  const clientRes = await fetch(`${WORKER}/api/core/v1/clients`, {
+  const clientRes = await fetch(`${CORE}/v1/clients`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${admin}` },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${admin}`,
+      ...(service ? { 'X-Archura-Service-Authorization': `Bearer ${service}` } : {}),
+    },
     body: JSON.stringify({
       name: `Test client ${site}`,
       slug: site,

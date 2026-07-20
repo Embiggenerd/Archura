@@ -125,16 +125,13 @@ try {
   const linkA = await mailboxLink(emailA);
   check('mailbox: dev mailbox lists the confirmation link', !!linkA);
   await pageA.goto(linkA, { waitUntil: 'domcontentloaded' });
-  check('confirm: magic link lands on the confirmed page', (await pageA.textContent('body')).includes('Email confirmed'));
-  const pageSnippet = await pageA.locator('#embed-code').inputValue();
   check(
-    'page-sized component: confirmation presents a client-specific embed snippet and preview',
-    pageSnippet.includes('/embed/pk_test_') &&
-      pageSnippet.includes('/Landing.js') &&
-      pageSnippet.includes('<archura-landing>') &&
-      (await pageA.getByRole('link', { name: 'Open preview' }).count()) === 1,
-    pageSnippet
+    'confirm: magic link redirects straight to the published site',
+    new URL(pageA.url()).pathname === `/s/${siteA}/`,
+    pageA.url()
   );
+  await pageA.locator('archura-hero').waitFor({ state: 'visible', timeout: 20000 });
+  check('confirm: the redirected page renders the published page', true);
 
   // The open loader tab promotes-on-poll and reloads into the live site
   await sitePageA.locator('archura-hero').waitFor({ state: 'visible', timeout: 20000 });
@@ -152,10 +149,11 @@ try {
 
   await pageA.goto(`${WORKER}/dashboard/`, { waitUntil: 'domcontentloaded' });
   await pageA.locator('.card').first().waitFor({ timeout: 15000 });
+  await pageA.locator('.card').filter({ hasText: siteA }).waitFor({ timeout: 15000 });
   const dashA = await pageA.textContent('body');
   check(
-    "dashboard: flow 2's account is signed in and shows the deployed site",
-    dashA.includes(emailA) && dashA.includes(siteA),
+    "dashboard: flow 2's account is signed in, shows the deployed site and its embed code",
+    dashA.includes(emailA) && dashA.includes(siteA) && dashA.includes('Get embed code'),
     dashA.slice(0, 200)
   );
   const listA = await pageA.evaluate(async (site) => {
@@ -193,18 +191,13 @@ try {
   const componentLink = await mailboxLink(componentEmail);
   check('component deploy: dev mailbox lists the confirmation link', !!componentLink);
   await pageC.goto(componentLink, { waitUntil: 'domcontentloaded' });
-  const componentConfirmation = await pageC.textContent('body');
-  const componentSnippet = await pageC.locator('#embed-code').inputValue();
   check(
-    'smaller component: confirmation presents a hosted preview and client-specific embed snippet',
-    componentConfirmation.includes('component is published') &&
-      componentConfirmation.includes('Open preview') &&
-      componentSnippet.includes('/embed/pk_test_') &&
-      componentSnippet.includes('/StripePayment.js') &&
-      componentSnippet.includes('<archura-stripe-payment') &&
-      componentSnippet.includes('amount='),
-    JSON.stringify({ componentConfirmation, componentSnippet })
+    'smaller component: confirmation redirects straight to the hosted component',
+    new URL(pageC.url()).pathname === `/s/${componentSite}/`,
+    pageC.url()
   );
+  await pageC.locator('archura-stripe-payment').waitFor({ state: 'visible', timeout: 20000 });
+  check('smaller component: the redirected page renders the hosted component', true);
 
   await pageC.goto(`${WORKER}/dashboard/`, { waitUntil: 'domcontentloaded' });
   const componentCard = pageC.locator('.card').filter({ hasText: componentSite });
@@ -212,9 +205,9 @@ try {
   const componentCardText = await componentCard.textContent();
   check(
     'component dashboard: offers component editing, hosted preview, and embed code',
-    componentCardText.includes('Edit component') &&
+    componentCardText.includes('Edit') &&
       componentCardText.includes('Get embed code') &&
-      componentCardText.includes('Open preview'),
+      componentCardText.includes('Open site'),
     componentCardText
   );
   const componentPreview = await contextC.newPage();

@@ -52,6 +52,7 @@ func TestProductionForcesEdgeAuthAndRequiredValues(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("PLATFORM_ADMIN_KEY", "adm_live_example")
 	t.Setenv("CORE_SERVICE_KEY", "svc_live_0123456789012345678901234567890123456789012")
+	t.Setenv("CORE_INTERNAL_KEY", "int_live_0123456789012345678901234567890123456789012")
 	t.Setenv("CONFIRM_URL_BASE", "https://archura.ai/confirm")
 	t.Setenv("CLOUDFLARE_EMAIL_ACCOUNT_ID", "account-id")
 	t.Setenv("CLOUDFLARE_EMAIL_API_TOKEN", "email-token")
@@ -77,13 +78,14 @@ func TestProductionRejectsMissingValuesAndMismatchedServiceKey(t *testing.T) {
 	t.Setenv("EMAIL_FROM", "")
 
 	_, err := Load()
-	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") || !strings.Contains(err.Error(), "PLATFORM_ADMIN_KEY") || !strings.Contains(err.Error(), "CORE_SERVICE_KEY") {
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") || !strings.Contains(err.Error(), "PLATFORM_ADMIN_KEY") || !strings.Contains(err.Error(), "CORE_SERVICE_KEY") || !strings.Contains(err.Error(), "CORE_INTERNAL_KEY") {
 		t.Fatalf("Load error = %v, want all missing production variables", err)
 	}
 
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("PLATFORM_ADMIN_KEY", "adm_live_example")
 	t.Setenv("CORE_SERVICE_KEY", "svc_test_0123456789012345678901234567890123456789012")
+	t.Setenv("CORE_INTERNAL_KEY", "int_live_0123456789012345678901234567890123456789012")
 	t.Setenv("CONFIRM_URL_BASE", "https://archura.ai/confirm")
 	t.Setenv("CLOUDFLARE_EMAIL_ACCOUNT_ID", "account-id")
 	t.Setenv("CLOUDFLARE_EMAIL_API_TOKEN", "email-token")
@@ -91,6 +93,13 @@ func TestProductionRejectsMissingValuesAndMismatchedServiceKey(t *testing.T) {
 	_, err = Load()
 	if err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("Load error = %v, want environment mismatch", err)
+	}
+
+	t.Setenv("CORE_SERVICE_KEY", "svc_live_0123456789012345678901234567890123456789012")
+	t.Setenv("CORE_INTERNAL_KEY", "int_test_0123456789012345678901234567890123456789012")
+	_, err = Load()
+	if err == nil || !strings.Contains(err.Error(), "CORE_INTERNAL_KEY does not match") {
+		t.Fatalf("Load error = %v, want internal key environment mismatch", err)
 	}
 }
 

@@ -194,9 +194,52 @@ func TestBillingRecoveryReleasesSiteBinding(t *testing.T) {
 	repo, server, _, organizationID := billingTestServer(t, "owner")
 	repo.sites = map[string]string{"expired-site": organizationID}
 	response := performRequest(server.Router(), http.MethodDelete,
-		"/v1/organizations/"+organizationID+"/sites/expired-site", "", "")
+		"/v1/organizations/"+organizationID+"/sites/expired-site", "", server.cfg.CoreInternalKey)
 	if response.Code != http.StatusNoContent || repo.sites["expired-site"] != "" {
 		t.Fatalf("release status=%d sites=%+v body=%s", response.Code, repo.sites, response.Body.String())
+	}
+}
+
+// Doctrine: reachability is never authorization. These endpoints must
+// self-defend even with edge auth off (as it is throughout this test server).
+func TestMachineEndpointsRejectCallersWithoutInternalKey(t *testing.T) {
+	repo, server, sessionToken, organizationID := billingTestServer(t, "owner")
+	repo.sites = map[string]string{"expired-site": organizationID}
+
+	for name, bearer := range map[string]string{"no credential": "", "session is not the internal key": sessionToken} {
+		release := performRequest(server.Router(), http.MethodDelete,
+			"/v1/organizations/"+organizationID+"/sites/expired-site", "", bearer)
+		if release.Code != http.StatusUnauthorized || repo.sites["expired-site"] != organizationID {
+			t.Fatalf("release with %s: status=%d sites=%+v", name, release.Code, repo.sites)
+		}
+	}
+
+	entitlement := performRequest(server.Router(), http.MethodGet,
+		"/v1/organizations/"+organizationID+"/entitlement", "", "")
+	if entitlement.Code != http.StatusUnauthorized {
+		t.Fatalf("entitlement without credential: status=%d body=%s", entitlement.Code, entitlement.Body.String())
+	}
+}
+
+func TestEntitlementAllowsInternalKeyAndMemberSession(t *testing.T) {
+	_, server, sessionToken, organizationID := billingTestServer(t, "member")
+
+	viaInternal := performRequest(server.Router(), http.MethodGet,
+		"/v1/organizations/"+organizationID+"/entitlement", "", server.cfg.CoreInternalKey)
+	if viaInternal.Code != http.StatusOK {
+		t.Fatalf("entitlement via internal key: status=%d body=%s", viaInternal.Code, viaInternal.Body.String())
+	}
+
+	viaSession := performRequest(server.Router(), http.MethodGet,
+		"/v1/organizations/"+organizationID+"/entitlement", "", sessionToken)
+	if viaSession.Code != http.StatusOK {
+		t.Fatalf("entitlement via member session: status=%d body=%s", viaSession.Code, viaSession.Body.String())
+	}
+
+	otherOrg := performRequest(server.Router(), http.MethodGet,
+		"/v1/organizations/some-other-organization/entitlement", "", sessionToken)
+	if otherOrg.Code != http.StatusNotFound {
+		t.Fatalf("entitlement for non-membership org: status=%d body=%s", otherOrg.Code, otherOrg.Body.String())
 	}
 }
 
@@ -221,9 +264,13 @@ func billingTestServer(t *testing.T, role string) (*fakeRepository, *Server, str
 		}},
 		},
 	}
+	internalKey, err := archauth.Generate("int", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
 	server := NewServer(config.Config{
 		Env: "dev", StripeBasicPriceID: "price_basic", StripeWebhookSecret: "test-webhook-signature",
-		BillingPublicOrigin: "http://localhost:8787",
+		BillingPublicOrigin: "http://localhost:8787", CoreInternalKey: internalKey,
 	}, repo, slog.Default())
 	return repo, server, token, organizationID
 }

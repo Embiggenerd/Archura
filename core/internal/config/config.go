@@ -18,7 +18,8 @@ type Config struct {
 	MetricsPort         string
 	DatabaseURL         string // empty in local scaffold runs => DB features disabled
 	PlatformAdminKey    string // gates platform-admin endpoints (client onboarding)
-	CoreServiceKey      string // authenticates the Cloudflare Worker to the core
+	CoreServiceKey      string // authenticates the Cloudflare Worker to the core (transport)
+	CoreInternalKey     string // per-request auth for machine-invoked endpoints (Worker cron/serving)
 	ConfirmURLBase      string // Public Worker confirmation URL; required in production and for local email links
 	EmailAccountID      string // Cloudflare account used by Email Service in production
 	EmailAPIToken       string // Cloudflare Email Service API token
@@ -42,6 +43,7 @@ func Load() (Config, error) {
 		DatabaseURL:         os.Getenv("DATABASE_URL"),
 		PlatformAdminKey:    os.Getenv("PLATFORM_ADMIN_KEY"),
 		CoreServiceKey:      os.Getenv("CORE_SERVICE_KEY"),
+		CoreInternalKey:     os.Getenv("CORE_INTERNAL_KEY"),
 		ConfirmURLBase:      os.Getenv("CONFIRM_URL_BASE"),
 		EmailAccountID:      os.Getenv("CLOUDFLARE_EMAIL_ACCOUNT_ID"),
 		EmailAPIToken:       os.Getenv("CLOUDFLARE_EMAIL_API_TOKEN"),
@@ -76,6 +78,9 @@ func (c Config) Validate() error {
 		if c.CoreServiceKey == "" {
 			missing = append(missing, "CORE_SERVICE_KEY")
 		}
+		if c.CoreInternalKey == "" {
+			missing = append(missing, "CORE_INTERNAL_KEY")
+		}
 		if c.ConfirmURLBase == "" {
 			missing = append(missing, "CONFIRM_URL_BASE")
 		}
@@ -100,6 +105,9 @@ func (c Config) Validate() error {
 	}
 	if c.CoreServiceKey != "" && !archauth.HasKindForEnv(c.CoreServiceKey, "svc", c.Env) {
 		return errors.New("CORE_SERVICE_KEY does not match ARCHURA_ENV")
+	}
+	if c.CoreInternalKey != "" && !archauth.HasKindForEnv(c.CoreInternalKey, "int", c.Env) {
+		return errors.New("CORE_INTERNAL_KEY does not match ARCHURA_ENV")
 	}
 	billingValues := []string{c.StripeSecretKey, c.StripeWebhookSecret, c.StripeBasicPriceID, c.BillingPublicOrigin}
 	billingSet := 0

@@ -43,7 +43,7 @@ func HasKind(value, kind string) bool {
 
 func prefixFor(kind, env string) (string, error) {
 	switch kind {
-	case "adm", "pk", "sk", "ct", "cmp", "ses", "svc", "cfm", "sess":
+	case "adm", "pk", "sk", "ct", "cmp", "ses", "svc", "cfm", "sess", "int":
 	default:
 		return "", fmt.Errorf("unsupported key kind %q", kind)
 	}

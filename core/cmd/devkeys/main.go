@@ -24,8 +24,11 @@ func main() {
 	case "service":
 		prefix = "svc"
 		label = "CORE_SERVICE_KEY"
+	case "internal":
+		prefix = "int"
+		label = "CORE_INTERNAL_KEY"
 	default:
-		fmt.Fprintln(os.Stderr, "usage: go run ./cmd/devkeys [admin|publishable|service]")
+		fmt.Fprintln(os.Stderr, "usage: go run ./cmd/devkeys [admin|publishable|service|internal]")
 		os.Exit(2)
 	}
 
