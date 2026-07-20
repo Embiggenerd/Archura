@@ -62,6 +62,16 @@
       const escapeHtml = (value) => String(value ?? '')
         .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+      const billingLabel = (billing) => {
+        if (billing?.status === 'active') return 'Active';
+        if (billing?.status === 'trialing') {
+          const days = Math.max(0, Math.ceil((new Date(billing.trial_ends_at).getTime() - Date.now()) / 86400000));
+          return `${days}-day trial`;
+        }
+        if (billing?.status === 'grace') return 'Publishing paused';
+        if (billing?.status === 'expired') return 'Subscription required';
+        return 'Trial not started';
+      };
 
       function renderRegister() {
         const invited = new URLSearchParams(location.search).has('invitation');
@@ -123,7 +133,7 @@
               const count = organization.component_count == null ? 'Components unavailable' : `${organization.component_count} component${organization.component_count === 1 ? '' : 's'}`;
               const sites = organization.sites?.length ?? 0;
               return `<article class="organization"><div class="row"><span class="mark" aria-hidden="true">${escapeHtml(organization.name?.slice(0, 1).toUpperCase() || 'O')}</span>
-                <div class="organization-copy"><span class="organization-name">${escapeHtml(organization.name)}</span><div class="row"><span class="badge">${escapeHtml(organization.role)}</span>${organization.is_default ? '<span class="badge">Default</span>' : ''}<span class="small muted">${sites} site${sites === 1 ? '' : 's'} · ${count}</span></div></div></div>
+                <div class="organization-copy"><span class="organization-name">${escapeHtml(organization.name)}</span><div class="row"><span class="badge">${escapeHtml(organization.role)}</span>${organization.is_default ? '<span class="badge">Default</span>' : ''}<span class="badge">${escapeHtml(billingLabel(organization.billing))}</span><span class="small muted">${sites} site${sites === 1 ? '' : 's'} · ${count}</span></div></div></div>
                 <div class="actions"><a class="button ${organization.is_default ? 'primary' : ''}" href="/dashboard/?organization=${encodeURIComponent(organization.id)}">Open dashboard</a></div></article>`;
             }).join('') || '<div class="empty">No organizations yet.</div>'}</div>
           </section>

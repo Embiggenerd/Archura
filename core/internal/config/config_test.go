@@ -93,3 +93,33 @@ func TestProductionRejectsMissingValuesAndMismatchedServiceKey(t *testing.T) {
 		t.Fatalf("Load error = %v, want environment mismatch", err)
 	}
 }
+
+func TestStripeBillingConfigurationIsAllOrNothing(t *testing.T) {
+	t.Setenv("ARCHURA_ENV", "dev")
+	t.Setenv("STRIPE_SECRET_KEY", "sk_test_example")
+	t.Setenv("STRIPE_WEBHOOK_SECRET", "")
+	t.Setenv("STRIPE_BASIC_PRICE_ID", "")
+	t.Setenv("BILLING_PUBLIC_ORIGIN", "")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "requires") {
+		t.Fatalf("Load error = %v, want complete billing group error", err)
+	}
+
+	t.Setenv("STRIPE_WEBHOOK_SECRET", "whsec_example")
+	t.Setenv("STRIPE_BASIC_PRICE_ID", "price_example")
+	t.Setenv("BILLING_PUBLIC_ORIGIN", "http://localhost:8787")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StripeBasicPriceID != "price_example" {
+		t.Fatalf("StripeBasicPriceID = %q", cfg.StripeBasicPriceID)
+	}
+
+	t.Setenv("BILLING_PUBLIC_ORIGIN", "http://localhost:8787/not-an-origin")
+	_, err = Load()
+	if err == nil || !strings.Contains(err.Error(), "origin") {
+		t.Fatalf("Load error = %v, want origin validation", err)
+	}
+}

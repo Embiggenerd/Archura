@@ -26,6 +26,10 @@ const BASE_RESET_CSS = `*, *::before, *::after { box-sizing: border-box; } body 
 const ASSET_TYPES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
 const CORE_SERVICE_HEADER = 'X-Archura-Service-Authorization';
 const CORE_CLIENT_IP_HEADER = 'X-Archura-Client-IP';
+const JSON_BODY_LIMIT = 1 * 1024 * 1024;
+const EMBED_BODY_LIMIT = 512 * 1024;
+const ASSET_BODY_LIMIT = 5 * 1024 * 1024;
+const BILLING_RECOVERY_WINDOW_MS = 60 * 24 * 60 * 60 * 1000;
 
 // Keep in sync with GOOGLE_FONTS in src/editor/ArchuraEditorController.ts
 const GOOGLE_FONTS = ['Inter', 'Poppins', 'Roboto', 'Montserrat', 'Playfair Display', 'Lora', 'Merriweather', 'DM Sans'];
@@ -47,7 +51,16 @@ async function tokenMatchesHash(token, expectedHex) {
   for (let index = 0; index < expected.length; index += 1) {
     expected[index] = Number.parseInt(expectedHex.slice(index * 2, index * 2 + 2), 16);
   }
-  return crypto.subtle.timingSafeEqual(provided, expected);
+  return constantTimeEqual(new Uint8Array(provided), expected);
+}
+
+function constantTimeEqual(left, right) {
+  if (left.byteLength !== right.byteLength) return false;
+  let difference = 0;
+  for (let index = 0; index < left.byteLength; index += 1) {
+    difference |= left[index] ^ right[index];
+  }
+  return difference === 0;
 }
 
 // API responses are session/state-dependent and must never be heuristically
@@ -123,6 +136,10 @@ export default {
     }
     return assetResponse;
   },
+
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(cleanupExpiredSites(env));
+  },
 };
 
 // Environment-correct site link. PUBLIC_ORIGIN (set in .dev.vars by
@@ -163,30 +180,58 @@ function withCors(response) {
   return new Response(response.body, { status: response.status, headers });
 }
 
-/**
- * Claim gating: when CLAIM_IP_ALLOWLIST is set (comma-separated; entries may
- * end in `*` for prefix match, e.g. an IPv6 /64), only those IPs may claim
- * sites. Loopback is exempt so `wrangler dev` keeps working — in production
- * Cloudflare sets CF-Connecting-IP itself, so it can never be loopback.
- */
-function claimAllowed(request, env) {
-  const allowlist = (env.CLAIM_IP_ALLOWLIST ?? '')
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-  if (allowlist.length === 0) return true;
+async function readBoundedBody(request, limit) {
+  const declared = Number(request.headers.get('Content-Length') ?? 0);
+  if (Number.isFinite(declared) && declared > limit) throw new RangeError('body_too_large');
+  if (!request.body) return new Uint8Array();
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) throw new RangeError('body_too_large');
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  }
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
 
-  const ip = request.headers.get('CF-Connecting-IP') ?? '';
-  if (ip === '127.0.0.1' || ip === '::1') return true;
-  return allowlist.some((entry) =>
-    entry.endsWith('*') ? ip.startsWith(entry.slice(0, -1)) : ip === entry
-  );
+async function readBoundedJSON(request, limit = JSON_BODY_LIMIT) {
+  const body = await readBoundedBody(request, limit);
+  return JSON.parse(new TextDecoder().decode(body));
+}
+
+async function rateLimitRequest(request, env, operation) {
+  if (!env.CORE_RATE_LIMITER) return null;
+  const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const { success } = await env.CORE_RATE_LIMITER.limit({ key: `${operation}:${clientIP}` });
+  if (success) return null;
+  return new Response(JSON.stringify({ error: 'Too many requests' }), {
+    status: 429,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Retry-After': '60' },
+  });
 }
 
 // --- Core (Go) plumbing: service-authed requests + account sessions ---
 
 function coreConfigured(env) {
   return !!(env.CORE_URL && env.CORE_SERVICE_KEY);
+}
+
+function anonymousSiteClaimsAllowed(env) {
+  return env.ALLOW_ANONYMOUS_SITE_CLAIMS === 'true';
 }
 
 function coreRequest(env, path, { method, body, bearer } = {}) {
@@ -218,6 +263,118 @@ async function sessionAccount(request, env) {
   return response.json();
 }
 
+async function organizationEntitlement(env, organizationId, { fresh = false } = {}) {
+  if (!coreConfigured(env) || !organizationId) throw new Error('billing_unavailable');
+  const cache = globalThis.caches?.default;
+  const cacheKey = new Request(`https://entitlement.archura.internal/${encodeURIComponent(organizationId)}`);
+  if (!fresh && cache) {
+    const cached = await cache.match(cacheKey);
+    if (cached) return cached.json();
+  }
+  const response = await coreRequest(env, `/v1/organizations/${encodeURIComponent(organizationId)}/entitlement`);
+  if (!response.ok) {
+    const error = new Error(`billing_${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  const entitlement = await response.json();
+  if (cache) {
+    await cache.put(cacheKey, new Response(JSON.stringify(entitlement), {
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=60' },
+    }));
+  }
+  return entitlement;
+}
+
+async function startOrganizationTrial(env, organizationId, bearer) {
+  if (!coreConfigured(env) || !organizationId || !bearer) throw new Error('billing_unavailable');
+  const response = await coreRequest(
+    env,
+    `/v1/organizations/${encodeURIComponent(organizationId)}/billing/start-trial`,
+    { method: 'POST', bearer }
+  );
+  if (!response.ok) throw new Error(`billing_${response.status}`);
+  return response.json();
+}
+
+async function requireSiteEditEntitlement(request, env, site, { startTrial = false } = {}) {
+  if (!coreConfigured(env)) return null;
+  const metaObject = await env.ARTIFACTS.get(`sites/${site}/meta.json`);
+  const meta = metaObject ? await metaObject.json() : null;
+  if (!meta?.organizationId) {
+    if (anonymousSiteClaimsAllowed(env)) return null;
+    return json({ error: 'This site must belong to an organization before it can be published.' }, 409);
+  }
+  let entitlement;
+  try {
+    entitlement = startTrial && !meta.trialStartedAt
+      ? await startOrganizationTrial(env, meta.organizationId, sessionTokenFromRequest(request))
+      : await organizationEntitlement(env, meta.organizationId, { fresh: true });
+  } catch {
+    return json({ error: 'Billing is temporarily unavailable.' }, 503);
+  }
+  if (!entitlement.can_edit) {
+    return json({ error: 'This organization needs an active subscription to publish changes.', billing: entitlement }, 402);
+  }
+  if (startTrial && !meta.trialStartedAt) {
+    await env.ARTIFACTS.put(`sites/${site}/meta.json`, JSON.stringify({
+      ...meta,
+      trialStartedAt: new Date().toISOString(),
+    }));
+  }
+  return null;
+}
+
+function billingRecoveryDeadline(entitlement) {
+  const servingEndedAt = Date.parse(entitlement.serve_grace_ends_at ?? '');
+  const start = Number.isFinite(servingEndedAt) ? servingEndedAt : Date.now();
+  return new Date(start + BILLING_RECOVERY_WINDOW_MS).toISOString();
+}
+
+async function updateBillingRecoveryMetadata(env, site, meta, entitlement) {
+  if (!site || !meta) return;
+  const metaKey = `sites/${site}/meta.json`;
+  if (entitlement.status === 'expired') {
+    const billingRecoveryDeleteAfter = billingRecoveryDeadline(entitlement);
+    if (meta.billingRecoveryDeleteAfter !== billingRecoveryDeleteAfter) {
+      await env.ARTIFACTS.put(metaKey, JSON.stringify({ ...meta, billingRecoveryDeleteAfter }));
+    }
+    return;
+  }
+  if (entitlement.can_serve && meta.billingRecoveryDeleteAfter) {
+    const { billingRecoveryDeleteAfter: _removed, ...restoredMeta } = meta;
+    await env.ARTIFACTS.put(metaKey, JSON.stringify(restoredMeta));
+  }
+}
+
+async function siteServingDenied(env, meta, site) {
+  if (meta?.moderation?.status === 'suspended') {
+    return new Response('This site is unavailable.', {
+      status: 451,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  }
+  if (!meta?.organizationId || !coreConfigured(env)) return null;
+  try {
+    const entitlement = await organizationEntitlement(env, meta.organizationId);
+    await updateBillingRecoveryMetadata(env, site, meta, entitlement);
+    if (entitlement.can_serve || entitlement.status === 'unstarted') return null;
+    return new Response('This site is unavailable until its subscription is active.', {
+      status: 402,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  } catch (error) {
+    if (error?.status && error.status < 500) {
+      return new Response('This site is unavailable.', {
+        status: 404,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
+      });
+    }
+    console.log(JSON.stringify({ event: 'billing_entitlement_unavailable', organization_id: meta.organizationId }));
+    return null;
+  }
+}
+
 // Publish auth: the bearer token must hash to the claimed site's tokenHash,
 // OR the request carries a session whose account owns the site.
 // Returns null when authorized, or the error Response to return.
@@ -235,27 +392,139 @@ async function requireClaimToken(request, env, site) {
 
 const EMBED_NAME = /^[A-Za-z0-9_-]+\.js$/;
 
+function moderationReasons(artifact) {
+  const html = String(artifact?.snapshot?.html ?? '');
+  const reasons = [];
+  if (/<input\b[^>]*\btype\s*=\s*["']?password\b/i.test(html)) reasons.push('password_collection');
+  if (/<form\b[^>]*\baction\s*=\s*["']?https?:\/\//i.test(html)) reasons.push('external_form_action');
+  if (/<(?:script|iframe|object|embed)\b/i.test(html)) reasons.push('active_embedded_content');
+  if (/\son[a-z]+\s*=/i.test(html)) reasons.push('inline_event_handler');
+  if (/\b(?:href|src|action)\s*=\s*["']?\s*javascript:/i.test(html)) reasons.push('javascript_url');
+  if (/<meta\b[^>]*http-equiv\s*=\s*["']?refresh\b/i.test(html)) reasons.push('meta_refresh');
+  const links = html.match(/<a\b[^>]*\bhref\s*=/gi)?.length ?? 0;
+  const externalLinks = html.match(/<a\b[^>]*\bhref\s*=\s*["']?https?:\/\//gi)?.length ?? 0;
+  if (externalLinks >= 20 && externalLinks / Math.max(links, 1) >= 0.8) reasons.push('excessive_external_links');
+  return [...new Set(reasons)];
+}
+
+async function recordModerationResult(env, site, artifact) {
+  const metaKey = `sites/${site}/meta.json`;
+  const metaObject = await env.ARTIFACTS.get(metaKey);
+  if (!metaObject) return;
+  const meta = await metaObject.json();
+  const reasons = moderationReasons(artifact);
+  const suspended = meta.moderation?.status === 'suspended';
+  const now = new Date().toISOString();
+  const moderation = {
+    status: suspended ? 'suspended' : reasons.length ? 'flagged' : 'active',
+    reasons,
+    updatedAt: now,
+    ...(reasons.length ? { flaggedAt: meta.moderation?.flaggedAt ?? now } : {}),
+    ...(suspended ? { suspendedAt: meta.moderation?.suspendedAt ?? now } : {}),
+  };
+  await env.ARTIFACTS.put(metaKey, JSON.stringify({ ...meta, moderation }));
+  const flagKey = `moderation/flags/${site}.json`;
+  if (reasons.length || suspended) {
+    await env.ARTIFACTS.put(flagKey, JSON.stringify({
+      site,
+      organizationId: meta.organizationId ?? null,
+      status: moderation.status,
+      reasons,
+      updatedAt: now,
+    }));
+    console.log(JSON.stringify({
+      event: 'content_moderation_flagged', site, organization_id: meta.organizationId ?? null,
+      reasons, status: moderation.status,
+    }));
+  } else {
+    await env.ARTIFACTS.delete(flagKey);
+  }
+}
+
+async function moderationAdminAuthorized(request, env) {
+  const configured = env.MODERATION_ADMIN_KEY ?? '';
+  const provided = (request.headers.get('Authorization') ?? '').replace(/^Bearer\s+/, '');
+  if (!configured || !provided) return false;
+  const configuredDigest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(configured));
+  const providedDigest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(provided));
+  return constantTimeEqual(new Uint8Array(configuredDigest), new Uint8Array(providedDigest));
+}
+
+async function handleModerationApi(request, env, url) {
+  if (!(await moderationAdminAuthorized(request, env))) return json({ error: 'Unauthorized' }, 401);
+  if (url.pathname === '/api/moderation/flags' && request.method === 'GET') {
+    const objects = await listAllObjects(env.ARTIFACTS, 'moderation/flags/');
+    const flags = [];
+    for (const object of objects) {
+      const stored = await env.ARTIFACTS.get(object.key);
+      if (stored) flags.push(await stored.json());
+    }
+    return json({ flags });
+  }
+  const actionMatch = url.pathname.match(/^\/api\/moderation\/sites\/([^/]+)\/(suspend|restore)$/);
+  if (!actionMatch || request.method !== 'POST' || !SITE_NAME.test(actionMatch[1])) {
+    return json({ error: 'Not found' }, 404);
+  }
+  const [, site, action] = actionMatch;
+  const metaKey = `sites/${site}/meta.json`;
+  const metaObject = await env.ARTIFACTS.get(metaKey);
+  if (!metaObject) return json({ error: 'Not found' }, 404);
+  const meta = await metaObject.json();
+  const now = new Date().toISOString();
+  const reasons = meta.moderation?.reasons ?? [];
+  const moderation = action === 'suspend'
+    ? { ...meta.moderation, status: 'suspended', reasons, suspendedAt: now, updatedAt: now }
+    : { ...meta.moderation, status: reasons.length ? 'flagged' : 'active', reasons, restoredAt: now, updatedAt: now };
+  await env.ARTIFACTS.put(metaKey, JSON.stringify({ ...meta, moderation }));
+  const flagKey = `moderation/flags/${site}.json`;
+  if (moderation.status === 'active') {
+    await env.ARTIFACTS.delete(flagKey);
+  } else {
+    await env.ARTIFACTS.put(flagKey, JSON.stringify({
+      site, organizationId: meta.organizationId ?? null, status: moderation.status, reasons, updatedAt: now,
+    }));
+  }
+  console.log(JSON.stringify({
+    event: `content_moderation_${action}`, site, organization_id: meta.organizationId ?? null,
+  }));
+  return json({ site, moderation });
+}
+
 async function serveApi(request, env, url) {
   if (url.pathname.startsWith('/api/core/')) {
     return proxyCore(request, env, url);
   }
+  if (url.pathname.startsWith('/api/moderation/')) {
+    return handleModerationApi(request, env, url);
+  }
 
   if (url.pathname === '/api/sites' && request.method === 'POST') {
-    if (!claimAllowed(request, env)) {
-      return json({ error: 'Claiming is restricted' }, 403);
-    }
+    const limited = await rateLimitRequest(request, env, 'claim-site');
+    if (limited) return limited;
     let site;
     let organizationId;
     try {
-      ({ site, organizationId } = await request.json());
-    } catch {
+      ({ site, organizationId } = await readBoundedJSON(request));
+    } catch (error) {
+      if (error instanceof RangeError) return json({ error: 'Body too large' }, 413);
       return json({ error: 'Invalid body' }, 400);
+    }
+    const session = await sessionAccount(request, env);
+    if (coreConfigured(env) && !session && !anonymousSiteClaimsAllowed(env)) {
+      return json({ error: 'Sign in before claiming a site' }, 401);
     }
     if (typeof site !== 'string' || !SITE_NAME.test(site) || RESERVED.has(site)) {
       return json({ error: 'Invalid site name' }, 400);
     }
     if (await env.ARTIFACTS.head(`sites/${site}/meta.json`)) {
       return json({ error: 'Site already claimed' }, 409);
+    }
+
+    const organization = organizationId
+      ? session?.organizations?.find((candidate) => candidate.id === organizationId)
+      : session?.organizations?.find((candidate) => candidate.is_default);
+    if (coreConfigured(env) && !organization && !anonymousSiteClaimsAllowed(env)) {
+      return json({ error: 'Organization not found' }, 404);
     }
 
     const token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '');
@@ -273,19 +542,11 @@ async function serveApi(request, env, url) {
       })
     );
 
-    // Claimed with a signed-in session: also record ownership in the core so
-    // the site shows up on the account's dashboard.
-    const sessionToken = sessionTokenFromRequest(request);
+    // Signed-in claims are recorded in core so the organization owns every
+    // artifact and its one billing entitlement covers all of its sites.
     let boundOrganization = null;
-    if (sessionToken && coreConfigured(env)) {
-      const session = await sessionAccount(request, env);
-      const organization = organizationId
-        ? session?.organizations?.find((candidate) => candidate.id === organizationId)
-        : session?.organizations?.find((candidate) => candidate.is_default);
-      if (!organization) {
-        await env.ARTIFACTS.delete(metaKey);
-        return json({ error: 'Organization not found' }, 404);
-      }
+    if (organization) {
+      const sessionToken = sessionTokenFromRequest(request);
       const bind = await coreRequest(env, '/v1/site-ownership', {
         body: { subdomain: site, organization_id: organization.id },
         bearer: sessionToken,
@@ -315,16 +576,16 @@ async function serveApi(request, env, url) {
   // Anonymous deploy (funnel flow 2): stage drafts + reserve the namespace.
   // Confirmation publishes both the hosted preview and stable embed module.
   if (url.pathname === '/api/deploys' && request.method === 'POST') {
-    if (!claimAllowed(request, env)) {
-      return json({ error: 'Deploys are restricted' }, 403);
-    }
+    const limited = await rateLimitRequest(request, env, 'anonymous-deploy');
+    if (limited) return limited;
     if (!coreConfigured(env)) {
       return json({ error: 'Core unavailable' }, 503);
     }
     let body;
     try {
-      body = await request.json();
-    } catch {
+      body = await readBoundedJSON(request);
+    } catch (error) {
+      if (error instanceof RangeError) return json({ error: 'Body too large' }, 413);
       return json({ error: 'Invalid body' }, 400);
     }
     const { site, email, artifact, embeds, targetEmbed } = body ?? {};
@@ -387,16 +648,16 @@ async function serveApi(request, env, url) {
 
   // Register-first (funnel flow 1): email-only confirmation, no subdomain.
   if (url.pathname === '/api/register' && request.method === 'POST') {
-    if (!claimAllowed(request, env)) {
-      return json({ error: 'Registration is restricted' }, 403);
-    }
+    const limited = await rateLimitRequest(request, env, 'email-registration');
+    if (limited) return limited;
     if (!coreConfigured(env)) {
       return json({ error: 'Core unavailable' }, 503);
     }
     let email;
     try {
-      ({ email } = await request.json());
-    } catch {
+      ({ email } = await readBoundedJSON(request));
+    } catch (error) {
+      if (error instanceof RangeError) return json({ error: 'Body too large' }, 413);
       return json({ error: 'Invalid body' }, 400);
     }
     if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -417,8 +678,9 @@ async function serveApi(request, env, url) {
     if (!sessionToken || !coreConfigured(env)) return json({ error: 'Unauthorized' }, 401);
     let body;
     try {
-      body = await request.json();
-    } catch {
+      body = await readBoundedJSON(request);
+    } catch (error) {
+      if (error instanceof RangeError) return json({ error: 'Body too large' }, 413);
       return json({ error: 'Invalid body' }, 400);
     }
     const response = await coreRequest(env, '/v1/organizations', { body, bearer: sessionToken });
@@ -434,13 +696,30 @@ async function serveApi(request, env, url) {
     if (!sessionToken || !coreConfigured(env)) return json({ error: 'Unauthorized' }, 401);
     let body;
     try {
-      body = await request.json();
-    } catch {
+      body = await readBoundedJSON(request);
+    } catch (error) {
+      if (error instanceof RangeError) return json({ error: 'Body too large' }, 413);
       return json({ error: 'Invalid body' }, 400);
     }
     const organizationID = encodeURIComponent(createInvitationMatch[1]);
     const response = await coreRequest(env, `/v1/organizations/${organizationID}/invitations`, {
       body,
+      bearer: sessionToken,
+    });
+    return new Response(response.body, {
+      status: response.status,
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+    });
+  }
+
+  const billingActionMatch = url.pathname.match(/^\/api\/organizations\/([^/]+)\/billing\/(checkout|portal)$/);
+  if (billingActionMatch && request.method === 'POST') {
+    const sessionToken = sessionTokenFromRequest(request);
+    if (!sessionToken || !coreConfigured(env)) return json({ error: 'Unauthorized' }, 401);
+    const organizationID = encodeURIComponent(billingActionMatch[1]);
+    const action = billingActionMatch[2];
+    const response = await coreRequest(env, `/v1/organizations/${organizationID}/billing/${action}`, {
+      method: 'POST',
       bearer: sessionToken,
     });
     return new Response(response.body, {
@@ -526,6 +805,12 @@ async function serveApi(request, env, url) {
     }
 
     if (request.method === 'GET') {
+      const authDenied = await requireClaimToken(request, env, site);
+      if (authDenied) {
+        const metaObject = await env.ARTIFACTS.get(`sites/${site}/meta.json`);
+        const servingDenied = await siteServingDenied(env, metaObject ? await metaObject.json() : null, site);
+        if (servingDenied) return servingDenied;
+      }
       const object = await env.ARTIFACTS.get(`sites/${site}/assets/${name}`);
       if (!object) return json({ error: 'Not found' }, 404);
       return new Response(object.body, {
@@ -537,9 +822,19 @@ async function serveApi(request, env, url) {
     }
 
     if (request.method === 'PUT') {
+      const limited = await rateLimitRequest(request, env, 'asset-upload');
+      if (limited) return limited;
       const denied = await requireClaimToken(request, env, site);
       if (denied) return denied;
-      const body = await request.arrayBuffer();
+      const billingDenied = await requireSiteEditEntitlement(request, env, site);
+      if (billingDenied) return billingDenied;
+      let body;
+      try {
+        body = await readBoundedBody(request, ASSET_BODY_LIMIT);
+      } catch (error) {
+        if (error instanceof RangeError) return json({ error: 'Asset too large' }, 413);
+        return json({ error: 'Invalid body' }, 400);
+      }
       const hash = (await sha256Hex(body)).slice(0, 12);
       const finalName = `${hash}.${ext}`;
       await env.ARTIFACTS.put(`sites/${site}/assets/${finalName}`, body, {
@@ -558,15 +853,35 @@ async function serveApi(request, env, url) {
     const key = `sites/${site}/${decodeURIComponent(artifactPath)}.json`;
 
     if (request.method === 'GET') {
+      const authDenied = await requireClaimToken(request, env, site);
+      if (authDenied) {
+        const metaObject = await env.ARTIFACTS.get(`sites/${site}/meta.json`);
+        const servingDenied = await siteServingDenied(env, metaObject ? await metaObject.json() : null, site);
+        if (servingDenied) return servingDenied;
+      }
       const object = await env.ARTIFACTS.get(key);
       if (!object) return json({ error: 'Not found' }, 404);
       return new Response(object.body, { headers: { 'Content-Type': 'application/json' } });
     }
 
     if (request.method === 'PUT') {
+      const limited = await rateLimitRequest(request, env, 'artifact-publish');
+      if (limited) return limited;
       const denied = await requireClaimToken(request, env, site);
       if (denied) return denied;
-      await env.ARTIFACTS.put(key, request.body);
+      const billingDenied = await requireSiteEditEntitlement(request, env, site, { startTrial: true });
+      if (billingDenied) return billingDenied;
+      let body;
+      let artifact;
+      try {
+        body = await readBoundedBody(request, JSON_BODY_LIMIT);
+        artifact = JSON.parse(new TextDecoder().decode(body));
+      } catch (error) {
+        if (error instanceof RangeError) return json({ error: 'Artifact too large' }, 413);
+        return json({ error: 'Invalid artifact' }, 400);
+      }
+      await env.ARTIFACTS.put(key, body, { httpMetadata: { contentType: 'application/json' } });
+      await recordModerationResult(env, site, artifact);
       return new Response(null, { status: 204 });
     }
   }
@@ -581,12 +896,29 @@ async function serveApi(request, env, url) {
       return json({ error: 'Bad request' }, 400);
     }
     if (request.method === 'GET') {
+      const authDenied = await requireClaimToken(request, env, site);
+      if (authDenied) {
+        const metaObject = await env.ARTIFACTS.get(`sites/${site}/meta.json`);
+        const servingDenied = await siteServingDenied(env, metaObject ? await metaObject.json() : null, site);
+        if (servingDenied) return withCors(servingDenied);
+      }
       return serveEmbed(env, site, name);
     }
     if (request.method === 'PUT') {
+      const limited = await rateLimitRequest(request, env, 'embed-publish');
+      if (limited) return limited;
       const denied = await requireClaimToken(request, env, site);
       if (denied) return denied;
-      await env.ARTIFACTS.put(`sites/${site}/embed/${name}`, request.body, {
+      const billingDenied = await requireSiteEditEntitlement(request, env, site);
+      if (billingDenied) return billingDenied;
+      let body;
+      try {
+        body = await readBoundedBody(request, EMBED_BODY_LIMIT);
+      } catch (error) {
+        if (error instanceof RangeError) return json({ error: 'Embed too large' }, 413);
+        return json({ error: 'Invalid body' }, 400);
+      }
+      await env.ARTIFACTS.put(`sites/${site}/embed/${name}`, body, {
         httpMetadata: { contentType: 'text/javascript; charset=utf-8' },
       });
       return new Response(null, { status: 204 });
@@ -707,28 +1039,40 @@ async function handleConfirm(request, env, url) {
 
   const { account, organization, subdomain, session } = await response.json();
   let embedSnippet = '';
+  let publishingDelayed = false;
   if (subdomain) {
     const metaKey = `sites/${subdomain}/meta.json`;
     const metaObj = await env.ARTIFACTS.get(metaKey);
     if (metaObj) {
       const meta = await metaObj.json();
       if (meta.status === 'drafted') {
-        await promoteSite(env, subdomain);
-        await env.ARTIFACTS.put(
-          metaKey,
-          JSON.stringify({
-            ...meta,
-            status: 'published',
-            ownerAccountId: account.id,
-            organizationId: organization.id,
-            publishableKey: organization.publishable_key,
-            confirmedAt: new Date().toISOString(),
-            publishedAt: new Date().toISOString(),
-          })
-        );
+        try {
+          await startOrganizationTrial(env, organization.id, session.token);
+          await promoteSite(env, subdomain);
+          await env.ARTIFACTS.put(
+            metaKey,
+            JSON.stringify({
+              ...meta,
+              status: 'published',
+              ownerAccountId: account.id,
+              organizationId: organization.id,
+              publishableKey: organization.publishable_key,
+              trialStartedAt: new Date().toISOString(),
+              confirmedAt: new Date().toISOString(),
+              publishedAt: new Date().toISOString(),
+            })
+          );
+          const artifactPath = Array.isArray(meta.componentPath) && meta.componentPath.length > 0
+            ? meta.componentPath.join('/')
+            : HOME_ARTIFACT;
+          const publishedArtifact = await env.ARTIFACTS.get(`sites/${subdomain}/${artifactPath}.json`);
+          if (publishedArtifact) await recordModerationResult(env, subdomain, await publishedArtifact.json());
+        } catch {
+          publishingDelayed = true;
+        }
       }
-      await bindEmbedIdentity(env, subdomain, organization);
-      if (meta.embedName && meta.embedTag) {
+      if (!publishingDelayed) await bindEmbedIdentity(env, subdomain, organization);
+      if (!publishingDelayed && meta.embedName && meta.embedTag) {
         const artifactPath = Array.isArray(meta.componentPath) && meta.componentPath.length > 0
           ? meta.componentPath.join('/')
           : HOME_ARTIFACT;
@@ -745,11 +1089,13 @@ async function handleConfirm(request, env, url) {
   const siteUrl = subdomain ? siteUrlFor(request, env, subdomain) : null;
   const page = messagePage(
     'Email confirmed',
-    subdomain
+    publishingDelayed
+      ? 'Your account is ready, but publishing is temporarily delayed. Open your account and try publishing again.'
+      : subdomain
       ? 'Your component is published. Preview it or copy its embed code below.'
       : 'You are signed in.',
-    [...(siteUrl ? [[siteUrl, 'Open preview']] : []), ['/account/', 'Go to your account']],
-    200,
+    [...(siteUrl && !publishingDelayed ? [[siteUrl, 'Open preview']] : []), ['/account/', 'Go to your account']],
+    publishingDelayed ? 503 : 200,
     embedSnippet
   );
   const headers = new Headers(page.headers);
@@ -758,7 +1104,7 @@ async function handleConfirm(request, env, url) {
     'Set-Cookie',
     `${SESSION_COOKIE}=${session.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${secure}`
   );
-  return new Response(page.body, { status: 200, headers });
+  return new Response(page.body, { status: page.status, headers });
 }
 
 async function serveEmbed(env, site, name) {
@@ -837,6 +1183,8 @@ async function servePublicEmbed(env, publishableKey, siteId, name) {
   ) {
     return json({ error: 'Not found' }, 404);
   }
+  const servingDenied = await siteServingDenied(env, meta, identity.site);
+  if (servingDenied) return withCors(servingDenied);
   return serveEmbed(env, identity.site, name);
 }
 
@@ -849,6 +1197,47 @@ async function listAllObjects(bucket, prefix) {
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
   return objects;
+}
+
+async function cleanupExpiredSites(env) {
+  if (!coreConfigured(env)) return;
+  const listed = await listAllObjects(env.ARTIFACTS, 'sites/');
+  const metaObjects = listed.filter((object) => /^sites\/[^/]+\/meta\.json$/.test(object.key));
+  const entitlements = new Map();
+  for (const object of metaObjects) {
+    const site = object.key.split('/')[1];
+    const stored = await env.ARTIFACTS.get(object.key);
+    if (!stored) continue;
+    const meta = await stored.json();
+    if (!meta.organizationId) continue;
+    if (!entitlements.has(meta.organizationId)) {
+      entitlements.set(
+        meta.organizationId,
+        organizationEntitlement(env, meta.organizationId, { fresh: true }).catch(() => null)
+      );
+    }
+    const entitlement = await entitlements.get(meta.organizationId);
+    if (!entitlement) continue;
+    await updateBillingRecoveryMetadata(env, site, meta, entitlement);
+    if (entitlement.status !== 'expired') continue;
+    const deleteAfter = billingRecoveryDeadline(entitlement);
+    if (Date.now() < Date.parse(deleteAfter)) continue;
+    const released = await coreRequest(
+      env,
+      `/v1/organizations/${encodeURIComponent(meta.organizationId)}/sites/${encodeURIComponent(site)}`,
+      { method: 'DELETE' }
+    ).catch(() => null);
+    if (!released?.ok) continue;
+    const siteObjects = await listAllObjects(env.ARTIFACTS, `sites/${site}/`);
+    for (const siteObject of siteObjects) await env.ARTIFACTS.delete(siteObject.key);
+    if (meta.publishableKey && meta.siteId) {
+      await env.ARTIFACTS.delete(`embed-identities/${meta.publishableKey}/${meta.siteId}.json`);
+    }
+    await env.ARTIFACTS.delete(`moderation/flags/${site}.json`);
+    console.log(JSON.stringify({
+      event: 'billing_recovery_expired', site, organization_id: meta.organizationId,
+    }));
+  }
 }
 
 async function proxyCore(request, env, url) {
@@ -973,6 +1362,9 @@ async function serveSite(request, env, site, path, base) {
       JSON.stringify({ ...meta, status: 'published', publishedAt: new Date().toISOString() })
     );
   }
+
+  const servingDenied = await siteServingDenied(env, meta, site);
+  if (servingDenied) return servingDenied;
 
   // Per-client embed modules on the site host: /embed/<Component>.js
   const embedMatch = path.match(/^\/embed\/([^/]+)$/);

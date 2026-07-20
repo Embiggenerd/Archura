@@ -36,6 +36,10 @@ is added to chi without being documented.
 | `CLOUDFLARE_EMAIL_ACCOUNT_ID` | — | Cloudflare account used for production transactional email |
 | `CLOUDFLARE_EMAIL_API_TOKEN` | — | Email Service API token; keep secret |
 | `EMAIL_FROM`         | —       | verified Email Service sender address  |
+| `STRIPE_SECRET_KEY`  | —       | Stripe test/live secret; keep server-side |
+| `STRIPE_WEBHOOK_SECRET` | —    | signing secret for `POST /stripe/webhooks` |
+| `STRIPE_BASIC_PRICE_ID` | —    | recurring $5/month Stripe Price ID |
+| `BILLING_PUBLIC_ORIGIN` | —    | Worker origin for Checkout and portal returns |
 | `REQUIRE_EDGE_AUTH`  | `false` | enables production-like edge auth locally |
 
 Production requires the database, admin key, an environment-matched `svc_live_...`
@@ -132,6 +136,44 @@ authentication is enabled. Account-session routes additionally use
 `Authorization: Bearer sess_...`. Development confirmation creation requires
 `CONFIRM_URL_BASE`; production sends confirmation and invitation messages through
 Cloudflare Email Service while still omitting `confirm_url` from API responses.
+
+## Organization billing API
+
+Billing belongs to an organization, not an account. The first publish starts one
+idempotent 30-day trial for the organization and all of its unrestricted sites.
+When the trial or paid period ends, publishing stops immediately, serving continues
+for seven days, and the Worker retains restorable artifacts for another 60 days.
+
+- `POST /v1/organizations/{organizationID}/billing/start-trial` — any member;
+  idempotently starts the trial immediately before first publish.
+- `GET /v1/organizations/{organizationID}/entitlement` — Worker service lookup;
+  returns normalized edit and serving rights plus their deadlines.
+- `POST /v1/organizations/{organizationID}/billing/checkout` — owner-only;
+  creates hosted Stripe Checkout for the configured recurring Price.
+- `POST /v1/organizations/{organizationID}/billing/portal` — owner-only;
+  creates a Stripe customer-portal session.
+- `POST /stripe/webhooks` — public Stripe callback authenticated by
+  `Stripe-Signature`; event claims are durable and retry-safe, and current
+  subscription state is re-read from Stripe before it is committed.
+- `DELETE /v1/organizations/{organizationID}/sites/{subdomain}` — idempotent
+  Worker-service cleanup that releases Core ownership before expired R2 content
+  is deleted.
+
+The four Stripe settings are optional as a group so Core can run while billing is
+being configured. Use Stripe test-mode values locally; never put the secret key or
+webhook signing secret in the Worker or browser.
+
+For local billing, create a recurring $5/month test Price in the Stripe Dashboard,
+put its `price_...` ID plus the test secret and local webhook `whsec_...` secret in
+the ignored root `.env`, then forward Stripe test events in a second terminal:
+
+```sh
+stripe listen --forward-to http://localhost:8080/stripe/webhooks
+```
+
+`scripts/dev-up.sh` recognizes `STRIPE_SECRET_KEY` or the existing
+`STRIPE_TEST_SECRET_KEY`, but enables billing only when the webhook secret and Price
+ID are present too. It still prints only the frontend URL.
 
 ## Observability and maintenance
 

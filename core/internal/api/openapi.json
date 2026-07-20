@@ -11,6 +11,7 @@
   "tags": [
     { "name": "Operations", "description": "Process and dependency health" },
     { "name": "Organizations", "description": "Business and billing boundaries shared by account members" },
+    { "name": "Billing", "description": "Organization trial, entitlement, and subscription management" },
     { "name": "Clients", "description": "Legacy platform-admin organization onboarding" },
     { "name": "Components", "description": "Organization-owned payment component configuration" },
     { "name": "Sessions", "description": "Component and account sessions" },
@@ -196,7 +197,7 @@
       },
       "Organization": {
         "type": "object",
-        "required": ["id", "name", "slug", "role", "is_default", "publishable_key", "sites", "created_at"],
+        "required": ["id", "name", "slug", "role", "is_default", "publishable_key", "sites", "billing", "created_at"],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "name": { "type": "string" },
@@ -205,7 +206,29 @@
           "is_default": { "type": "boolean" },
           "publishable_key": { "type": "string", "pattern": "^pk_(?:test|live)_" },
           "sites": { "type": "array", "items": { "type": "string" } },
+          "billing": { "$ref": "#/components/schemas/BillingEntitlement" },
           "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "BillingEntitlement": {
+        "type": "object",
+        "required": ["status", "can_edit", "can_serve", "can_manage_billing", "cancel_at_period_end"],
+        "properties": {
+          "status": { "type": "string", "enum": ["unstarted", "trialing", "active", "grace", "expired"] },
+          "can_edit": { "type": "boolean" },
+          "can_serve": { "type": "boolean" },
+          "can_manage_billing": { "type": "boolean" },
+          "trial_ends_at": { "type": ["string", "null"], "format": "date-time" },
+          "serve_grace_ends_at": { "type": ["string", "null"], "format": "date-time" },
+          "current_period_end": { "type": ["string", "null"], "format": "date-time" },
+          "cancel_at_period_end": { "type": "boolean" }
+        }
+      },
+      "BillingRedirect": {
+        "type": "object",
+        "required": ["url"],
+        "properties": {
+          "url": { "type": "string", "format": "uri" }
         }
       },
       "CreateOrganizationRequest": {
@@ -354,6 +377,23 @@
         "responses": {
           "200": { "description": "Database is reachable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Readiness" } } } },
           "503": { "description": "Database is absent or unreachable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Readiness" } } } }
+        }
+      }
+    },
+    "/stripe/webhooks": {
+      "post": {
+        "tags": ["Billing"],
+        "operationId": "receiveStripeWebhook",
+        "summary": "Receive signed Stripe billing events",
+        "description": "Public callback authenticated with the Stripe-Signature header. Processing is idempotent and refreshes subscription state from Stripe.",
+        "security": [],
+        "parameters": [{ "name": "Stripe-Signature", "in": "header", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "additionalProperties": true } } } },
+        "responses": {
+          "204": { "description": "Event processed or already processed" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
         }
       }
     },
@@ -517,6 +557,98 @@
           "429": { "$ref": "#/components/responses/RateLimited" },
           "500": { "$ref": "#/components/responses/InternalError" },
           "502": { "$ref": "#/components/responses/BadGateway" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/organizations/{organizationID}/billing/start-trial": {
+      "post": {
+        "tags": ["Organizations", "Billing"],
+        "operationId": "startOrganizationTrial",
+        "summary": "Start the organization's 30-day trial",
+        "description": "Idempotent. Any organization member may start the trial immediately before the first publish.",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": {
+          "200": { "description": "Current organization entitlement", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BillingEntitlement" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/organizations/{organizationID}/entitlement": {
+      "get": {
+        "tags": ["Organizations", "Billing"],
+        "operationId": "getOrganizationEntitlement",
+        "summary": "Return the organization's current edit and serving entitlement",
+        "description": "Service-authenticated Worker lookup. Account role is intentionally omitted, so can_manage_billing is false.",
+        "security": [{ "ServiceAuth": [] }],
+        "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": {
+          "200": { "description": "Current organization entitlement", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BillingEntitlement" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/organizations/{organizationID}/billing/checkout": {
+      "post": {
+        "tags": ["Organizations", "Billing"],
+        "operationId": "createOrganizationBillingCheckout",
+        "summary": "Create a Stripe Checkout session for the $5 monthly plan",
+        "description": "Organization owners only. The configured Stripe Price defines the amount and currency.",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": {
+          "201": { "description": "Checkout session created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BillingRedirect" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/organizations/{organizationID}/billing/portal": {
+      "post": {
+        "tags": ["Organizations", "Billing"],
+        "operationId": "createOrganizationBillingPortal",
+        "summary": "Create a Stripe customer portal session",
+        "description": "Organization owners only.",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": {
+          "201": { "description": "Portal session created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BillingRedirect" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/organizations/{organizationID}/sites/{subdomain}": {
+      "delete": {
+        "tags": ["Organizations", "Billing"],
+        "operationId": "releaseExpiredOrganizationSite",
+        "summary": "Release a site after its billing recovery window",
+        "description": "Worker service operation used by scheduled recovery cleanup. Idempotently removes the Core ownership binding before R2 artifacts are deleted.",
+        "security": [{ "ServiceAuth": [] }],
+        "parameters": [
+          { "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "subdomain", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$" } }
+        ],
+        "responses": {
+          "204": { "description": "Ownership binding released or already absent" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" },
           "503": { "$ref": "#/components/responses/Unavailable" }
         }
       }

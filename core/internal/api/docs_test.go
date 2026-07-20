@@ -57,7 +57,7 @@ func TestOpenAPIOperationsMatchRegisteredAPIRoutes(t *testing.T) {
 
 	registered := make(map[string]bool)
 	if err := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		if route == "/healthz" || route == "/readyz" || strings.HasPrefix(route, "/v1/") {
+		if route == "/healthz" || route == "/readyz" || route == "/stripe/webhooks" || strings.HasPrefix(route, "/v1/") {
 			registered[strings.ToLower(method)+" "+route] = true
 		}
 		return nil

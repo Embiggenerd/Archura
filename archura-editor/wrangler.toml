@@ -1,6 +1,6 @@
 name = "archura-sites"
 main = "workers/site-worker.js"
-compatibility_date = "2026-07-01"
+compatibility_date = "2026-07-15"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
@@ -8,6 +8,9 @@ routes = [
   { pattern = "archura.ai/*", zone_name = "archura.ai" },
   { pattern = "*.archura.ai/*", zone_name = "archura.ai" },
 ]
+
+[triggers]
+crons = ["17 4 * * *"]
 
 [assets]
 directory = "./dist"
@@ -22,18 +25,19 @@ bucket_name = "archura-artifacts"
 name = "CORE_RATE_LIMITER"
 namespace_id = "1001"
   [ratelimits.simple]
-  limit = 300
+  limit = 60
   period = 60
 
 [vars]
 # Cloudflare zone serving wildcard subdomains; empty = path-based sites only (/s/<name>/)
 ROOT_DOMAIN = "archura.ai"
-# IPs allowed to claim new sites (comma-separated, trailing * = prefix match).
-# Empty = open claiming. Loopback is always allowed for local dev.
-CLAIM_IP_ALLOWLIST = "72.132.36.124,2603:8001:2400:2ac0:*,216.61.150.99,2600:387:15:4a18:*"
 # Core proxy target. CORE_SERVICE_KEY must be set with `wrangler secret put` in
 # production or in `.dev.vars` for local Worker→core verification.
+# MODERATION_ADMIN_KEY is also a Worker secret; it protects the manual
+# moderation list and suspend/restore endpoints.
 CORE_URL = "https://core.archura.ai"
+# ALLOW_ANONYMOUS_SITE_CLAIMS is intentionally omitted. dev-up.sh sets it
+# explicitly for local claim-token compatibility; production requires sessions.
 
 [observability]
 enabled = true

@@ -21,6 +21,26 @@ pidfile=/tmp/archura-dev-pids
 child_pids=""
 cleaned_up=false
 
+# Local Stripe test settings live in the ignored root .env. Billing is enabled
+# only when the secret, webhook signing secret, and recurring Price are all
+# present; the rest of the stack still starts while those are being set up.
+if [ -f "$root/.env" ]; then
+  set -a
+  . "$root/.env"
+  set +a
+fi
+stripe_secret=${STRIPE_SECRET_KEY:-${STRIPE_TEST_SECRET_KEY:-}}
+stripe_webhook=${STRIPE_WEBHOOK_SECRET:-}
+stripe_price=${STRIPE_BASIC_PRICE_ID:-}
+stripe_origin=${BILLING_PUBLIC_ORIGIN:-http://localhost:8787}
+unset STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_BASIC_PRICE_ID BILLING_PUBLIC_ORIGIN
+if [ -n "$stripe_secret" ] && [ -n "$stripe_webhook" ] && [ -n "$stripe_price" ]; then
+  export STRIPE_SECRET_KEY="$stripe_secret"
+  export STRIPE_WEBHOOK_SECRET="$stripe_webhook"
+  export STRIPE_BASIC_PRICE_ID="$stripe_price"
+  export BILLING_PUBLIC_ORIGIN="$stripe_origin"
+fi
+
 record_pid() {
   child_pids="$child_pids $1"
   printf '%s\n' "$1" >> "$pidfile"
@@ -79,6 +99,7 @@ createdb -h /tmp -p "$pgport" -U postgres archura 2>/dev/null || true
 cd "$core_dir"
 admin=$(go run ./cmd/devkeys admin | cut -d= -f2)
 service=$(go run ./cmd/devkeys service | cut -d= -f2)
+moderation=$(openssl rand -hex 32)
 
 # --- Core (background) ---
 DATABASE_URL="postgres://postgres@/archura?host=/tmp&port=$pgport" \
@@ -126,6 +147,9 @@ CORE_SERVICE_KEY=$service
 # Local links: wrangler dev simulates the prod route host, so the Worker
 # needs telling where it actually is (used by siteUrlFor for "open your site")
 PUBLIC_ORIGIN=http://localhost:8787
+# Explicit local compatibility for claim-token-only sites. Never set in prod.
+ALLOW_ANONYMOUS_SITE_CLAIMS=true
+MODERATION_ADMIN_KEY=$moderation
 VARS
 
 "$av2/node_modules/.bin/wrangler" dev --port 8787 --live-reload > /tmp/archura-wrangler.log 2>&1 &

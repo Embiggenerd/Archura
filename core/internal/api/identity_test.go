@@ -25,25 +25,28 @@ const (
 )
 
 type fakeRepository struct {
-	organization     store.Organization
-	secretHash       string
-	publishableKey   string
-	edgeClaimToken   string
-	component        store.PaymentComponent
-	session          store.ComponentSession
-	componentSession map[string]store.ComponentSession
-	audits           []store.AuditEvent
-	rateLimitDenied  bool
-	confirmations    map[string]store.EmailConfirmation
-	accounts         map[string]store.Account
-	accountByEmail   map[string]string
-	accountSessions  map[string]store.AccountSession
-	organizations    map[string][]store.AccountOrganization
-	invitations      map[string]store.OrganizationInvitation
-	sites            map[string]string
-	nextID           int
-	rateLimitCalls   []fakeRateLimitCall
-	revokeSessionErr error
+	organization        store.Organization
+	secretHash          string
+	publishableKey      string
+	edgeClaimToken      string
+	component           store.PaymentComponent
+	session             store.ComponentSession
+	componentSession    map[string]store.ComponentSession
+	audits              []store.AuditEvent
+	rateLimitDenied     bool
+	confirmations       map[string]store.EmailConfirmation
+	accounts            map[string]store.Account
+	accountByEmail      map[string]string
+	accountSessions     map[string]store.AccountSession
+	organizations       map[string][]store.AccountOrganization
+	invitations         map[string]store.OrganizationInvitation
+	invitationCreateErr error
+	sites               map[string]string
+	nextID              int
+	rateLimitCalls      []fakeRateLimitCall
+	revokeSessionErr    error
+	billing             map[string]store.OrganizationBilling
+	webhookEvents       map[string]string
 }
 
 type fakeRateLimitCall struct {
@@ -321,6 +324,9 @@ func (f *fakeRepository) CreateOrganizationInvitation(
 	if !owner {
 		return store.OrganizationInvitation{}, store.ErrNotFound
 	}
+	if f.invitationCreateErr != nil {
+		return store.OrganizationInvitation{}, f.invitationCreateErr
+	}
 	for accountID, account := range f.accounts {
 		if account.Email == email && f.accountOwnsOrganization(accountID, organizationID) {
 			return store.OrganizationInvitation{}, store.ErrAlreadyMember
@@ -413,6 +419,14 @@ func (f *fakeRepository) BindOrganizationSite(_ context.Context, subdomain, orga
 	return nil
 }
 
+func (f *fakeRepository) ReleaseOrganizationSite(_ context.Context, subdomain, organizationID string, audit store.AuditEvent) error {
+	if f.sites != nil && f.sites[subdomain] == organizationID {
+		delete(f.sites, subdomain)
+		f.audits = append(f.audits, audit)
+	}
+	return nil
+}
+
 func (f *fakeRepository) ensureFakeDefaultOrganization(account store.Account, publishableKey string) store.AccountOrganization {
 	if f.organizations == nil {
 		f.organizations = make(map[string][]store.AccountOrganization)
@@ -450,6 +464,87 @@ func (f *fakeRepository) RecordAudit(_ context.Context, audit store.AuditEvent) 
 func (f *fakeRepository) ConsumeRateLimit(_ context.Context, subject, operation string, limit int, window time.Duration) (store.RateLimitResult, error) {
 	f.rateLimitCalls = append(f.rateLimitCalls, fakeRateLimitCall{Subject: subject, Operation: operation, Limit: limit, Window: window})
 	return store.RateLimitResult{Allowed: !f.rateLimitDenied, Count: 1, RetryAfterSeconds: 42}, nil
+}
+
+func (f *fakeRepository) BillingForOrganization(_ context.Context, organizationID string) (store.OrganizationBilling, error) {
+	if f.billing == nil {
+		f.billing = make(map[string]store.OrganizationBilling)
+	}
+	return f.billing[organizationID], nil
+}
+
+func (f *fakeRepository) StartOrganizationTrial(_ context.Context, organizationID string, now time.Time, audit store.AuditEvent) (store.OrganizationBilling, error) {
+	if f.billing == nil {
+		f.billing = make(map[string]store.OrganizationBilling)
+	}
+	if existing, ok := f.billing[organizationID]; ok && existing.TrialStartedAt != nil {
+		return existing, nil
+	}
+	trialEnd := now.Add(store.TrialDuration)
+	graceEnd := trialEnd.Add(store.ServingGracePeriod)
+	billing := store.OrganizationBilling{
+		OrganizationID: organizationID, TrialStartedAt: &now, TrialEndsAt: &trialEnd,
+		ServeGraceEndsAt: &graceEnd, CreatedAt: now, UpdatedAt: now,
+	}
+	f.billing[organizationID] = billing
+	audit.OrganizationID = organizationID
+	audit.Action = "billing.trial_started"
+	f.audits = append(f.audits, audit)
+	return billing, nil
+}
+
+func (f *fakeRepository) SetStripeCustomer(_ context.Context, organizationID, customerID string) error {
+	billing, _ := f.BillingForOrganization(context.Background(), organizationID)
+	billing.OrganizationID = organizationID
+	billing.StripeCustomerID = customerID
+	f.billing[organizationID] = billing
+	return nil
+}
+
+func (f *fakeRepository) UpdateStripeSubscription(_ context.Context, update store.StripeSubscriptionUpdate, audit store.AuditEvent) error {
+	billing, _ := f.BillingForOrganization(context.Background(), update.OrganizationID)
+	if billing.LastStripeEventAt != nil && billing.LastStripeEventAt.After(update.EventCreatedAt) {
+		return nil
+	}
+	billing.OrganizationID = update.OrganizationID
+	billing.StripeCustomerID = update.CustomerID
+	billing.StripeSubscriptionID = update.SubscriptionID
+	billing.StripeSubscriptionStatus = update.Status
+	billing.CurrentPeriodEnd = update.CurrentPeriodEnd
+	billing.CancelAtPeriodEnd = update.CancelAtPeriodEnd
+	billing.LastStripeEventAt = &update.EventCreatedAt
+	f.billing[update.OrganizationID] = billing
+	f.audits = append(f.audits, audit)
+	return nil
+}
+
+func (f *fakeRepository) OrganizationIDByStripeCustomer(_ context.Context, customerID string) (string, error) {
+	for organizationID, billing := range f.billing {
+		if billing.StripeCustomerID == customerID {
+			return organizationID, nil
+		}
+	}
+	return "", store.ErrNotFound
+}
+
+func (f *fakeRepository) ClaimStripeWebhookEvent(_ context.Context, eventID, _ string, _ time.Time) (bool, error) {
+	if f.webhookEvents == nil {
+		f.webhookEvents = make(map[string]string)
+	}
+	if f.webhookEvents[eventID] == "processed" {
+		return false, nil
+	}
+	f.webhookEvents[eventID] = "processing"
+	return true, nil
+}
+
+func (f *fakeRepository) FinishStripeWebhookEvent(_ context.Context, eventID string, processingErr error) error {
+	if processingErr != nil {
+		f.webhookEvents[eventID] = "failed"
+	} else {
+		f.webhookEvents[eventID] = "processed"
+	}
+	return nil
 }
 
 func TestClientComponentAndSessionContract(t *testing.T) {

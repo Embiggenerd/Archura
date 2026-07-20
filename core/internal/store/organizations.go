@@ -285,6 +285,39 @@ func (s *Store) BindOrganizationSite(
 	return nil
 }
 
+func (s *Store) ReleaseOrganizationSite(
+	ctx context.Context,
+	subdomain, organizationID string,
+	audit AuditEvent,
+) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin release organization site: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	result, err := tx.Exec(ctx, `
+		DELETE FROM organization_sites
+		WHERE subdomain = $1 AND organization_id = $2::uuid`, subdomain, organizationID)
+	if err != nil {
+		return fmt.Errorf("release organization site: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return tx.Commit(ctx)
+	}
+	audit.OrganizationID = organizationID
+	audit.Action = "site_ownership.released"
+	audit.ResourceType = "site"
+	audit.ResourceID = subdomain
+	if err := insertAudit(ctx, tx, audit); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit release organization site: %w", err)
+	}
+	return nil
+}
+
 func bindOrganizationSite(ctx context.Context, tx pgx.Tx, subdomain, organizationID string) (string, error) {
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO organization_sites (subdomain, organization_id)

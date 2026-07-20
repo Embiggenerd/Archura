@@ -285,7 +285,7 @@ func (s *Server) handleVerifyConfirmation(w http.ResponseWriter, r *http.Request
 		"organization": organizationResponse(store.AccountOrganization{
 			Organization: result.Organization, Role: "owner", IsDefault: true,
 			PublishableKey: result.PublishableKey,
-		}),
+		}, s.now().UTC()),
 		"subdomain": result.Subdomain,
 		"session":   map[string]any{"token": sessionToken, "expires_at": result.Session.ExpiresAt},
 	})
@@ -331,8 +331,15 @@ func (s *Server) handleSessionMe(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	organizationBodies := make([]map[string]any, 0, len(organizations))
-	for _, organization := range organizations {
-		organizationBodies = append(organizationBodies, organizationResponse(organization))
+	for index := range organizations {
+		billing, billingErr := s.store.BillingForOrganization(r.Context(), organizations[index].ID)
+		if billingErr != nil {
+			s.internalError(w, r, billingErr)
+			return
+		}
+		organizations[index].Billing = billing
+		organization := organizations[index]
+		organizationBodies = append(organizationBodies, organizationResponse(organization, s.now().UTC()))
 	}
 	invitations, err := s.store.PendingInvitationsForEmail(r.Context(), account.Email)
 	if err != nil {
@@ -388,6 +395,10 @@ func (s *Server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) 
 	}
 	if errors.Is(err, store.ErrAlreadyMember) {
 		writeError(w, r, http.StatusConflict, "already_member", "That account is already a member.")
+		return
+	}
+	if errors.Is(err, store.ErrConflict) {
+		writeError(w, r, http.StatusConflict, "already_invited", "That email address already has a pending invitation.")
 		return
 	}
 	if err != nil {
@@ -496,7 +507,7 @@ func (s *Server) handleCreateOrganization(w http.ResponseWriter, r *http.Request
 		s.internalError(w, r, err)
 		return
 	}
-	response := organizationResponse(organization)
+	response := organizationResponse(organization, s.now().UTC())
 	response["secret_key"] = secretKey
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusCreated, response)
@@ -580,12 +591,13 @@ func (s *Server) handleBindSiteOwnership(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-func organizationResponse(organization store.AccountOrganization) map[string]any {
+func organizationResponse(organization store.AccountOrganization, now time.Time) map[string]any {
 	return map[string]any{
 		"id": organization.ID, "name": organization.Name, "slug": organization.Slug,
 		"role": organization.Role, "is_default": organization.IsDefault,
 		"publishable_key": organization.PublishableKey, "sites": organization.Sites,
 		"created_at": organization.CreatedAt,
+		"billing":    billingResponse(organization.Billing, organization.Role, now),
 	}
 }
 

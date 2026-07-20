@@ -140,6 +140,43 @@ type AccountOrganization struct {
 	IsDefault      bool
 	PublishableKey string
 	Sites          []string
+	Billing        OrganizationBilling
+}
+
+type OrganizationBilling struct {
+	OrganizationID           string
+	TrialStartedAt           *time.Time
+	TrialEndsAt              *time.Time
+	ServeGraceEndsAt         *time.Time
+	StripeCustomerID         string
+	StripeSubscriptionID     string
+	StripeSubscriptionStatus string
+	CurrentPeriodEnd         *time.Time
+	CancelAtPeriodEnd        bool
+	LastStripeEventAt        *time.Time
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
+}
+
+type OrganizationEntitlement struct {
+	Status            string
+	CanEdit           bool
+	CanServe          bool
+	CanManageBilling  bool
+	TrialEndsAt       *time.Time
+	ServeGraceEndsAt  *time.Time
+	CurrentPeriodEnd  *time.Time
+	CancelAtPeriodEnd bool
+}
+
+type StripeSubscriptionUpdate struct {
+	OrganizationID    string
+	CustomerID        string
+	SubscriptionID    string
+	Status            string
+	CurrentPeriodEnd  *time.Time
+	CancelAtPeriodEnd bool
+	EventCreatedAt    time.Time
 }
 
 type OrganizationInvitation struct {

@@ -132,7 +132,7 @@ try {
   // --- 5. Editor breadcrumb + registry integration ---
   check(
     'editor: Stripe Payment is a registered, editable target',
-    /Components\s*\/\s*Stripe Payment/.test(await page.locator('.breadcrumb').innerText())
+    /Smaller components\s*\/\s*Stripe Payment/.test(await page.locator('.breadcrumb').innerText())
   );
 
   // --- 6. Publish → the component survives into a deployable artifact ---

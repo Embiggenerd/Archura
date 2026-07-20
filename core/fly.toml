@@ -1,6 +1,7 @@
 # Fly.io deployment for the Archura core server. Fill in <app-name>.
 # Secrets (DATABASE_URL, PLATFORM_ADMIN_KEY, CORE_SERVICE_KEY,
-# CLOUDFLARE_EMAIL_API_TOKEN, and Stripe keys) are
+# CLOUDFLARE_EMAIL_API_TOKEN, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
+# STRIPE_BASIC_PRICE_ID, and BILLING_PUBLIC_ORIGIN) are
 # set out-of-band with `fly secrets set`.
 app = "archura-core"
 primary_region = "sjc"

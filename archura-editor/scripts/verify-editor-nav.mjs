@@ -71,7 +71,7 @@ try {
   check('switcher: Cards page renders after switching (3 cards)', (await frame.locator('archura-card').count()) === 3);
   check(
     'switcher: breadcrumb and URL follow the new target',
-    /Pages\s*\/\s*Cards/.test(await page.locator('.breadcrumb').innerText()) &&
+    /Page-sized components\s*\/\s*Cards/.test(await page.locator('.breadcrumb').innerText()) &&
       page.url().includes('component=pages%2FCards'),
     page.url()
   );

@@ -1,203 +1,138 @@
-# Deploy Funnel — Anonymous → Confirmed → Published → Paid
+# Deploy Funnel — Anonymous → Confirmed → Trial → Paid
 
-The growth funnel and its implementation: instant anonymous editing, a deploy that captures
-an email before anything goes live, a **lazy publish** triggered by the first visit to a
-confirmed subdomain, and **universal expiry** where payment buys persistence + the right to
-edit. Same house style as the other docs; grounded in the edge/core split
-(`FINTECH_ARCHITECTURE.md`).
+This is the current product funnel for every Archura artifact. Pages and smaller
+components use the same publication, embed, identity, billing, and recovery rules.
 
 ## Principles
 
-- **Value before signup.** Editing is instant and anonymous. Email is captured at the
-  moment of value (deploy), not before.
-- **Nothing serves until confirmed + visited.** The email confirmation *arms* a subdomain;
-  the first visit *publishes* it. Abandoned or unconfirmed work never becomes a live page —
-  which is the anti-abuse property and defers all publish/serve cost to real engagement.
-- **Everything expires by default; payment makes it permanent.** Drafts, unvisited sites,
-  and free published sites all have TTLs. Paying removes the expiry *and* unlocks editing.
-- **Two revenue streams, kept separate:** the site subscription (persistence + edit) here,
-  vs. component transaction fees (Stripe Connect, `STRIPE_COMPONENT.md`). A user may pay
-  neither, one, or both.
+- **Value before signup.** A visitor can edit an in-browser draft before entering an
+  email address.
+- **Email before publication.** Deploy reserves a subdomain and stores an R2 draft, but
+  the content does not go live until its email confirmation succeeds.
+- **Organizations pay.** Accounts are people; organizations are businesses and billing
+  boundaries. One organization plan covers all of its unrestricted sites and components.
+- **A useful free trial.** The 30-day trial includes editing, publishing, hosted pages,
+  and embeds. No card is required.
+- **Recovery before deletion.** Publishing stops first, serving stops seven days later,
+  and artifacts remain recoverable for another 60 days.
+- **Hosting billing is separate from merchant payments.** The $5 Archura subscription
+  does not onboard a merchant to Stripe Connect or change payment-component behavior.
 
-## State machine
+## State sequence
 
+```text
+Anonymous browser draft
+        │ Deploy: subdomain + email
+        ▼
+DRAFTED IN R2
+        │ email confirmation creates/reuses the account and default organization
+        │ binds the site, starts the organization trial, and publishes immediately
+        ▼
+30-DAY ORGANIZATION TRIAL
+        │ all organization members may edit/publish; pages and embeds serve
+        │ owner may subscribe for $5/month at any point
+        ├──────────────────────────────▶ ACTIVE SUBSCRIPTION
+        │                                  │ cancel: active through paid period
+        │ trial or paid entitlement ends   │ payment/period ends
+        ▼                                  ▼
+7-DAY SERVING GRACE (editing and publishing blocked)
+        │ owner restores billing → ACTIVE SUBSCRIPTION
+        │ grace ends
+        ▼
+EXPIRED (editor read-only; pages and embeds unavailable)
+        │ owner restores within 60 days → ACTIVE SUBSCRIPTION
+        │ recovery window ends
+        ▼
+R2 ARTIFACTS DELETED; SUBDOMAIN RELEASED
 ```
-Anonymous editor
-   │  Deploy: pick subdomain + enter email
-   ▼
-DRAFTED ───────────── expires ~48h ──▶ deleted, subdomain released
-   │  subdomain serves a loader; NOT published
-   │  email confirmed  (arms the site + binds it to the account's default organization)
-   ▼
-ARMED ─────────────── expires ~7d ───▶ deleted, subdomain released
-   │  subdomain still serves the loader
-   │  ANY visit to the subdomain
-   ▼
-PUBLISHED ─ free: expires ~30d ──────▶ expired page; pay to restore
-   │  moderation scan on promote, then serves the live artifact
-   │  owner pays
-   ▼
-PERSISTENT + EDITABLE   no expiry; edits re-publish immediately
-```
 
-The only authentication on the whole path is the email confirmation that arms the site.
-Everything downstream is a stateless "is it armed? publish-on-visit" / "is it expired?" check.
+The 30-day clock starts once per organization at its first publication, not at account
+registration, organization creation, site claim, or anonymous editing. Creating more sites
+never restarts or extends the trial.
 
-## Where each piece lives
+## Where state lives
 
-- **Editor (frontend):** anonymous editing; Deploy → draft; the "confirm your email" loader;
-  on return, the editor opens the published artifact (load-on-open) but gates save/publish
-  on payment.
-- **Edge Worker:** subdomain reservation + availability; draft storage in R2; serving the
-  three states (loader vs published vs expired); the publish-on-visit promote; lazy expiry
-  checks on access.
-- **Core (Go):** email-confirmation accounts, organizations + memberships,
-  organization-owned sites, subscription/payment state, and the
-  `expires_at`/`status` records. The security boundary for identity and money.
-- **Email:** Cloudflare Email Service, called by the Go core over its REST API, for
-  confirmation links and organization invitations; local development uses the
-  in-memory mailbox.
+- **Go Core:** accounts, organizations, memberships, organization-owned site bindings,
+  trial/subscription state, Stripe customer and subscription identifiers, webhook ledger,
+  billing audit events, and the normalized edit/serve entitlement.
+- **Cloudflare Worker:** R2 drafts and published artifacts, stable embed projections,
+  trial-start orchestration at publish time, entitlement enforcement, recovery metadata,
+  scheduled artifact deletion, rate limiting, bounded request bodies, and moderation.
+- **Frontend:** anonymous draft UX, confirmation messaging, organization plan status,
+  owner Checkout/portal actions, and the expired read-only editor.
+- **Stripe:** test-mode Customer, recurring $5 Price, subscription Checkout, customer
+  portal, and signed billing events. Stripe is not an identity or content store.
 
-## Data model (new/extended)
+Core never stores component artifacts. The Worker never stores Stripe secrets or decides
+billing rules from raw Stripe statuses.
 
-- `sites` — **`site_id` (permanent, opaque `site_…`, the identity — never reused)**,
-  `subdomain` (the *address* — unique among active sites, renamable, releasable),
-  `status` (drafted|armed|published|expired), `organization_id` (null until
-  confirmed), `draft_ref`, `published_ref`, `created_at`, `confirmed_at`,
-  `published_at`, `expires_at`.
-- `email_confirmations` — `token_hash`, `site_id`, `email`, `expires_at`.
-- `accounts` — `email`, `email_verified_at`, magic-link auth. Accounts own nothing but identity and
-  memberships; the subscription attaches to the organization (the billing
-  boundary) when phase 4 ships — see `AUTH_ARCHITECTURE.md` vocabulary note.
-- Ownership: `sites.organization_id → organizations.id`; an account reaches a
-  site only through a membership (`accounts ↔ memberships ↔ organizations`).
-  Site and organization counts are unrestricted.
+## Identity and ownership
 
-**Identity vs. address** (full doctrine: `AUTH_ARCHITECTURE.md` § Namespaces): the
-slug must not be the durable identity, because expiry releases subdomains (phase 5)
-and paid users later attach full domains. `site_id` is the durable key; hostnames map
-to it. *Implemented at the edge already:* claim and deploy stamp `siteId` into
-`sites/<slug>/meta.json`, so every site created since 2026-07-18 carries its
-permanent identity ahead of the storage/routing migration.
+- Confirmation creates or reuses the account and its default organization, then binds the
+  deployed site to that organization.
+- Accounts reach a site only through organization membership. Owners manage billing and
+  invitations; members can edit and publish while the organization is entitled.
+- Every site carries a permanent `site_…` ID. The current subdomain is an address, not the
+  durable identity.
+- Stable embed URLs use `/<publishable_key>/<site_id>/<component>.js`; resolution verifies
+  that the organization key, permanent site ID, and current site metadata still agree.
+- A released subdomain cannot take over an earlier owner's embed URL.
 
-## Phases
+## Billing behavior
 
-### 1. Anonymous deploy → DRAFTED
+The Core entitlement is the only contract consumers use:
 
-**Problem.** Deploy today publishes immediately and (was) gated by an IP allowlist. We want
-anonymous instant editing and a deploy that captures email without going live.
+- `unstarted`: editing is allowed; serving is false because nothing has published.
+- `trialing`: editing and serving are allowed until `trial_ends_at`.
+- `active`: editing and serving are allowed. Cancellation at period end does not remove
+  access early.
+- `grace`: editing/publishing is blocked; existing pages and embeds serve until
+  `serve_grace_ends_at`.
+- `expired`: editing/publishing and public serving are blocked. Artifacts remain in R2 until
+  the 60-day recovery deadline.
 
-**Solution.** Editing stays anonymous (browser state). **Deploy**: choose subdomain → check
-availability → create a `drafted` site (store the artifact as `draft_ref` in R2, reserve the
-subdomain, `expires_at = now + 48h`) → prompt for email → create an `email_confirmation` +
-send the link. The editor shows the "check your email" loader. The reserved subdomain serves
-a **loader/placeholder** to any visitor.
+Entitlement reads used for public serving may be cached for 60 seconds. Writes always ask
+Core for fresh state and fail closed if it is unavailable. Already-published public content
+fails open during a temporary Core outage so an internal outage does not take customer
+sites down.
 
-**Verify.** Deploy creates a `drafted` site; the subdomain returns the loader, not the
-content; no published artifact exists.
+## Abuse and content operations
 
-### 2. Email confirm → ARMED
+- Anonymous register/deploy, site claims, artifact publication, embed publication, and
+  asset uploads use operation/IP edge rate-limit keys. Core retains its authoritative
+  confirmation and organization limits.
+- Request bodies are bounded before parsing or R2 storage.
+- Production site claims require an authenticated account and selected organization. The
+  old operator-IP allowlist is gone. Local claim-token compatibility is enabled only by
+  the explicit `ALLOW_ANONYMOUS_SITE_CLAIMS=true` Worker variable; `PUBLIC_ORIGIN` only
+  controls generated URLs.
+- Publication checks structural risk signals such as password collection, external form
+  actions, active embedded content, inline handlers, JavaScript URLs, meta refresh, and
+  excessive external links.
+- A signal creates a minimal moderation record and structured log; it never auto-bans.
+  Staff review with a secret-protected endpoint and may suspend or restore the site.
+- Logs and moderation records contain site/organization IDs and reason codes, not artifact
+  bodies, tokens, customer email addresses, or payment details.
 
-**Problem.** Nothing may publish until the owner proves the email.
+## Verification
 
-**Solution.** The email link carries a confirmation token. The core validates it → creates
-(or attaches) an account from the email → ensures the account's **default organization**
-(created with the account, with its `pk_`/`sk_` key pair and an `owner` membership) →
-binds the site to that organization → marks the site `armed` (`confirmed_at`) and extends
-`expires_at` to the armed grace (~7d). The confirmation response hands the owner the link
-to their subdomain and the organization's publishable key.
+- A drafted deployment serves only the loader.
+- Confirmation binds the organization, starts the trial once, publishes the artifact, and
+  returns both preview and copy/paste embed information.
+- All sites in one organization share the same deadline and subscription.
+- At trial end, writes return the billing-required response while public content still
+  serves for seven days.
+- At grace end, hosted pages and every embed route stop serving.
+- Payment restoration re-enables all organization sites without changing embed URLs.
+- Scheduled cleanup deletes content only after the 60-day recovery window.
+- Flagging alone keeps a site live; manual suspension blocks it and restoration reverses it.
 
-**Verify.** A valid token arms the site, creates the account + default organization +
-owner membership, and binds the site to the organization; an expired/invalid token is
-rejected; the subdomain still serves the loader (armed ≠ published).
-
-### 3. First visit → PUBLISHED (lazy publish)
-
-**Problem.** Publish/serve work should happen only for sites a real visitor reaches.
-
-**Solution.** On any visit to an **armed** subdomain, the Worker promotes: run the moderation
-scan on the draft, copy `draft_ref → published_ref`, set `status = published`,
-`published_at`, and the free-tier `expires_at` (~30d). Show a brief loader during promote,
-then serve. Subsequent visits serve the live artifact directly. "Any visit publishes" is safe
-because arming already required the owner's confirmation.
-
-**Verify.** The first visit to an armed subdomain publishes and serves the content; a second
-visit serves it fast (already published); a visit to a *drafted* (unarmed) subdomain never
-publishes.
-
-### 4. Pay to edit + persist
-
-**Problem.** Free gets one deployed site; editing and keeping it alive should require payment.
-
-**Solution.** The owner returns via magic link and opens the editor with their published
-artifact. **Save/publish checks the owning *organization's* subscription** — blocked
-(with an upgrade prompt) while the organization is on the free tier, allowed once it
-pays; any member with owner/billing permission can be the payer, and the subscription
-survives member turnover. Payment also clears `expires_at` (persistence). Members of
-paying organizations re-publish immediately (they're authenticated; no lazy dance).
-
-**Verify.** A member of a free organization can open the editor and view but not
-save/publish; after the organization pays, save/publish succeeds and the site's
-`expires_at` is cleared.
-
-### 5. Universal expiry (lazy)
-
-**Problem.** Drafts, unvisited sites, and lapsed free sites must clean themselves up and free
-their subdomains.
-
-**Solution.** **Lazy expiry:** every access (visit, edit, API) checks `expires_at`; past it,
-the site is treated as expired — serve an "expired, upgrade to restore" page and stop serving
-content. A periodic cleanup job reclaims R2 storage and **releases the subdomain after a
-short grace** (so good names aren't squatted by dead free sites); the owning
-organization can reclaim during the grace via any of its members. TTLs (all tunable):
-draft 48h, armed 7d, published-free 30d,
-paid = none. This mirrors the core's existing `ct_` session TTL — "everything has an expiry"
-becomes a platform-wide principle.
-
-**Verify.** An unconfirmed draft past 48h is gone and its subdomain reusable; a free site past
-its window serves the expired page; a paid site never expires.
-
-**Release frees the address, never the identity.** Reclaiming a subdomain deletes the
-hostname mapping and the content; the `site_id` is never reissued. **Prerequisite
-before this phase ships:** embed URLs must resolve by stable identity, not the
-releasable slug — otherwise a stranger re-registering a released slug would serve
-their content through the previous owner's pasted embed code. **Satisfied by the
-embed-identity milestone**: embed URLs are `/<pk>/<site_id>/<Component>.js`
-(organization key + permanent site id; `docs/PLAN_EMBEDS.md`), with resolution
-verifying the site's current metadata still matches — a reused slug's projection
-returns 404. Legacy slug-based `/s/<slug>/embed/…` URLs must be retired before
-subdomain release actually ships.
-
-## Anti-abuse (falls out of the design)
-
-- No live page exists for unconfirmed/unvisited deploys → spammers can't cheaply spray live
-  phishing subdomains.
-- Rate-limit drafts per IP; moderation scan runs at promote (only for sites that go live).
-- Expiry reclaims junk automatically.
-
-## Build order
-
-1. **Draft/serve states in the Worker** — Deploy → `drafted` + reserved subdomain + loader
-   page; no publish. (Reuses R2 + serving; adds the draft state.)
-2. **Email-confirm accounts in the core** — confirmations, accounts + default
-   organizations + owner memberships, organization-owned sites, the `arm` action;
-   transactional email.
-3. **Publish-on-visit promote** — Worker promotes armed → published on first visit, with the
-   moderation scan.
-4. **Lazy expiry** — `expires_at` on sites + on-access checks + cleanup job + subdomain
-   release.
-5. **Pay-to-edit gate** — subscription state in the core; save/publish checks it; payment
-   clears expiry. (Ties to Stripe billing, separate from Connect component fees.)
+Implementation details and environment variables are recorded in
+`core/PLAN_BILLING.md`; identity doctrine remains in `AUTH_ARCHITECTURE.md`.
 
 ## Deferred
 
-- **Custom domains (the paid upgrade)** — falls out of identity vs. address: a domain
-  upgrade *adds* a hostname → `site_id` mapping row (`www.mikesbakery.com → site_x`)
-  alongside the existing subdomain mapping; serving resolves host → site_id →
-  namespace. Nothing about the site's content, embeds, or ownership moves. The
-  archura subdomain stays as the default/fallback address. Requires: the mapping
-  table (core), host-resolution in the Worker ahead of the current subdomain parse,
-  and TLS via Cloudflare custom hostnames.
-- Multi-page sites, subdomain reclaim UI, composer vs client editing mode, and the
-  developer/embed on-ramp (separate funnel for the embeddable components — see
-  `STRIPE_COMPONENT.md` and the marketing split).
+- Stripe Connect merchant onboarding and transaction-fee economics.
+- Custom domains and custom-hostname TLS.
+- A staff moderation GUI; the initial operator surface is an authenticated API.
+- Automated reputation scoring or automatic suspension.

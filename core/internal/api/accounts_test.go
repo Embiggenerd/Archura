@@ -202,6 +202,15 @@ func TestOrganizationInvitationRequiresOwnerAndMatchingVerifiedEmail(t *testing.
 	server := NewServer(config.Config{Env: "dev", ConfirmURLBase: "http://localhost:8787/confirm"}, repo, slog.Default())
 	router := server.Router()
 
+	repo.invitationCreateErr = store.ErrConflict
+	alreadyInvited := performRequest(router, http.MethodPost, "/v1/organizations/organization-one/invitations", `{"email":"member@example.com"}`, ownerToken)
+	if alreadyInvited.Code != http.StatusConflict ||
+		!strings.Contains(alreadyInvited.Body.String(), `"code":"already_invited"`) ||
+		strings.Contains(alreadyInvited.Body.String(), "already a member") {
+		t.Fatalf("pending-invitation conflict status=%d body=%s", alreadyInvited.Code, alreadyInvited.Body.String())
+	}
+	repo.invitationCreateErr = nil
+
 	created := performRequest(router, http.MethodPost, "/v1/organizations/organization-one/invitations", `{"email":" MEMBER@Example.com "}`, ownerToken)
 	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"email":"member@example.com"`) {
 		t.Fatalf("create invitation status=%d body=%s", created.Code, created.Body.String())

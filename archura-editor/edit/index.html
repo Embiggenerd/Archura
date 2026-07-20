@@ -137,6 +137,11 @@
         overflow-x: auto; font-size: 0.75rem; margin: 8px 0 0;
       }
       .publish-panel summary { cursor: pointer; margin-top: 6px; }
+      .billing-notice {
+        padding: 11px 24px; background: #fff7ed; border-bottom: 1px solid #fed7aa;
+        color: #9a3412; font-size: 0.86rem;
+      }
+      archura-editor.billing-readonly { pointer-events: none; opacity: 0.78; }
     </style>
   </head>
   <body>
@@ -304,17 +309,37 @@
         document.body.appendChild(overlay);
       }
 
+      async function initPage() {
       if (site) {
         const token = localStorage.getItem(`archura:site-token:${site}`);
         const url = localStorage.getItem(`archura:site-url:${site}`);
         const siteUrl = url ?? `/s/${site}/`;
+        const me = await fetch('/api/me').then((response) => response.ok ? response.json() : null).catch(() => null);
+        const organization = me?.organizations?.find((candidate) => candidate.sites?.includes(site));
+        const readOnly = organization?.billing?.can_edit === false;
         const bar = document.createElement('div');
         bar.className = 'site-bar';
         bar.innerHTML = `<strong>${site}</strong> <span>publishes to</span> <a href="${siteUrl}" target="_blank">${siteUrl}</a>
           <span style="flex:1"></span>
           <a class="button secondary" href="/dashboard/">Dashboard</a>`;
         document.body.appendChild(bar);
-        const editorEl = mountEditor(createR2Adapter({ endpoint: `/api/artifacts/${site}`, token: token ?? undefined, site }));
+        const persistence = createR2Adapter({ endpoint: `/api/artifacts/${site}`, token: token ?? undefined, site });
+        const guardedPersistence = readOnly ? {
+          ...persistence,
+          publish: async () => { throw new Error('An active subscription is required to publish.'); },
+          publishEmbed: async () => { throw new Error('An active subscription is required to publish.'); },
+        } : persistence;
+        if (readOnly) {
+          const notice = document.createElement('div');
+          notice.className = 'billing-notice';
+          notice.innerHTML = `This organization is read-only until an owner activates the $5/month plan. <a href="/dashboard/?organization=${encodeURIComponent(organization.id)}">Manage billing</a>`;
+          document.body.appendChild(notice);
+        }
+        const editorEl = mountEditor(guardedPersistence);
+        if (readOnly) {
+          editorEl.classList.add('billing-readonly');
+          editorEl.setAttribute('aria-disabled', 'true');
+        }
         attachPublishPanel(editorEl, site, siteUrl);
       } else if (import.meta.env.PROD) {
         // Anonymous draft mode (funnel flow 2): edit first; Deploy captures
@@ -347,6 +372,8 @@
         // Bare /edit in dev: choose what to edit.
         showPicker();
       }
+      }
+      void initPage();
     </script>
   </body>
 </html>

@@ -9,6 +9,7 @@ const pkgRoot = join(here, '..');
 
 const SUITES = [
   'verify-account-summary',
+  'verify-worker-billing',
   'verify-account-flow',
   'verify-section1',
   'verify-section2',

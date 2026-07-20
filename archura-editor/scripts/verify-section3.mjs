@@ -33,7 +33,11 @@ try {
 
   // --- 2. Breadcrumb shows the editing target ---
   const crumb = page.locator('.breadcrumb');
-  check('breadcrumb: shows "Pages / Landing"', /Pages\s*\/\s*Landing/.test(await crumb.innerText()), await crumb.innerText());
+  check(
+    'breadcrumb: shows "Page-sized components / Landing"',
+    /Page-sized components\s*\/\s*Landing/.test(await crumb.innerText()),
+    await crumb.innerText()
+  );
 
   // --- 3. Structure is locked ---
   const firstCard = frame.locator('archura-card').first();
@@ -133,7 +137,11 @@ try {
   await page.goto(`${BASE}/edit/?component=cards/Card`, { waitUntil: 'domcontentloaded' });
   await page.frameLocator('iframe.gjs-frame').locator('archura-card').waitFor({ state: 'visible', timeout: 15000 });
   const compCrumb = await page.locator('.breadcrumb').innerText();
-  check('breadcrumb: shows "Components / Card" for component targets', /Components\s*\/\s*Card/.test(compCrumb), compCrumb);
+  check(
+    'breadcrumb: shows "Smaller components / Card" for component targets',
+    /Smaller components\s*\/\s*Card/.test(compCrumb),
+    compCrumb
+  );
 } finally {
   await browser.close();
 }

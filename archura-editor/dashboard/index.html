@@ -53,6 +53,11 @@
       }
       .error { color: #dc2626; font-size: 0.85rem; min-height: 1.2em; }
       details summary { cursor: pointer; font-size: 0.85rem; margin-top: 8px; }
+      .billing-status { display: inline-flex; align-items: center; gap: 7px; margin: 8px 0 12px; font-size: 0.88rem; }
+      .billing-dot { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; }
+      .billing-dot.good { background: #16a34a; }
+      .billing-dot.warn { background: #d97706; }
+      .billing-dot.bad { background: #dc2626; }
     </style>
   </head>
   <body>
@@ -69,6 +74,28 @@
       const tagFor = (embedName) =>
         defaultComponents.find((d) => `${d.path.at(-1)}.js` === embedName)?.tagName ?? null;
       const selectedOrganizationKey = 'archura:selected-organization';
+
+      const daysRemaining = (value) => value
+        ? Math.max(0, Math.ceil((new Date(value).getTime() - Date.now()) / 86400000))
+        : null;
+
+      function billingCopy(billing) {
+        if (!billing) return { tone: 'bad', title: 'Billing unavailable', detail: 'Try again shortly.' };
+        if (billing.status === 'active') {
+          return { tone: 'good', title: billing.cancel_at_period_end ? 'Active until period end' : 'Active subscription', detail: billing.current_period_end ? `Current period ends ${new Date(billing.current_period_end).toLocaleDateString()}.` : 'All sites are included.' };
+        }
+        if (billing.status === 'trialing') {
+          const days = daysRemaining(billing.trial_ends_at);
+          return { tone: 'good', title: `${days} trial day${days === 1 ? '' : 's'} left`, detail: 'Editing, publishing, hosted pages, and embeds are included.' };
+        }
+        if (billing.status === 'grace') {
+          return { tone: 'warn', title: 'Publishing paused', detail: `Existing pages and embeds remain live${billing.serve_grace_ends_at ? ` until ${new Date(billing.serve_grace_ends_at).toLocaleDateString()}` : ' during the grace period'}.` };
+        }
+        if (billing.status === 'expired') {
+          return { tone: 'bad', title: 'Subscription required', detail: 'Editing, publishing, hosted pages, and embeds are paused.' };
+        }
+        return { tone: '', title: 'Trial not started', detail: 'Your 30-day trial starts when this organization first publishes.' };
+      }
 
       function attributesFor(artifact, embedName) {
         const instance = [...(artifact?.content?.components ?? [])]
@@ -223,6 +250,36 @@
         main.appendChild(card);
       }
 
+      function renderBilling(organization) {
+        const billing = organization.billing;
+        const copy = billingCopy(billing);
+        const card = document.createElement('div');
+        card.className = 'card';
+        const canManage = billing?.can_manage_billing;
+        const portal = billing?.status === 'active' || billing?.current_period_end;
+        card.innerHTML = `
+          <h2>Plan</h2>
+          <div class="billing-status"><span class="billing-dot ${copy.tone}"></span><strong>${escapeHtml(copy.title)}</strong></div>
+          <p class="hint">${escapeHtml(copy.detail)} One $5/month subscription covers every site in this organization.</p>
+          ${canManage ? `<div class="actions"><button data-billing-action="${portal ? 'portal' : 'checkout'}">${portal ? 'Manage billing' : 'Subscribe for $5/month'}</button></div>` : '<p class="hint">Ask an organization owner to manage billing.</p>'}
+          <p class="error" aria-live="polite"></p>`;
+        card.querySelector('[data-billing-action]')?.addEventListener('click', async (event) => {
+          const button = event.currentTarget;
+          const action = button.dataset.billingAction;
+          const message = card.querySelector('.error');
+          button.disabled = true;
+          const response = await fetch(`/api/organizations/${encodeURIComponent(organization.id)}/billing/${action}`, { method: 'POST' }).catch(() => null);
+          const body = await response?.json().catch(() => null);
+          if (!response?.ok || !body?.url) {
+            button.disabled = false;
+            message.textContent = body?.error?.message ?? body?.error ?? 'Could not open Stripe billing.';
+            return;
+          }
+          location.href = body.url;
+        });
+        main.appendChild(card);
+      }
+
       function renderInvite(organization) {
         if (organization.role !== 'owner') return;
         const card = document.createElement('div');
@@ -290,6 +347,7 @@
         localStorage.setItem(selectedOrganizationKey, organization.id);
         document.getElementById('current-org').textContent = `· ${organization.name}`;
         renderOrganizationControls(me, organization);
+        renderBilling(organization);
         renderInvite(organization);
         for (const site of organization.sites) await renderSite(site, organization.siteUrls?.[site] ?? `/s/${site}/`);
         if (organization.sites.length === 0) {

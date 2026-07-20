@@ -40,10 +40,18 @@ type repository interface {
 	PendingInvitationsForEmail(context.Context, string) ([]store.OrganizationInvitation, error)
 	RespondToOrganizationInvitation(context.Context, string, store.Account, bool, store.AuditEvent) (store.OrganizationInvitation, error)
 	BindOrganizationSite(context.Context, string, string, string, store.AuditEvent) error
+	ReleaseOrganizationSite(context.Context, string, string, store.AuditEvent) error
 	SitesForAccount(context.Context, string) ([]string, error)
 	BindSiteOwnership(context.Context, string, string, store.AuditEvent) error
 	RecordAudit(context.Context, store.AuditEvent) error
 	ConsumeRateLimit(context.Context, string, string, int, time.Duration) (store.RateLimitResult, error)
+	BillingForOrganization(context.Context, string) (store.OrganizationBilling, error)
+	StartOrganizationTrial(context.Context, string, time.Time, store.AuditEvent) (store.OrganizationBilling, error)
+	SetStripeCustomer(context.Context, string, string) error
+	UpdateStripeSubscription(context.Context, store.StripeSubscriptionUpdate, store.AuditEvent) error
+	OrganizationIDByStripeCustomer(context.Context, string) (string, error)
+	ClaimStripeWebhookEvent(context.Context, string, string, time.Time) (bool, error)
+	FinishStripeWebhookEvent(context.Context, string, error) error
 	DBStats() telemetry.DBStats
 }
 
@@ -56,15 +64,20 @@ type Server struct {
 	metrics         *telemetry.Metrics
 	devOutbox       *confirmationOutbox
 	delivery        emailDelivery
+	billing         billingProvider
+	now             func() time.Time
 }
 
 func NewServer(cfg config.Config, st repository, log *slog.Logger) *Server {
-	server := &Server{cfg: cfg, store: st, log: log, securitySampler: newSecurityLogSampler()}
+	server := &Server{cfg: cfg, store: st, log: log, securitySampler: newSecurityLogSampler(), now: time.Now}
 	if cfg.Env == "dev" {
 		server.devOutbox = newConfirmationOutbox()
 		server.delivery = server.devOutbox
 	} else if cfg.EmailAccountID != "" && cfg.EmailAPIToken != "" && cfg.EmailFrom != "" {
 		server.delivery = newCloudflareEmailDelivery(cfg.EmailAccountID, cfg.EmailAPIToken, cfg.EmailFrom)
+	}
+	if cfg.StripeSecretKey != "" {
+		server.billing = newStripeBillingProvider(cfg.StripeSecretKey)
 	}
 	server.metrics = telemetry.New(func() telemetry.DBStats {
 		if server.store == nil {
@@ -91,6 +104,7 @@ func (s *Server) Router() http.Handler {
 	r.Get("/docs", s.handleDocs)
 	r.Get("/docs/", s.handleDocs)
 	r.Get("/docs/swagger-initializer.js", s.handleSwaggerInitializer)
+	r.Post("/stripe/webhooks", s.handleStripeWebhook)
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(s.requireEdgeAuthentication)
 		r.Use(s.trustedClientIP)
@@ -104,6 +118,11 @@ func (s *Server) Router() http.Handler {
 		r.Post("/sessions/logout", s.handleSessionLogout)
 		r.Post("/organizations", s.handleCreateOrganization)
 		r.Post("/organizations/{organizationID}/invitations", s.handleCreateInvitation)
+		r.Post("/organizations/{organizationID}/billing/start-trial", s.handleStartTrial)
+		r.Get("/organizations/{organizationID}/entitlement", s.handleOrganizationEntitlement)
+		r.Post("/organizations/{organizationID}/billing/checkout", s.handleBillingCheckout)
+		r.Post("/organizations/{organizationID}/billing/portal", s.handleBillingPortal)
+		r.Delete("/organizations/{organizationID}/sites/{subdomain}", s.handleReleaseOrganizationSite)
 		r.Post("/invitations/{invitationID}/accept", s.handleAcceptInvitation)
 		r.Post("/invitations/{invitationID}/decline", s.handleDeclineInvitation)
 		r.Post("/site-ownership", s.handleBindSiteOwnership)

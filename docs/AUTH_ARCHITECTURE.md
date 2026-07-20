@@ -29,9 +29,9 @@ verification as a first filter.
 > **The organization is also the billing boundary**: subscriptions, payment
 > methods, and billing events attach to the organization (managed by members
 > with owner/billing permission; billing events record the acting account for
-> audit) — never to a person. `FUNNEL.md`'s `accounts.subscription_status` is
-> superseded by this; the billing schema itself is built when FUNNEL phase 4
-> (pay-to-edit) ships, not before.
+> audit) — never to a person. The implemented `organization_billing` record,
+> Stripe customer/subscription IDs, trial deadlines, and entitlement API all
+> follow this rule; there is no account subscription.
 >
 > The doctrine in one breath: **accounts are people; organizations are
 > businesses and billing boundaries; memberships decide which people can
@@ -132,9 +132,10 @@ resource) *is* building the credit component's auth, minus the provider integrat
 ## Namespaces & the tenant → namespace binding
 
 How identity (core) ties to content (edge/local) — added once per-client publishing became
-real. **Auth stays deliberately simple for now: claim token + platform admin key.**
-Accounts/passwords attach later, if we go that route — and then they live only in core,
-hashed, never at the edge.
+real. **Account sessions and organization membership are the production authority.**
+Per-site claim tokens remain a legacy editor capability and are stored only as hashes at
+the edge; a token cannot create a production site without the site first being bound to an
+authenticated account's organization.
 
 - **One identity authority, N content stores.** A client's content lives in a
   **namespace** addressed by their slug, in whichever store the persistence adapter
@@ -142,19 +143,17 @@ hashed, never at the edge.
   (`artifacts/sites/<slug>/...`) for dev and tests. Adapters share one canonical path
   scheme and one interface — `load` / `publish` / `list(namespace)` — so the dashboard
   (and any agent driving the controller) enumerates a client's components identically
-  regardless of adapter. Core never stores content; content stores never hold identity
-  data.
-- **The binding.** Core stores the client's actual data (name, keys, and later account
-  credentials / end-user data) plus the binding: tenant → namespace slug + that
-  namespace's edge credential (the claim token). Registration is **one flow**: claim
-  `sites/<slug>/` at the edge, create the tenant in core, store the binding.
-  (Prototype: the claim token is stored plainly in core so it can be released to
-  sessions later; encrypt it before real merchants.)
-- **Who reaches which namespace.** A client resolves to their own binding. Platform
-  admins/devs resolve **all** bindings — access to every namespace comes from core
-  knowing every binding, never from an edge-side bypass; the Worker keeps enforcing
-  plain claim-token auth. Locally the FS adapter has no auth at all: a dev running it
-  is implicitly admin of every local namespace, which is the intended behavior.
+  regardless of adapter. Core never stores component artifacts: Cloudflare R2
+  remains the content store, while Core supplies organization ownership and
+  billing entitlement.
+- **The binding.** Core stores `organization_sites`; R2 metadata stores the same
+  organization ID plus the public organization key and permanent site ID. The Worker
+  creates both sides during a signed-in site claim or after email confirmation, and
+  rejects publication when Core is configured but the organization binding is absent.
+- **Who reaches which namespace.** An account resolves to sites through its organization
+  memberships. The Worker verifies the account session with Core; the hashed claim token
+  remains accepted for an already-bound editor session. Locally the FS adapter has no
+  auth at all: a dev running it is implicitly admin of local namespaces.
 - **Invariants.** Edge/local stores hold nothing secret beyond token hashes; core holds
   no presentation data; the edge credential is released by core, never baked into an
   artifact or embed.
