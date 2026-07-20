@@ -41,7 +41,7 @@ export class ArchuraToolbar extends LitElement {
           ${target
             ? html`
                 <button class="crumb" @click=${() => this.#togglePanel('targets')}>
-                  ${target.kind === 'page' ? 'Pages' : 'Components'} / <strong>${target.label}</strong>
+                  ${target.kind === 'page' ? 'Page-sized components' : 'Smaller components'} / <strong>${target.label}</strong>
                   <span class="caret">▾</span>
                 </button>
               `
@@ -149,7 +149,9 @@ export class ArchuraToolbar extends LitElement {
         )}
       `;
     };
-    return html`<div class="panel left targets">${group('page', 'Pages')} ${group('component', 'Components')}</div>`;
+    return html`<div class="panel left targets">
+      ${group('page', 'Page-sized components')} ${group('component', 'Smaller components')}
+    </div>`;
   }
 
   #renderBreakpointsPanel() {

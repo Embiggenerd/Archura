@@ -279,3 +279,4 @@ function loadStripeJs() {
 if (!customElements.get(StripePayment.grapesTagName)) {
   customElements.define(StripePayment.grapesTagName, StripePayment);
 }
+

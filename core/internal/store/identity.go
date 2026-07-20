@@ -14,55 +14,55 @@ var (
 	ErrNotFound = errors.New("store record not found")
 )
 
-func (s *Store) CreateTenant(ctx context.Context, p CreateTenantParams, audit AuditEvent) (Tenant, error) {
+func (s *Store) CreateOrganization(ctx context.Context, p CreateOrganizationParams, audit AuditEvent) (Organization, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
-		return Tenant{}, fmt.Errorf("begin create tenant: %w", err)
+		return Organization{}, fmt.Errorf("begin create organization: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var tenant Tenant
+	var organization Organization
 	err = tx.QueryRow(ctx, `
-		INSERT INTO tenants (name, slug, allowed_origins, edge_claim_token)
+		INSERT INTO organizations (name, slug, allowed_origins, edge_claim_token)
 		VALUES ($1, $2, $3, NULLIF($4, ''))
 		RETURNING id::text, name, slug, allowed_origins, status, created_at`,
 		p.Name, p.Slug, p.AllowedOrigins, p.EdgeClaimToken,
-	).Scan(&tenant.ID, &tenant.Name, &tenant.Slug, &tenant.AllowedOrigins, &tenant.Status, &tenant.CreatedAt)
+	).Scan(&organization.ID, &organization.Name, &organization.Slug, &organization.AllowedOrigins, &organization.Status, &organization.CreatedAt)
 	if err != nil {
-		return Tenant{}, mapStoreError("insert tenant", err)
+		return Organization{}, mapStoreError("insert organization", err)
 	}
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO tenant_api_keys (tenant_id, publishable_key, secret_key_hash)
+		INSERT INTO organization_api_keys (organization_id, publishable_key, secret_key_hash)
 		VALUES ($1::uuid, $2, $3)`,
-		tenant.ID, p.PublishableKey, p.SecretKeyHash,
+		organization.ID, p.PublishableKey, p.SecretKeyHash,
 	); err != nil {
-		return Tenant{}, mapStoreError("insert tenant keys", err)
+		return Organization{}, mapStoreError("insert organization keys", err)
 	}
-	audit.TenantID = tenant.ID
-	audit.ResourceID = tenant.ID
+	audit.OrganizationID = organization.ID
+	audit.ResourceID = organization.ID
 	if err := insertAudit(ctx, tx, audit); err != nil {
-		return Tenant{}, err
+		return Organization{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return Tenant{}, fmt.Errorf("commit create tenant: %w", err)
+		return Organization{}, fmt.Errorf("commit create organization: %w", err)
 	}
-	return tenant, nil
+	return organization, nil
 }
 
-func (s *Store) TenantBySecretHash(ctx context.Context, hash string) (Tenant, error) {
-	var tenant Tenant
+func (s *Store) OrganizationBySecretHash(ctx context.Context, hash string) (Organization, error) {
+	var organization Organization
 	err := s.Pool.QueryRow(ctx, `
 		SELECT t.id::text, t.name, t.slug, t.allowed_origins, t.status, t.created_at
-		FROM tenants t
-		JOIN tenant_api_keys k ON k.tenant_id = t.id
+		FROM organizations t
+		JOIN organization_api_keys k ON k.organization_id = t.id
 		WHERE k.secret_key_hash = $1 AND k.revoked_at IS NULL AND t.status = 'active'`,
 		hash,
-	).Scan(&tenant.ID, &tenant.Name, &tenant.Slug, &tenant.AllowedOrigins, &tenant.Status, &tenant.CreatedAt)
+	).Scan(&organization.ID, &organization.Name, &organization.Slug, &organization.AllowedOrigins, &organization.Status, &organization.CreatedAt)
 	if err != nil {
-		return Tenant{}, mapStoreError("find tenant by secret", err)
+		return Organization{}, mapStoreError("find organization by secret", err)
 	}
-	return tenant, nil
+	return organization, nil
 }
 
 func (s *Store) UpsertPaymentComponent(ctx context.Context, component PaymentComponent, audit AuditEvent) (PaymentComponent, error) {
@@ -75,7 +75,7 @@ func (s *Store) UpsertPaymentComponent(ctx context.Context, component PaymentCom
 	var saved PaymentComponent
 	err = tx.QueryRow(ctx, `
 		INSERT INTO payment_components (
-			id, tenant_id, mode, stripe_price_id, success_url, cancel_url, allowed_origins, status
+			id, organization_id, mode, stripe_price_id, success_url, cancel_url, allowed_origins, status
 		) VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (id) DO UPDATE SET
 			mode = EXCLUDED.mode,
@@ -85,13 +85,13 @@ func (s *Store) UpsertPaymentComponent(ctx context.Context, component PaymentCom
 			allowed_origins = EXCLUDED.allowed_origins,
 			status = EXCLUDED.status,
 			updated_at = now()
-		WHERE payment_components.tenant_id = EXCLUDED.tenant_id
-		RETURNING id, tenant_id::text, mode, stripe_price_id, success_url, cancel_url,
+		WHERE payment_components.organization_id = EXCLUDED.organization_id
+		RETURNING id, organization_id::text, mode, stripe_price_id, success_url, cancel_url,
 			allowed_origins, status, created_at, updated_at`,
-		component.ID, component.TenantID, component.Mode, component.StripePriceID,
+		component.ID, component.OrganizationID, component.Mode, component.StripePriceID,
 		component.SuccessURL, component.CancelURL, component.AllowedOrigins, component.Status,
 	).Scan(
-		&saved.ID, &saved.TenantID, &saved.Mode, &saved.StripePriceID,
+		&saved.ID, &saved.OrganizationID, &saved.Mode, &saved.StripePriceID,
 		&saved.SuccessURL, &saved.CancelURL, &saved.AllowedOrigins, &saved.Status,
 		&saved.CreatedAt, &saved.UpdatedAt,
 	)
@@ -110,16 +110,16 @@ func (s *Store) UpsertPaymentComponent(ctx context.Context, component PaymentCom
 	return saved, nil
 }
 
-func (s *Store) PaymentComponentForTenant(ctx context.Context, tenantID, componentID string) (PaymentComponent, error) {
+func (s *Store) PaymentComponentForOrganization(ctx context.Context, organizationID, componentID string) (PaymentComponent, error) {
 	var component PaymentComponent
 	err := s.Pool.QueryRow(ctx, `
-		SELECT id, tenant_id::text, mode, stripe_price_id, success_url, cancel_url,
+		SELECT id, organization_id::text, mode, stripe_price_id, success_url, cancel_url,
 			allowed_origins, status, created_at, updated_at
 		FROM payment_components
-		WHERE id = $1 AND tenant_id = $2::uuid AND status = 'active'`,
-		componentID, tenantID,
+		WHERE id = $1 AND organization_id = $2::uuid AND status = 'active'`,
+		componentID, organizationID,
 	).Scan(
-		&component.ID, &component.TenantID, &component.Mode, &component.StripePriceID,
+		&component.ID, &component.OrganizationID, &component.Mode, &component.StripePriceID,
 		&component.SuccessURL, &component.CancelURL, &component.AllowedOrigins, &component.Status,
 		&component.CreatedAt, &component.UpdatedAt,
 	)
@@ -139,17 +139,17 @@ func (s *Store) CreateComponentSession(ctx context.Context, session ComponentSes
 	var created ComponentSession
 	err = tx.QueryRow(ctx, `
 		INSERT INTO component_sessions (
-			id, token_hash, tenant_id, component_id, external_user_id, scopes,
+			id, token_hash, organization_id, component_id, external_user_id, scopes,
 			audience, allowed_origin, expires_at
 		) VALUES ($1, $2, $3::uuid, $4, NULLIF($5, ''), $6, $7, $8, $9)
-		RETURNING id, token_hash, tenant_id::text, component_id,
+		RETURNING id, token_hash, organization_id::text, component_id,
 			COALESCE(external_user_id, ''), scopes, audience, allowed_origin,
 			expires_at, revoked_at, created_at`,
-		session.ID, session.TokenHash, session.TenantID, session.ComponentID,
+		session.ID, session.TokenHash, session.OrganizationID, session.ComponentID,
 		session.ExternalUserID, session.Scopes, session.Audience,
 		session.AllowedOrigin, session.ExpiresAt,
 	).Scan(
-		&created.ID, &created.TokenHash, &created.TenantID, &created.ComponentID,
+		&created.ID, &created.TokenHash, &created.OrganizationID, &created.ComponentID,
 		&created.ExternalUserID, &created.Scopes, &created.Audience,
 		&created.AllowedOrigin, &created.ExpiresAt, &created.RevokedAt, &created.CreatedAt,
 	)
@@ -168,13 +168,13 @@ func (s *Store) CreateComponentSession(ctx context.Context, session ComponentSes
 func (s *Store) ComponentSessionByTokenHash(ctx context.Context, hash string) (ComponentSession, error) {
 	var session ComponentSession
 	err := s.Pool.QueryRow(ctx, `
-		SELECT id, token_hash, tenant_id::text, component_id,
+		SELECT id, token_hash, organization_id::text, component_id,
 			COALESCE(external_user_id, ''), scopes, audience, allowed_origin,
 			expires_at, revoked_at, created_at
 		FROM component_sessions
 		WHERE token_hash = $1`, hash,
 	).Scan(
-		&session.ID, &session.TokenHash, &session.TenantID, &session.ComponentID,
+		&session.ID, &session.TokenHash, &session.OrganizationID, &session.ComponentID,
 		&session.ExternalUserID, &session.Scopes, &session.Audience,
 		&session.AllowedOrigin, &session.ExpiresAt, &session.RevokedAt, &session.CreatedAt,
 	)

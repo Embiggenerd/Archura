@@ -4,7 +4,7 @@ import {
   createCanonicalComponentData,
   type CanonicalComponentData,
 } from '../component-data/canonical.js';
-import { extractInstanceEmbed, generateEmbedModule, type EmbedInstance } from '../component-data/embed.js';
+import { buildEmbedModules } from '../component-data/embed.js';
 import { defaultComponents } from '../components/index.js';
 import type {
   ArchuraComponentDefinition,
@@ -569,26 +569,20 @@ export class ArchuraEditorController {
 
     this.#artifacts = [artifact];
     this.#dirty = false;
-    this.#config.onSave?.({ artifacts: this.#artifacts });
+    this.#config.onSave?.({ artifacts: this.#artifacts, published: true });
     this.#config.onChange?.(this.#artifacts);
     this.#notify();
     return [...this.#artifacts];
   }
 
-  // Per-client embed modules: one generated JS file per component instance,
-  // named by component (later instances of the same component win). Skipped
-  // for adapters without namespace support.
+  // Per-client embed modules, one per component instance. Skipped for
+  // adapters without namespace support.
   async #publishEmbeds(persistence: ArchuraPersistenceAdapter, artifact: CanonicalComponentData): Promise<void> {
     if (!persistence.publishEmbed) return;
-    const instances = (artifact.content.components ?? []) as EmbedInstance[];
-    for (const instance of instances) {
-      const definition = this.#resolveDefinition(instance.componentPath);
-      if (!definition) continue;
-      const { css, traits } = extractInstanceEmbed(artifact, instance);
-      // Foreign-origin pages need an absolute import URL for the shared module
-      const moduleUrl = new URL(definition.moduleUrl, globalThis.location?.href).href;
-      const source = generateEmbedModule({ moduleUrl, tag: instance.tagName, css, traits });
-      await persistence.publishEmbed(`${instance.componentPath.at(-1)}.js`, source);
+    // Foreign-origin pages need absolute import URLs for the shared modules
+    const modules = buildEmbedModules(artifact, this.#components, globalThis.location?.href ?? '');
+    for (const module of modules) {
+      await persistence.publishEmbed(module.name, module.source);
     }
   }
 
@@ -1128,6 +1122,11 @@ export class ArchuraEditorController {
     const canvasDocument = editor.Canvas.getDocument();
     if (!canvasDocument) return;
 
+    // Editor-context marker: components arm editor-only affordances (inline
+    // text editing) only when this attribute is present. Must be set before
+    // component modules load so firstUpdated sees it.
+    canvasDocument.documentElement.setAttribute('data-archura-editor', '');
+
     // Boot from the host's stored artifact when one exists; a failed load
     // reports through onError and falls back to template defaults
     if (!this.#hasSnapshot && this.#config.persistence) {
@@ -1445,7 +1444,19 @@ export class ArchuraEditorController {
     }
   }
 
+  // An inline text edit commits on blur; snapshotting while one is still
+  // focused (e.g. Deploy clicked straight from typing) must not lose it
+  #commitActiveInlineEdit(): void {
+    const doc = this.#gjsEditor?.Canvas.getDocument();
+    let active = doc?.activeElement ?? null;
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    if (active && 'isContentEditable' in active && active.isContentEditable) {
+      (active as HTMLElement).blur();
+    }
+  }
+
   #createCurrentArtifact(): CanonicalComponentData {
+    this.#commitActiveInlineEdit();
     this.#ensureInstanceIds();
     const timestamp = new Date().toISOString();
     const rawHtml = this.#gjsEditor?.getHtml() ?? this.#state.html;

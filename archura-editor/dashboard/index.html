@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Archura Dashboard</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        margin: 0; min-height: 100vh; background: #f3f4f6;
+        font-family: Helvetica, Arial, sans-serif; color: #111827;
+      }
+      header {
+        display: flex; align-items: baseline; gap: 12px;
+        padding: 14px 28px; background: #111827; color: #e5e7eb;
+      }
+      header h1 { font-size: 1rem; margin: 0; }
+      header .email { color: #9ca3af; font-size: 0.85rem; }
+      header .organization { color: #c7d2fe; font-size: 0.85rem; }
+      header .signout {
+        margin-left: auto; padding: 5px 12px; border: none; border-radius: 6px;
+        background: #374151; color: white; font-size: 0.8rem; font-weight: 600;
+        cursor: pointer; display: none;
+      }
+      main { max-width: 760px; margin: 24px auto; padding: 0 16px; }
+      .card {
+        background: white; border: 1px solid #e5e7eb; border-radius: 14px;
+        padding: 22px; margin-bottom: 18px;
+      }
+      .card h2 { margin: 0 0 4px; font-size: 1.1rem; }
+      .card p.hint { margin: 0 0 14px; color: #6b7280; font-size: 0.9rem; }
+      .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+      .actions a, .actions button {
+        padding: 7px 14px; border-radius: 8px; border: none; cursor: pointer;
+        background: #4f46e5; color: white; font-size: 0.82rem; font-weight: 600;
+        text-decoration: none;
+      }
+      .actions .secondary { background: #374151; }
+      ul.entries { margin: 8px 0 0; padding-left: 18px; color: #374151; font-size: 0.85rem; }
+      pre.snippet {
+        background: #111827; color: #e5e7eb; padding: 10px; border-radius: 8px;
+        overflow-x: auto; font-size: 0.75rem;
+      }
+      form { display: flex; gap: 8px; }
+      input {
+        flex: 1; padding: 10px 12px; border: 1px solid #d1d5db;
+        border-radius: 8px; font-size: 0.95rem;
+      }
+      form button {
+        padding: 10px 18px; border: none; border-radius: 8px;
+        background: #111827; color: white; font-weight: 600; cursor: pointer;
+      }
+      .error { color: #dc2626; font-size: 0.85rem; min-height: 1.2em; }
+      details summary { cursor: pointer; font-size: 0.85rem; margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <header><h1>Archura</h1><span class="email" id="who"></span><span class="organization" id="current-org"></span>
+      <button class="signout" id="signout">Sign out</button></header>
+    <main id="main"></main>
+    <script type="module">
+      import { defaultComponents } from './../src/components/index.ts';
+
+      const main = document.getElementById('main');
+      const tagFor = (embedName) =>
+        defaultComponents.find((d) => `${d.path.at(-1)}.js` === embedName)?.tagName ?? null;
+      const selectedOrganizationKey = 'archura:selected-organization';
+
+      function attributesFor(artifact, embedName) {
+        const instance = [...(artifact?.content?.components ?? [])]
+          .reverse()
+          .find((component) => `${component.componentPath.at(-1)}.js` === embedName);
+        if (!instance) return '';
+        return Object.entries(instance.attributes ?? {})
+          .filter(([name, value]) => !['id', 'class', 'style'].includes(name) && !name.startsWith('data-gjs') && value !== false && value != null)
+          .map(([name, value]) => value === true ? name : `${name}="${String(value).replaceAll('&', '&amp;').replaceAll('"', '&quot;')}"`)
+          .join(' ');
+      }
+
+      function renderRegister(message = '') {
+        main.innerHTML = `
+          <div class="card">
+            <h2>Sign in or register</h2>
+            <p class="hint">Enter your email — we'll send you a link. ${message}</p>
+            <form><input name="email" type="email" placeholder="you@example.com" required />
+            <button type="submit">Send link</button></form>
+            <p class="error"></p>
+          </div>`;
+        main.querySelector('form').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const email = main.querySelector('input').value.trim();
+          const res = await fetch('/api/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+          }).catch(() => null);
+          if (!res || !res.ok) {
+            main.querySelector('.error').textContent =
+              res?.status === 429 ? 'Too many attempts — wait a bit and try again.' :
+              res?.status === 503 ? 'Unavailable — core is not running.' : 'Could not send the link.';
+            return;
+          }
+          main.innerHTML = `<div class="card"><h2>Check your email</h2>
+            <p class="hint">We sent a sign-in link to <strong>${email}</strong>.
+            <a href="/dev-mail/">Running locally? Open the dev mailbox.</a></p></div>`;
+        });
+      }
+
+      async function renderSite(site, siteUrl) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <h2>${site}</h2>
+          <div class="actions"></div>
+          <ul class="entries"><li>Loading…</li></ul>`;
+        main.appendChild(card);
+
+        const list = await fetch(`/api/sites/${site}/list`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null);
+        const ul = card.querySelector('.entries');
+        if (!list) {
+          ul.innerHTML = '<li>Could not load contents.</li>';
+          return;
+        }
+        const componentPath = list.componentPath ?? ['pages', 'Landing'];
+        card.querySelector('.actions').innerHTML =
+          `<a href="/edit/?site=${site}&component=${componentPath.join('/')}">Edit component</a>
+           <a class="secondary" href="${siteUrl}" target="_blank">Open preview</a>`;
+        ul.innerHTML =
+          list.entries.map((e) => `<li>${e.kind}: ${e.path.join('/')}</li>`).join('') ||
+          '<li>Nothing published yet.</li>';
+        const artifact = await fetch(`/api/artifacts/${site}/${componentPath.join('/')}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null);
+        const embeds = list.entries.filter((e) => e.kind === 'embed');
+        for (const embed of embeds) {
+          const name = embed.path.at(-1);
+          const tag = tagFor(name);
+          if (!tag || !list.embedBase) continue;
+          const attributes = attributesFor(artifact, name);
+          const snippet = `<script type="module" src="${list.embedBase}/${name}"><\/script>\n<${tag}${attributes ? ` ${attributes}` : ''}></${tag}>`;
+          const details = document.createElement('details');
+          details.innerHTML = `<summary>Get embed code — ${name}</summary>
+            <pre class="snippet">${snippet.replaceAll('<', '&lt;')}</pre>`;
+          card.appendChild(details);
+        }
+      }
+
+      function renderClaim(organization) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <h2>Claim a new site</h2>
+          <p class="hint">Lowercase letters, digits, dashes.</p>
+          <form><input name="site" placeholder="my-site" pattern="[a-z0-9][a-z0-9\\-]{1,38}[a-z0-9]" required />
+          <button type="submit">Claim</button></form>
+          <p class="error"></p>`;
+        card.querySelector('form').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const site = card.querySelector('input').value.trim().toLowerCase();
+          const res = await fetch('/api/sites', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ site, organizationId: organization.id }),
+          }).catch(() => null);
+          if (!res || !res.ok) {
+            card.querySelector('.error').textContent =
+              res?.status === 409 ? 'That name is taken.' :
+              res?.status === 403 ? 'Claiming is currently restricted.' : 'Invalid name.';
+            return;
+          }
+          const { token, url } = await res.json();
+          localStorage.setItem(`archura:site-token:${site}`, token);
+          localStorage.setItem(`archura:site-url:${site}`, url);
+          location.reload();
+        });
+        main.appendChild(card);
+      }
+
+      function renderOrganizationControls(me, selected) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <h2>Organization</h2>
+          <p class="hint">The selected organization owns the sites and embed keys shown below.</p>
+          <form class="select-org">
+            <select name="organization" style="flex:1;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px">
+              ${me.organizations.map((organization) => `<option value="${organization.id}" ${organization.id === selected.id ? 'selected' : ''}>${organization.name}</option>`).join('')}
+            </select>
+          </form>
+          <details><summary>Create another organization</summary>
+            <form class="create-org" style="margin-top:10px;flex-wrap:wrap">
+              <input name="name" placeholder="Business name" required />
+              <input name="slug" placeholder="business-slug" pattern="[a-z0-9][a-z0-9\\-]{0,61}[a-z0-9]" required />
+              <button type="submit">Create</button>
+            </form><p class="error"></p>
+          </details>`;
+        card.querySelector('select').addEventListener('change', (event) => {
+          localStorage.setItem(selectedOrganizationKey, event.target.value);
+          location.reload();
+        });
+        card.querySelector('.create-org').addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const response = await fetch('/api/organizations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: form.name.value.trim(), slug: form.slug.value.trim().toLowerCase() }),
+          }).catch(() => null);
+          if (!response?.ok) {
+            card.querySelector('.error').textContent = response?.status === 409 ? 'That organization slug is taken.' : 'Could not create the organization.';
+            return;
+          }
+          const organization = await response.json();
+          localStorage.setItem(selectedOrganizationKey, organization.id);
+          location.reload();
+        });
+        main.appendChild(card);
+      }
+
+      async function init() {
+        const pathAccount = location.pathname.match(/^\/([0-9a-fA-F][0-9a-fA-F-]{7,})\/dashboard\/?$/)?.[1] ?? null;
+        const me = await fetch('/api/me').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (!me) {
+          renderRegister(pathAccount ? 'This dashboard belongs to a signed-out account — enter its email to get a fresh link.' : '');
+          return;
+        }
+        // Canonical URL is plain /dashboard/; a legacy /<accountId>/ path for
+        // a different account gets a pointer instead of someone else's data
+        if (pathAccount && pathAccount.toLowerCase() !== String(me.id).toLowerCase()) {
+          main.innerHTML = `<div class="card"><h2>Different account</h2>
+            <p class="hint">You are signed in as <strong>${me.email}</strong>.</p>
+            <div class="actions"><a href="/dashboard/">Open your dashboard</a></div></div>`;
+          return;
+        }
+        document.getElementById('who').textContent = me.email;
+        const signout = document.getElementById('signout');
+        signout.style.display = 'inline-block';
+        signout.addEventListener('click', async () => {
+          await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+          location.href = '/dashboard/';
+        });
+        main.innerHTML = '';
+        const preferredOrganization = localStorage.getItem(selectedOrganizationKey);
+        const organization = me.organizations.find((candidate) => candidate.id === preferredOrganization)
+          ?? me.organizations.find((candidate) => candidate.is_default)
+          ?? me.organizations[0];
+        if (!organization) {
+          main.innerHTML = '<div class="card"><h2>No organization</h2><p class="error">Your account needs a default organization.</p></div>';
+          return;
+        }
+        localStorage.setItem(selectedOrganizationKey, organization.id);
+        document.getElementById('current-org').textContent = `· ${organization.name}`;
+        renderOrganizationControls(me, organization);
+        for (const site of organization.sites) await renderSite(site, organization.siteUrls?.[site] ?? `/s/${site}/`);
+        if (organization.sites.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'card';
+          empty.innerHTML = '<h2>No sites yet</h2><p class="hint">Claim a subdomain below, or build first in the <a href="/edit/">editor</a> and deploy from there.</p>';
+          main.appendChild(empty);
+        }
+        renderClaim(organization);
+      }
+      init();
+    </script>
+  </body>
+</html>

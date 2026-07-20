@@ -27,7 +27,7 @@ Anonymous editor
    ▼
 DRAFTED ───────────── expires ~48h ──▶ deleted, subdomain released
    │  subdomain serves a loader; NOT published
-   │  email confirmed  (arms the site + binds it to an account)
+   │  email confirmed  (arms the site + binds it to the account's default organization)
    ▼
 ARMED ─────────────── expires ~7d ───▶ deleted, subdomain released
    │  subdomain still serves the loader
@@ -51,18 +51,32 @@ Everything downstream is a stateless "is it armed? publish-on-visit" / "is it ex
 - **Edge Worker:** subdomain reservation + availability; draft storage in R2; serving the
   three states (loader vs published vs expired); the publish-on-visit promote; lazy expiry
   checks on access.
-- **Core (Go):** email-confirmation accounts, site ownership, subscription/payment state,
-  and the `expires_at`/`status` records. The security boundary for accounts and money.
+- **Core (Go):** email-confirmation accounts, organizations + memberships,
+  organization-owned sites, subscription/payment state, and the
+  `expires_at`/`status` records. The security boundary for identity and money.
 - **Email:** a transactional provider (Resend/Postmark) for the confirmation link.
 
 ## Data model (new/extended)
 
-- `sites` — `subdomain`, `status` (drafted|armed|published|expired), `owner_account_id`
-  (null until confirmed), `draft_ref`, `published_ref`, `created_at`, `confirmed_at`,
+- `sites` — **`site_id` (permanent, opaque `site_…`, the identity — never reused)**,
+  `subdomain` (the *address* — unique among active sites, renamable, releasable),
+  `status` (drafted|armed|published|expired), `organization_id` (null until
+  confirmed), `draft_ref`, `published_ref`, `created_at`, `confirmed_at`,
   `published_at`, `expires_at`.
 - `email_confirmations` — `token_hash`, `site_id`, `email`, `expires_at`.
-- `accounts` — `email`, magic-link auth, `subscription_status`.
-- Ownership: `sites.owner_account_id → accounts.id`.
+- `accounts` — `email`, magic-link auth. Accounts own nothing but identity and
+  memberships; the subscription attaches to the organization (the billing
+  boundary) when phase 4 ships — see `AUTH_ARCHITECTURE.md` vocabulary note.
+- Ownership: `sites.organization_id → organizations.id`; an account reaches a
+  site only through a membership (`accounts ↔ memberships ↔ organizations`).
+  Site and organization counts are unrestricted.
+
+**Identity vs. address** (full doctrine: `AUTH_ARCHITECTURE.md` § Namespaces): the
+slug must not be the durable identity, because expiry releases subdomains (phase 5)
+and paid users later attach full domains. `site_id` is the durable key; hostnames map
+to it. *Implemented at the edge already:* claim and deploy stamp `siteId` into
+`sites/<slug>/meta.json`, so every site created since 2026-07-18 carries its
+permanent identity ahead of the storage/routing migration.
 
 ## Phases
 
@@ -85,11 +99,14 @@ content; no published artifact exists.
 **Problem.** Nothing may publish until the owner proves the email.
 
 **Solution.** The email link carries a confirmation token. The core validates it → creates
-(or attaches) an account from the email → marks the site `armed` (`confirmed_at`), binds
-ownership, and extends `expires_at` to the armed grace (~7d). The confirmation response hands
-the owner the link to their subdomain.
+(or attaches) an account from the email → ensures the account's **default organization**
+(created with the account, with its `pk_`/`sk_` key pair and an `owner` membership) →
+binds the site to that organization → marks the site `armed` (`confirmed_at`) and extends
+`expires_at` to the armed grace (~7d). The confirmation response hands the owner the link
+to their subdomain and the organization's publishable key.
 
-**Verify.** A valid token arms the site and creates the account; an expired/invalid token is
+**Verify.** A valid token arms the site, creates the account + default organization +
+owner membership, and binds the site to the organization; an expired/invalid token is
 rejected; the subdomain still serves the loader (armed ≠ published).
 
 ### 3. First visit → PUBLISHED (lazy publish)
@@ -111,12 +128,15 @@ publishes.
 **Problem.** Free gets one deployed site; editing and keeping it alive should require payment.
 
 **Solution.** The owner returns via magic link and opens the editor with their published
-artifact. **Save/publish checks `subscription_status`** — blocked (with an upgrade prompt)
-for free accounts, allowed for paying ones. Payment also clears `expires_at` (persistence).
-Paying owners' re-publishes are immediate (they're authenticated; no lazy dance).
+artifact. **Save/publish checks the owning *organization's* subscription** — blocked
+(with an upgrade prompt) while the organization is on the free tier, allowed once it
+pays; any member with owner/billing permission can be the payer, and the subscription
+survives member turnover. Payment also clears `expires_at` (persistence). Members of
+paying organizations re-publish immediately (they're authenticated; no lazy dance).
 
-**Verify.** A free owner can open the editor and view but not save/publish; after payment,
-save/publish succeeds and the site's `expires_at` is cleared.
+**Verify.** A member of a free organization can open the editor and view but not
+save/publish; after the organization pays, save/publish succeeds and the site's
+`expires_at` is cleared.
 
 ### 5. Universal expiry (lazy)
 
@@ -126,13 +146,25 @@ their subdomains.
 **Solution.** **Lazy expiry:** every access (visit, edit, API) checks `expires_at`; past it,
 the site is treated as expired — serve an "expired, upgrade to restore" page and stop serving
 content. A periodic cleanup job reclaims R2 storage and **releases the subdomain after a
-short grace** (so good names aren't squatted by dead free sites); the original owner can
-reclaim if they had an account. TTLs (all tunable): draft 48h, armed 7d, published-free 30d,
+short grace** (so good names aren't squatted by dead free sites); the owning
+organization can reclaim during the grace via any of its members. TTLs (all tunable):
+draft 48h, armed 7d, published-free 30d,
 paid = none. This mirrors the core's existing `ct_` session TTL — "everything has an expiry"
 becomes a platform-wide principle.
 
 **Verify.** An unconfirmed draft past 48h is gone and its subdomain reusable; a free site past
 its window serves the expired page; a paid site never expires.
+
+**Release frees the address, never the identity.** Reclaiming a subdomain deletes the
+hostname mapping and the content; the `site_id` is never reissued. **Prerequisite
+before this phase ships:** embed URLs must resolve by stable identity, not the
+releasable slug — otherwise a stranger re-registering a released slug would serve
+their content through the previous owner's pasted embed code. **Satisfied by the
+embed-identity milestone**: embed URLs are `/<pk>/<site_id>/<Component>.js`
+(organization key + permanent site id; `docs/PLAN_EMBEDS.md`), with resolution
+verifying the site's current metadata still matches — a reused slug's projection
+returns 404. Legacy slug-based `/s/<slug>/embed/…` URLs must be retired before
+subdomain release actually ships.
 
 ## Anti-abuse (falls out of the design)
 
@@ -145,8 +177,9 @@ its window serves the expired page; a paid site never expires.
 
 1. **Draft/serve states in the Worker** — Deploy → `drafted` + reserved subdomain + loader
    page; no publish. (Reuses R2 + serving; adds the draft state.)
-2. **Email-confirm accounts in the core** — confirmations, accounts, ownership, the `arm`
-   action; transactional email.
+2. **Email-confirm accounts in the core** — confirmations, accounts + default
+   organizations + owner memberships, organization-owned sites, the `arm` action;
+   transactional email.
 3. **Publish-on-visit promote** — Worker promotes armed → published on first visit, with the
    moderation scan.
 4. **Lazy expiry** — `expires_at` on sites + on-access checks + cleanup job + subdomain
@@ -156,6 +189,13 @@ its window serves the expired page; a paid site never expires.
 
 ## Deferred
 
-Custom domains, multi-page sites, subdomain reclaim UI, composer vs client editing mode, and
-the developer/embed on-ramp (separate funnel for the embeddable components — see
-`STRIPE_COMPONENT.md` and the marketing split).
+- **Custom domains (the paid upgrade)** — falls out of identity vs. address: a domain
+  upgrade *adds* a hostname → `site_id` mapping row (`www.mikesbakery.com → site_x`)
+  alongside the existing subdomain mapping; serving resolves host → site_id →
+  namespace. Nothing about the site's content, embeds, or ownership moves. The
+  archura subdomain stays as the default/fallback address. Requires: the mapping
+  table (core), host-resolution in the Worker ahead of the current subdomain parse,
+  and TLS via Cloudflare custom hostnames.
+- Multi-page sites, subdomain reclaim UI, composer vs client editing mode, and the
+  developer/embed on-ramp (separate funnel for the embeddable components — see
+  `STRIPE_COMPONENT.md` and the marketing split).

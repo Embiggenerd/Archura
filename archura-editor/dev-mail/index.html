@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Archura Dev Mailbox</title>
+    <style>
+      body { margin: 0; min-height: 100vh; background: #f3f4f6; font-family: Helvetica, Arial, sans-serif; color: #111827; }
+      main { max-width: 640px; margin: 40px auto; padding: 0 16px; }
+      h1 { font-size: 1.2rem; }
+      p.hint { color: #6b7280; font-size: 0.9rem; }
+      ul { list-style: none; padding: 0; }
+      li { background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 18px; margin-bottom: 10px; font-size: 0.9rem; }
+      li a { color: #4f46e5; font-weight: 600; }
+      li.used { opacity: 0.55; }
+      .meta { color: #9ca3af; font-size: 0.8rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Dev mailbox</h1>
+      <p class="hint">Pending confirmation links from the local core. Local testing only — this page is empty/unavailable in production. Refreshes every 3s.</p>
+      <ul id="list"><li>Loading…</li></ul>
+    </main>
+    <script type="module">
+      const list = document.getElementById('list');
+      async function refresh() {
+        const res = await fetch('/api/dev/mailbox').catch(() => null);
+        if (!res || !res.ok) {
+          list.innerHTML = `<li>Mailbox unavailable (${res?.status ?? 'no connection'}) — is the local core running in dev mode?</li>`;
+          return;
+        }
+        const { confirmations = [] } = await res.json();
+        list.innerHTML =
+          confirmations
+            .map(
+              (c) => `<li${c.used ? ' class="used"' : ''}><strong>${c.email}</strong>${c.subdomain ? ` → ${c.subdomain}` : ''}
+                <div class="meta">${c.created_at ?? ''}${c.used ? ' · used' : ''}${c.expired ? ' · expired' : ''}</div>
+                <a href="${c.confirm_url}">${c.used ? 'Open (already used — takes you to your dashboard)' : 'Confirm'}</a></li>`
+            )
+            .join('') || '<li>No confirmations yet.</li>';
+      }
+      refresh();
+      setInterval(refresh, 3000);
+    </script>
+  </body>
+</html>

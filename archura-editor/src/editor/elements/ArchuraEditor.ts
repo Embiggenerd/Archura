@@ -21,6 +21,11 @@ export class ArchuraEditor extends LitElement {
 
   @state() private controller: ArchuraEditorController | null = null;
 
+  /** Programmatic access for host pages and agents (the controller-first path). */
+  getController(): ArchuraEditorController | null {
+    return this.controller;
+  }
+
   connectedCallback(): void {
     super.connectedCallback();
     this.addEventListener('archura:target-select', this.#onTargetSelect);
@@ -70,8 +75,8 @@ export class ArchuraEditor extends LitElement {
       onChange: (artifacts) => {
         this.dispatchEvent(new CustomEvent('artifactchange', { detail: { artifacts } }));
       },
-      onSave: ({ artifacts }) => {
-        this.dispatchEvent(new CustomEvent('artifactsave', { detail: { artifacts } }));
+      onSave: ({ artifacts, published }) => {
+        this.dispatchEvent(new CustomEvent('artifactsave', { detail: { artifacts, published } }));
       },
       onError: (error) => {
         this.dispatchEvent(new CustomEvent('editorerror', { detail: { error } }));

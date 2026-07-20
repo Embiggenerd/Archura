@@ -31,6 +31,10 @@ func TestAuditMetadataIsActionAllowlisted(t *testing.T) {
 			t.Fatalf("audit metadata contains forbidden field %q: %s", forbidden, value)
 		}
 	}
+	empty, err := auditMetadata(AuditEvent{Action: "confirmation.verify_rejected", Metadata: EmptyAuditMetadata{}})
+	if err != nil || string(empty) != `{}` {
+		t.Fatalf("empty funnel audit metadata = %s, err = %v", empty, err)
+	}
 }
 
 func TestAuditMetadataRejectsUnknownShapesAndActions(t *testing.T) {

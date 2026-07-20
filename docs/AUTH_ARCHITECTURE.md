@@ -10,6 +10,37 @@ Stripe component is just the first harmless resource to gate behind it.
 in the Go core (see `FINTECH_ARCHITECTURE.md`); the edge Worker does only coarse token
 verification as a first filter.
 
+> **Vocabulary (decided 2026-07-19): "tenant" is renamed "organization".**
+> The model: `account` (a person; email + sessions) ↔ `organization` (the
+> business; keys, payment config, audit, end-users, site ownership — the
+> isolation boundary) via `memberships` (account_id, organization_id, role) —
+> many-to-many. **Creating an account creates its default organization**;
+> accounts can create more, and other accounts can be members of them. **Site
+> and organization counts are unrestricted** (the earlier one-deploy-per-email
+> rule is rescinded). **There is no "workspace" concept — the dashboard is
+> the organization-scoped experience**, and an account merely selects which
+> organization's dashboard to enter; while an account has one org,
+> `/dashboard/` simply is that organization's dashboard, and an org switcher
+> appears with the second membership. An agency running many
+> merchants is many organizations joined by cross-org memberships — never one
+> organization containing many businesses, because keys, Connect accounts,
+> and liability must stay per-business.
+>
+> **The organization is also the billing boundary**: subscriptions, payment
+> methods, and billing events attach to the organization (managed by members
+> with owner/billing permission; billing events record the acting account for
+> audit) — never to a person. `FUNNEL.md`'s `accounts.subscription_status` is
+> superseded by this; the billing schema itself is built when FUNNEL phase 4
+> (pay-to-edit) ships, not before.
+>
+> The doctrine in one breath: **accounts are people; organizations are
+> businesses and billing boundaries; memberships decide which people can
+> access and pay for an organization; the dashboard shows the currently
+> selected organization; sites and embedded components belong to the
+> organization.**
+>
+> Older text below says "tenant"; read it as organization.
+
 ## Three principals, all tenant-scoped
 
 - **Platform admin** (Archura staff) — internal.
@@ -18,10 +49,13 @@ verification as a first filter.
 - **End-user** (the client's customer) — authenticates to see *their own* data.
   → "the client registers users."
 
-Identity is **scoped by tenant**: `jane@example.com` under Client A is a different principal
-than under Client B. Per-tenant token signing, per-tenant validation, and a tenant-id claim
-on every token. Tenant isolation is enforced at the **data layer** (row-level security, or
-schema/DB-per-tenant for the most sensitive data), not just in application logic.
+**End-user** identity is **scoped by organization**: `jane@example.com` as Client A's
+customer is a different principal than as Client B's customer. Per-org token signing,
+per-org validation, and an organization-id claim on every token. Isolation is enforced
+at the **data layer** (row-level security, or schema/DB-per-org for the most sensitive
+data), not just in application logic. **Archura account identity is the opposite —
+global**: one email is one person everywhere; what differs across organizations is
+their membership and role, never who they are.
 
 ## Client credentials
 
@@ -120,6 +154,18 @@ hashed, never at the edge.
 - **Invariants.** Edge/local stores hold nothing secret beyond token hashes; core holds
   no presentation data; the edge credential is released by core, never baked into an
   artifact or embed.
+- **Identity vs. address (decided ahead of custom domains).** The slug currently does
+  three jobs at once: namespace key, public address, and uniqueness token. That
+  coupling ends when paying users attach full domains, and when expiry releases
+  subdomains for reuse. The durable model: every site gets a permanent opaque
+  **site ID** (`site_…`, minted at claim/deploy, never reused) as the true namespace
+  key; hostnames — the archura subdomain now, custom domains later — become a
+  **mapping to that ID**. Slug uniqueness then means only "no two active sites share
+  an address." Embeds and core bindings ultimately resolve by ID, so pasted snippets
+  survive renames, domain upgrades, and subdomain release. Migration is deferred
+  (prototype discipline), but `meta.json` stamps `siteId` from creation so every
+  namespace already carries its permanent identity — and new features must not deepen
+  the slug=identity coupling.
 
 ## Seed → target migration
 
@@ -151,7 +197,13 @@ hashed, never at the edge.
 
 ---
 
-## Implementation plan (first cut — Worker-based)
+## Implementation plan (first cut — Worker-based) — HISTORICAL, SUPERSEDED
+
+> **Do not implement from this section.** It predates the Go core: it builds
+> the auth spine in the Worker, treats a site as the tenant, and treats the
+> claim token as the organization secret — all superseded by the core-based
+> reality above (accounts, organizations, memberships, core-minted keys).
+> Kept for the record of how the seed model evolved.
 
 ### Guiding decisions
 

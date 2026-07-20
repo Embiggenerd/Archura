@@ -21,6 +21,7 @@ const SUITES = [
   'verify-invariants',
   'verify-deploy',
   'verify-client-styling',
+  'verify-funnel',
 ];
 
 const startServer = (args) =>

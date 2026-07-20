@@ -1,6 +1,7 @@
 name = "archura-sites"
 main = "workers/site-worker.js"
 compatibility_date = "2026-07-01"
+compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
 routes = [
@@ -33,3 +34,14 @@ CLAIM_IP_ALLOWLIST = "72.132.36.124,2603:8001:2400:2ac0:*,216.61.150.99,2600:387
 # Core proxy target. CORE_SERVICE_KEY must be set with `wrangler secret put` in
 # production or in `.dev.vars` for local Worker→core verification.
 CORE_URL = "https://core.archura.ai"
+
+[observability]
+enabled = true
+
+  [observability.logs]
+  enabled = true
+  head_sampling_rate = 1
+
+  [observability.traces]
+  enabled = true
+  head_sampling_rate = 0.01

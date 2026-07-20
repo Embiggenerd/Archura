@@ -1,0 +1,16 @@
+{
+  "name": "archura-e2e",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "test": "node run-all.mjs",
+    "test:stories": "node stories-client-registration.mjs",
+    "test:funnel": "node funnel.mjs",
+    "test:editor": "node editor.mjs",
+    "postinstall": "playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}

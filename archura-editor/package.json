@@ -4,12 +4,14 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "sh ../scripts/dev-up.sh",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build:app": "vite build",
     "build:components": "node scripts/build-components.mjs",
     "build": "npm run build:app && npm run build:components",
     "deploy": "npm run build && wrangler deploy",
+    "practice": "node toy-client/server.mjs",
+    "deploy:practice": "wrangler deploy --config toy-client/wrangler.jsonc",
     "verify:all": "node scripts/verify-all.mjs"
   },
   "dependencies": {

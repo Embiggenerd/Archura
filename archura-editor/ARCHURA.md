@@ -39,17 +39,17 @@ The host application decides all of that.
 
 | Doc | What it covers |
 | --- | --- |
-| [EDITOR_API_SPEC.md](docs/EDITOR_API_SPEC.md) | The editor's public API surface. |
-| [EDITOR_EMBEDDING_MODEL.md](docs/EDITOR_EMBEDDING_MODEL.md) | How hosts embed the editor and wire the controller. |
-| [EDITOR_PARITY.md](docs/EDITOR_PARITY.md) | Road to a Webflow-level editor. |
-| [ARTICLES_APP.md](docs/ARTICLES_APP.md) | First collection-backed app: Markdown-canonical knowledge/articles, math + wikilink graph, AEO. |
-| [GAPS_AND_SOLUTIONS.md](docs/GAPS_AND_SOLUTIONS.md) | Current gaps and the plan to close them. Source of truth for state. |
-| [STRIPE_COMPONENT.md](docs/STRIPE_COMPONENT.md) | Embedded Stripe component — gaps and how to close them. |
-| [FUNNEL.md](docs/FUNNEL.md) | Deploy funnel: anonymous → confirmed → published → paid. |
-| [DASHBOARD.md](docs/DASHBOARD.md) | Tenant dashboard (later sprint). |
-| [AUTH_ARCHITECTURE.md](docs/AUTH_ARCHITECTURE.md) | Identity & auth for the B2B2C multi-tenant model. |
-| [CORE_SERVER.md](docs/CORE_SERVER.md) | The Go core server — design & build reference. |
-| [FINTECH_ARCHITECTURE.md](docs/FINTECH_ARCHITECTURE.md) | Trust boundaries and the edge/core split. |
+| [EDITOR_API_SPEC.md](../docs/EDITOR_API_SPEC.md) | The editor's public API surface. |
+| [EDITOR_EMBEDDING_MODEL.md](../docs/EDITOR_EMBEDDING_MODEL.md) | How hosts embed the editor and wire the controller. |
+| [EDITOR_PARITY.md](../docs/EDITOR_PARITY.md) | Road to a Webflow-level editor. |
+| [ARTICLES_APP.md](../docs/ARTICLES_APP.md) | First collection-backed app: Markdown-canonical knowledge/articles, math + wikilink graph, AEO. |
+| [GAPS_AND_SOLUTIONS.md](../docs/GAPS_AND_SOLUTIONS.md) | Current gaps and the plan to close them. Source of truth for state. |
+| [STRIPE_COMPONENT.md](../docs/STRIPE_COMPONENT.md) | Embedded Stripe component — gaps and how to close them. |
+| [FUNNEL.md](../docs/FUNNEL.md) | Deploy funnel: anonymous → confirmed → published → paid. |
+| [DASHBOARD.md](../docs/DASHBOARD.md) | Tenant dashboard (later sprint). |
+| [AUTH_ARCHITECTURE.md](../docs/AUTH_ARCHITECTURE.md) | Identity & auth for the B2B2C multi-tenant model. |
+| [CORE_SERVER.md](../docs/CORE_SERVER.md) | The Go core server — design & build reference. |
+| [FINTECH_ARCHITECTURE.md](../docs/FINTECH_ARCHITECTURE.md) | Trust boundaries and the edge/core split. |
 
-For current status and what's next, see [GAPS_AND_SOLUTIONS.md](docs/GAPS_AND_SOLUTIONS.md)
-and [EDITOR_PARITY.md](docs/EDITOR_PARITY.md) — not this file.
+For current status and what's next, see [GAPS_AND_SOLUTIONS.md](../docs/GAPS_AND_SOLUTIONS.md)
+and [EDITOR_PARITY.md](../docs/EDITOR_PARITY.md) — not this file.

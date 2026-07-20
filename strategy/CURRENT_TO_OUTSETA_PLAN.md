@@ -779,13 +779,13 @@ After the evidence gates are met, the next expansion is not “more Outseta.” 
 - [`OUTSETA_TO_DUDA_STRATEGY.md`](OUTSETA_TO_DUDA_STRATEGY.md) — company and product progression.
 - [`DUDA_PLATFORM_REFERENCE.md`](DUDA_PLATFORM_REFERENCE.md) — longer-term platform model.
 - [`archura-editor/ARCHURA.md`](archura-editor/ARCHURA.md) — editor package boundary.
-- [`archura-editor/docs/AUTH_ARCHITECTURE.md`](archura-editor/docs/AUTH_ARCHITECTURE.md) — current B2B2C identity direction.
-- [`archura-editor/docs/CORE_SERVER.md`](archura-editor/docs/CORE_SERVER.md) — Core design reference.
+- [`docs/AUTH_ARCHITECTURE.md`](../docs/AUTH_ARCHITECTURE.md) — current B2B2C identity direction.
+- [`docs/CORE_SERVER.md`](../docs/CORE_SERVER.md) — Core design reference.
 - [`core/README.md`](core/README.md) — implemented Core operations and API summary.
-- [`archura-editor/docs/STRIPE_COMPONENT.md`](archura-editor/docs/STRIPE_COMPONENT.md) — payment/data-connected component path.
-- [`archura-editor/docs/DASHBOARD.md`](archura-editor/docs/DASHBOARD.md) — thin console direction.
-- [`archura-editor/docs/FUNNEL.md`](archura-editor/docs/FUNNEL.md) — site acquisition/publishing funnel to revisit after MVP.
-- [`archura-editor/docs/FINTECH_ARCHITECTURE.md`](archura-editor/docs/FINTECH_ARCHITECTURE.md) — regulated boundary.
+- [`docs/STRIPE_COMPONENT.md`](../docs/STRIPE_COMPONENT.md) — payment/data-connected component path.
+- [`docs/DASHBOARD.md`](../docs/DASHBOARD.md) — thin console direction.
+- [`docs/FUNNEL.md`](../docs/FUNNEL.md) — site acquisition/publishing funnel to revisit after MVP.
+- [`docs/FINTECH_ARCHITECTURE.md`](../docs/FINTECH_ARCHITECTURE.md) — regulated boundary.
 
 ## Final recommendation
 

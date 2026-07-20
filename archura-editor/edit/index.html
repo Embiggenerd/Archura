@@ -118,6 +118,25 @@
       .picker a:hover {
         background: #f3f4f6;
       }
+
+      /* Overlay + modal styles come from funnel-ui.js (shared with the front page) */
+
+      .site-bar button, .site-bar a.button {
+        margin-left: 8px; padding: 5px 12px; border: none; border-radius: 6px;
+        background: #4f46e5; color: white; font-size: 0.8rem; font-weight: 600;
+        cursor: pointer; text-decoration: none;
+      }
+      .site-bar button.secondary { background: #374151; }
+
+      .publish-panel {
+        padding: 10px 24px; background: #ecfdf5; border-bottom: 1px solid #a7f3d0;
+        font-size: 0.85rem; color: #065f46;
+      }
+      .publish-panel pre {
+        background: #111827; color: #e5e7eb; padding: 10px; border-radius: 8px;
+        overflow-x: auto; font-size: 0.75rem; margin: 8px 0 0;
+      }
+      .publish-panel summary { cursor: pointer; margin-top: 6px; }
     </style>
   </head>
   <body>
@@ -125,6 +144,8 @@
       import './../src/index.ts';
       import { defaultComponents } from './../src/components/index.ts';
       import { createFileSystemAdapter, createR2Adapter } from './../src/adapters/index.ts';
+      import { ensureFunnelStyles, showDeployModal, showRegisterModal } from './funnel-ui.js';
+      ensureFunnelStyles(); // the claim screen builds its own .overlay
 
       const params = new URLSearchParams(location.search);
       const site = params.get('site');
@@ -149,10 +170,10 @@
         return (await response.json()).url;
       }
 
-      function mountEditor(persistence) {
+      function mountEditor(persistence, componentPath = component) {
         const editor = document.createElement('archura-editor');
         editor.id = 'editor';
-        if (component) editor.componentPath = component.split('/');
+        if (componentPath) editor.componentPath = componentPath.split('/');
         if (components) editor.components = components;
         editor.persistence = persistence;
         editor.uploadAsset = uploadAsset;
@@ -162,12 +183,58 @@
           history.replaceState(null, '', url);
         });
         document.body.appendChild(editor);
+        return editor;
+      }
+
+      // --- Publish panel (site mode only; deploy/register modals come from funnel-ui.js) ---
+
+      function embedAttributes(artifact, name) {
+        const instance = [...(artifact.content?.components ?? [])]
+          .reverse()
+          .find((candidate) => `${candidate.componentPath.at(-1)}.js` === name);
+        return Object.entries(instance?.attributes ?? {})
+          .filter(([attribute, value]) => !['id', 'class', 'style'].includes(attribute) && !attribute.startsWith('data-gjs') && value !== false && value != null)
+          .map(([attribute, value]) => value === true ? attribute : `${attribute}="${String(value).replaceAll('&', '&amp;').replaceAll('"', '&quot;')}"`)
+          .join(' ');
+      }
+
+      function embedSnippets(artifact, list) {
+        if (!list?.embedBase) return [];
+        return list.entries
+          .filter((entry) => entry.kind === 'embed')
+          .map((entry) => entry.path.at(-1))
+          .map((name) => [name, defaultComponents.find((definition) => `${definition.path.at(-1)}.js` === name)?.tagName])
+          .filter(([, tag]) => tag)
+          .map(([name, tag]) => {
+            const attributes = embedAttributes(artifact, name);
+            return `<script type="module" src="${list.embedBase}/${name}"><\/script>\n<${tag}${attributes ? ` ${attributes}` : ''}></${tag}>`;
+          });
+      }
+
+      // After a real publish, surface the live link + copyable embed snippets
+      function attachPublishPanel(editorEl, siteName, siteUrl) {
+        editorEl.addEventListener('artifactsave', async (e) => {
+          if (!e.detail.published) return;
+          const [artifact] = e.detail.artifacts;
+          const token = localStorage.getItem(`archura:site-token:${siteName}`);
+          const list = await fetch(`/api/sites/${siteName}/list`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          }).then((response) => response.ok ? response.json() : null).catch(() => null);
+          document.querySelector('.publish-panel')?.remove();
+          const panel = document.createElement('div');
+          panel.className = 'publish-panel';
+          const snippets = embedSnippets(artifact, list)
+            .map((s) => `<details><summary>Embed snippet</summary><pre>${s.replaceAll('<', '&lt;')}</pre></details>`)
+            .join('');
+          panel.innerHTML = `Published ✓ — live at <a href="${siteUrl}" target="_blank">${siteUrl}</a>${snippets}`;
+          document.body.insertBefore(panel, document.getElementById('editor'));
+        });
       }
 
       function showPicker() {
         const groups = [
-          ['page', 'Pages'],
-          ['component', 'Components'],
+          ['page', 'Page-sized components'],
+          ['component', 'Smaller components'],
         ];
         const el = document.createElement('div');
         el.className = 'picker';
@@ -189,6 +256,11 @@
       }
 
       function showClaimScreen() {
+        const overlay = document.createElement('div');
+        overlay.className = 'overlay';
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) overlay.remove();
+        });
         const el = document.createElement('div');
         el.className = 'claim';
         el.innerHTML = `
@@ -196,7 +268,7 @@
           <p>Pick a name, build your page, hit publish. It goes live immediately.</p>
           <form>
             <input name="site" placeholder="my-site" autocomplete="off"
-                   pattern="[a-z0-9][a-z0-9-]{1,38}[a-z0-9]" required />
+                   pattern="[a-z0-9][a-z0-9\\-]{1,38}[a-z0-9]" required />
             <button type="submit">Claim</button>
           </form>
           <p class="error"></p>
@@ -228,21 +300,49 @@
             errorEl.textContent = 'Could not reach the server.';
           }
         });
-        document.body.appendChild(el);
+        overlay.appendChild(el);
+        document.body.appendChild(overlay);
       }
 
       if (site) {
         const token = localStorage.getItem(`archura:site-token:${site}`);
         const url = localStorage.getItem(`archura:site-url:${site}`);
+        const siteUrl = url ?? `/s/${site}/`;
         const bar = document.createElement('div');
         bar.className = 'site-bar';
-        bar.innerHTML = `<strong>${site}</strong> <span>publishes to</span> <a href="${url ?? `/s/${site}/`}" target="_blank">${url ?? `/s/${site}/`}</a>`;
+        bar.innerHTML = `<strong>${site}</strong> <span>publishes to</span> <a href="${siteUrl}" target="_blank">${siteUrl}</a>
+          <span style="flex:1"></span>
+          <a class="button secondary" href="/dashboard/">Dashboard</a>`;
         document.body.appendChild(bar);
-        mountEditor(createR2Adapter({ endpoint: `/api/artifacts/${site}`, token: token ?? undefined, site }));
-      } else if (component) {
-        mountEditor(import.meta.env.PROD ? undefined : createFileSystemAdapter());
+        const editorEl = mountEditor(createR2Adapter({ endpoint: `/api/artifacts/${site}`, token: token ?? undefined, site }));
+        attachPublishPanel(editorEl, site, siteUrl);
       } else if (import.meta.env.PROD) {
-        showClaimScreen();
+        // Anonymous draft mode (funnel flow 2): edit first; Deploy captures
+        // the subdomain + email; nothing goes live until the email confirms.
+        const bar = document.createElement('div');
+        bar.className = 'site-bar';
+        bar.innerHTML = `<strong>Draft</strong> <span>editing anonymously — deploy to pick a name and go live</span>
+          <span style="flex:1"></span>
+          <button class="deploy-open">Deploy</button>
+          <button class="secondary claim-open">Claim a site</button>
+          <button class="secondary register-open">Sign in</button>`;
+        document.body.appendChild(bar);
+        const editorEl = mountEditor(undefined, component ?? 'pages/Landing');
+        bar.querySelector('.deploy-open').addEventListener('click', () => showDeployModal(editorEl, components));
+        bar.querySelector('.claim-open').addEventListener('click', () => showClaimScreen());
+        bar.querySelector('.register-open').addEventListener('click', () => showRegisterModal());
+        // Signed-in users don't need Register — show the way back instead
+        fetch('/api/me').then((r) => {
+          if (!r.ok) return;
+          const register = bar.querySelector('.register-open');
+          const dash = document.createElement('a');
+          dash.className = 'button secondary';
+          dash.href = '/dashboard/';
+          dash.textContent = 'Dashboard';
+          register.replaceWith(dash);
+        }).catch(() => {});
+      } else if (component) {
+        mountEditor(createFileSystemAdapter());
       } else {
         // Bare /edit in dev: choose what to edit.
         showPicker();

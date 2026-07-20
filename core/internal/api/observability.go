@@ -23,9 +23,9 @@ const (
 type requestMetadataKey struct{}
 
 type requestMetadata struct {
-	TenantID    string
-	ComponentID string
-	ClientIP    string
+	OrganizationID string
+	ComponentID    string
+	ClientIP       string
 }
 
 func metadataFromRequest(r *http.Request) *requestMetadata {
@@ -84,8 +84,8 @@ func (s *Server) accessLogger(next http.Handler) http.Handler {
 		}
 		if metadata := metadataFromRequest(r); metadata != nil {
 			attrs = append(attrs, slog.String("client_ip", metadata.ClientIP))
-			if metadata.TenantID != "" {
-				attrs = append(attrs, slog.String("tenant_id", metadata.TenantID))
+			if metadata.OrganizationID != "" {
+				attrs = append(attrs, slog.String("organization_id", metadata.OrganizationID))
 			}
 			if metadata.ComponentID != "" {
 				attrs = append(attrs, slog.String("component_id", metadata.ComponentID))

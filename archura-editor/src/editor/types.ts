@@ -1,6 +1,7 @@
 import type { CanonicalComponentData } from '../component-data/canonical.js';
 
 export type ArchuraComponentDefinition = {
+  /** Editor layout/composition category only; every definition is embeddable. */
   kind: 'component' | 'page';
   path: string[];
   tagName: string;
@@ -11,6 +12,7 @@ export type ArchuraComponentDefinition = {
 };
 
 export type ArchuraEditTarget = {
+  /** Editor layout/composition category only; every target publishes identically. */
   kind: 'component' | 'page';
   path: string[];
   label: string;
@@ -47,7 +49,7 @@ export type ArchuraEditorConfig = {
   initialArtifact?: CanonicalComponentData | null;
   onReady?: () => void;
   onChange?: (artifacts: CanonicalComponentData[]) => void;
-  onSave?: (result: { artifacts: CanonicalComponentData[] }) => void;
+  onSave?: (result: { artifacts: CanonicalComponentData[]; published?: boolean }) => void;
   onError?: (error: unknown) => void;
 };
 

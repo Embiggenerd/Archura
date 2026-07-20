@@ -43,7 +43,7 @@ func (s *Server) handleCreateClient(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusServiceUnavailable, "database_unavailable", "The database is unavailable.")
 		return
 	}
-	if !s.enforceRateLimit(w, r, "platform", "client.create", clientCreateLimit) {
+	if !s.enforceRateLimit(w, r, "platform", "client.create", clientCreateLimit, time.Minute) {
 		return
 	}
 
@@ -70,14 +70,14 @@ func (s *Server) handleCreateClient(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	tenant, err := s.store.CreateTenant(r.Context(), store.CreateTenantParams{
+	organization, err := s.store.CreateOrganization(r.Context(), store.CreateOrganizationParams{
 		Name: input.Name, Slug: input.Slug, AllowedOrigins: input.AllowedOrigins,
 		PublishableKey: publishableKey, SecretKeyHash: archauth.Hash(secretKey),
 		EdgeClaimToken: input.EdgeClaimToken,
 	}, store.AuditEvent{
-		ActorType: "platform_admin", Action: "client.created",
-		ResourceType: "client", RequestID: middleware.GetReqID(r.Context()),
-		Metadata: store.ClientAuditMetadata{NamespaceBound: input.EdgeClaimToken != ""},
+		ActorType: "platform_admin", Action: "organization.created",
+		ResourceType: "organization", RequestID: middleware.GetReqID(r.Context()),
+		Metadata: store.OrganizationAuditMetadata{NamespaceBound: input.EdgeClaimToken != ""},
 	})
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, r, http.StatusConflict, "client_exists", "A client with that slug already exists.")
@@ -88,16 +88,16 @@ func (s *Server) handleCreateClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if metadata := metadataFromRequest(r); metadata != nil {
-		metadata.TenantID = tenant.ID
+		metadata.OrganizationID = organization.ID
 	}
-	s.log.InfoContext(r.Context(), "client created",
-		"event", "client_created", "request_id", middleware.GetReqID(r.Context()), "tenant_id", tenant.ID)
+	s.log.InfoContext(r.Context(), "organization created",
+		"event", "organization_created", "request_id", middleware.GetReqID(r.Context()), "organization_id", organization.ID)
 
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"id": tenant.ID, "name": tenant.Name, "slug": tenant.Slug,
+		"id": organization.ID, "name": organization.Name, "slug": organization.Slug,
 		"publishable_key": publishableKey, "secret_key": secretKey,
-		"created_at": tenant.CreatedAt,
+		"created_at": organization.CreatedAt,
 	})
 }
 
@@ -111,11 +111,11 @@ type putComponentRequest struct {
 }
 
 func (s *Server) handleCreateComponent(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.authenticateTenant(w, r)
+	organization, ok := s.authenticateOrganization(w, r)
 	if !ok {
 		return
 	}
-	if !s.enforceRateLimit(w, r, tenant.ID, "component.write", componentWriteLimit) {
+	if !s.enforceRateLimit(w, r, organization.ID, "component.write", componentWriteLimit, time.Minute) {
 		return
 	}
 	componentID, err := archauth.Generate("cmp", s.cfg.Env)
@@ -123,15 +123,15 @@ func (s *Server) handleCreateComponent(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	s.saveComponent(w, r, tenant, componentID, http.StatusCreated)
+	s.saveComponent(w, r, organization, componentID, http.StatusCreated)
 }
 
 func (s *Server) handlePutComponent(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.authenticateTenant(w, r)
+	organization, ok := s.authenticateOrganization(w, r)
 	if !ok {
 		return
 	}
-	if !s.enforceRateLimit(w, r, tenant.ID, "component.write", componentWriteLimit) {
+	if !s.enforceRateLimit(w, r, organization.ID, "component.write", componentWriteLimit, time.Minute) {
 		return
 	}
 	componentID := chi.URLParam(r, "componentID")
@@ -139,10 +139,10 @@ func (s *Server) handlePutComponent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "The component ID is invalid.")
 		return
 	}
-	s.saveComponent(w, r, tenant, componentID, http.StatusOK)
+	s.saveComponent(w, r, organization, componentID, http.StatusOK)
 }
 
-func (s *Server) saveComponent(w http.ResponseWriter, r *http.Request, tenant store.Tenant, componentID string, status int) {
+func (s *Server) saveComponent(w http.ResponseWriter, r *http.Request, organization store.Organization, componentID string, status int) {
 	var input putComponentRequest
 	if err := decodeJSON(w, r, &input); err != nil {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "The request body is invalid.")
@@ -155,7 +155,7 @@ func (s *Server) saveComponent(w http.ResponseWriter, r *http.Request, tenant st
 		!strings.HasPrefix(input.StripePriceID, "price_") ||
 		(input.Status != "active" && input.Status != "inactive") ||
 		!validOrigins(input.AllowedOrigins, s.cfg.Env) ||
-		!originsSubset(input.AllowedOrigins, tenant.AllowedOrigins) ||
+		!originsSubset(input.AllowedOrigins, organization.AllowedOrigins) ||
 		!urlMatchesOrigins(input.SuccessURL, input.AllowedOrigins) ||
 		!urlMatchesOrigins(input.CancelURL, input.AllowedOrigins) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "The component configuration is invalid.")
@@ -167,17 +167,17 @@ func (s *Server) saveComponent(w http.ResponseWriter, r *http.Request, tenant st
 		action = "component.created"
 	}
 	component, err := s.store.UpsertPaymentComponent(r.Context(), store.PaymentComponent{
-		ID: componentID, TenantID: tenant.ID, Mode: input.Mode,
+		ID: componentID, OrganizationID: organization.ID, Mode: input.Mode,
 		StripePriceID: input.StripePriceID, SuccessURL: input.SuccessURL,
 		CancelURL: input.CancelURL, AllowedOrigins: input.AllowedOrigins, Status: input.Status,
 	}, store.AuditEvent{
-		TenantID: tenant.ID, ActorType: "tenant", ActorID: tenant.ID,
+		OrganizationID: organization.ID, ActorType: "organization", ActorID: organization.ID,
 		Action: action, ResourceType: "component", ResourceID: componentID,
 		RequestID: middleware.GetReqID(r.Context()),
 		Metadata:  store.ComponentAuditMetadata{Mode: input.Mode, Status: input.Status},
 	})
 	if errors.Is(err, store.ErrNotFound) {
-		s.securityEvent(r, "component_tenant_mismatch")
+		s.securityEvent(r, "component_organization_mismatch")
 		writeError(w, r, http.StatusNotFound, "component_not_found", "The component was not found.")
 		return
 	}
@@ -190,7 +190,7 @@ func (s *Server) saveComponent(w http.ResponseWriter, r *http.Request, tenant st
 	}
 	s.log.InfoContext(r.Context(), "component configured",
 		"event", "component_configured", "request_id", middleware.GetReqID(r.Context()),
-		"tenant_id", tenant.ID, "component_id", component.ID)
+		"organization_id", organization.ID, "component_id", component.ID)
 	writeJSON(w, status, componentResponse(component))
 }
 
@@ -201,11 +201,11 @@ type createComponentSessionRequest struct {
 }
 
 func (s *Server) handleCreateComponentSession(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := s.authenticateTenant(w, r)
+	organization, ok := s.authenticateOrganization(w, r)
 	if !ok {
 		return
 	}
-	if !s.enforceRateLimit(w, r, tenant.ID, "component_session.create", componentSessionCreateLimit) {
+	if !s.enforceRateLimit(w, r, organization.ID, "component_session.create", componentSessionCreateLimit, time.Minute) {
 		return
 	}
 	var input createComponentSessionRequest
@@ -213,9 +213,9 @@ func (s *Server) handleCreateComponentSession(w http.ResponseWriter, r *http.Req
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "The request body is invalid.")
 		return
 	}
-	component, err := s.store.PaymentComponentForTenant(r.Context(), tenant.ID, input.ComponentID)
+	component, err := s.store.PaymentComponentForOrganization(r.Context(), organization.ID, input.ComponentID)
 	if errors.Is(err, store.ErrNotFound) {
-		s.securityEvent(r, "component_tenant_mismatch")
+		s.securityEvent(r, "component_organization_mismatch")
 		writeError(w, r, http.StatusNotFound, "component_not_found", "The component was not found.")
 		return
 	}
@@ -244,12 +244,12 @@ func (s *Server) handleCreateComponentSession(w http.ResponseWriter, r *http.Req
 	}
 	expiresAt := time.Now().UTC().Add(componentTokenTTL)
 	_, err = s.store.CreateComponentSession(r.Context(), store.ComponentSession{
-		ID: sessionID, TokenHash: archauth.Hash(token), TenantID: tenant.ID,
+		ID: sessionID, TokenHash: archauth.Hash(token), OrganizationID: organization.ID,
 		ComponentID: component.ID, ExternalUserID: strings.TrimSpace(input.ExternalUserID),
 		Scopes: []string{"checkout:create"}, Audience: componentAudience,
 		AllowedOrigin: input.Origin, ExpiresAt: expiresAt,
 	}, store.AuditEvent{
-		TenantID: tenant.ID, ActorType: "tenant", ActorID: tenant.ID,
+		OrganizationID: organization.ID, ActorType: "organization", ActorID: organization.ID,
 		Action: "component_session.created", ResourceType: "component_session", ResourceID: sessionID,
 		RequestID: middleware.GetReqID(r.Context()),
 		Metadata: store.ComponentSessionAuditMetadata{
@@ -262,7 +262,7 @@ func (s *Server) handleCreateComponentSession(w http.ResponseWriter, r *http.Req
 	}
 	s.log.InfoContext(r.Context(), "component session created",
 		"event", "component_session_created", "request_id", middleware.GetReqID(r.Context()),
-		"tenant_id", tenant.ID, "component_id", component.ID)
+		"organization_id", organization.ID, "component_id", component.ID)
 	s.metrics.IncSessionCreated()
 
 	w.Header().Set("Cache-Control", "no-store")
@@ -277,31 +277,31 @@ func (s *Server) authenticatePlatformAdmin(r *http.Request) bool {
 	return ok && s.cfg.PlatformAdminKey != "" && archauth.Equal(token, s.cfg.PlatformAdminKey)
 }
 
-func (s *Server) authenticateTenant(w http.ResponseWriter, r *http.Request) (store.Tenant, bool) {
+func (s *Server) authenticateOrganization(w http.ResponseWriter, r *http.Request) (store.Organization, bool) {
 	if s.store == nil {
 		writeError(w, r, http.StatusServiceUnavailable, "database_unavailable", "The database is unavailable.")
-		return store.Tenant{}, false
+		return store.Organization{}, false
 	}
 	token, ok := bearerToken(r)
 	if !ok || !archauth.HasKindForEnv(token, "sk", s.cfg.Env) {
-		s.securityEvent(r, "invalid_tenant_key")
-		writeError(w, r, http.StatusUnauthorized, "invalid_api_key", "The tenant API key is invalid.")
-		return store.Tenant{}, false
+		s.securityEvent(r, "invalid_organization_key")
+		writeError(w, r, http.StatusUnauthorized, "invalid_api_key", "The organization API key is invalid.")
+		return store.Organization{}, false
 	}
-	tenant, err := s.store.TenantBySecretHash(r.Context(), archauth.Hash(token))
+	organization, err := s.store.OrganizationBySecretHash(r.Context(), archauth.Hash(token))
 	if errors.Is(err, store.ErrNotFound) {
-		s.securityEvent(r, "invalid_tenant_key")
-		writeError(w, r, http.StatusUnauthorized, "invalid_api_key", "The tenant API key is invalid.")
-		return store.Tenant{}, false
+		s.securityEvent(r, "invalid_organization_key")
+		writeError(w, r, http.StatusUnauthorized, "invalid_api_key", "The organization API key is invalid.")
+		return store.Organization{}, false
 	}
 	if err != nil {
 		s.internalError(w, r, err)
-		return store.Tenant{}, false
+		return store.Organization{}, false
 	}
 	if metadata := metadataFromRequest(r); metadata != nil {
-		metadata.TenantID = tenant.ID
+		metadata.OrganizationID = organization.ID
 	}
-	return tenant, true
+	return organization, true
 }
 
 func (s *Server) authenticateComponentSession(w http.ResponseWriter, r *http.Request, requiredScope string) (store.ComponentSession, bool) {
@@ -341,7 +341,7 @@ func (s *Server) authenticateComponentSession(w http.ResponseWriter, r *http.Req
 		return store.ComponentSession{}, false
 	}
 	if metadata := metadataFromRequest(r); metadata != nil {
-		metadata.TenantID = session.TenantID
+		metadata.OrganizationID = session.OrganizationID
 		metadata.ComponentID = session.ComponentID
 	}
 	return session, true

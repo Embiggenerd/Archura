@@ -16,8 +16,9 @@ const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('pageerror:', e.message));
 
 try {
-  // --- 1. Claim a site through the UI ---
+  // --- 1. Claim a site through the UI (behind the anonymous bar's button) ---
   await page.goto(`${BASE}/edit/`, { waitUntil: 'domcontentloaded' });
+  await page.locator('.claim-open').click();
   await page.locator('.claim input').fill(SITE);
   await page.locator('.claim button').click();
   await page.waitForURL(`**/edit/?site=${SITE}`, { timeout: 10000 });

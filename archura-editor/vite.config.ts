@@ -17,7 +17,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // rather than the mock placeholders, so it needs a Stripe *publishable* test
 // key. Read it from the repo-root .env and expose it ONLY if it's a pk_test_
 // (a publishable test key is safe on the client; a secret must never leak, and
-// a live key must never be defaulted). Embedded components still never default
+// a live key must never be defaulted). Published embeds still never default
 // a key — this is demo-only.
 function demoStripePk(): string {
   try {
@@ -33,6 +33,8 @@ const buildInputs = {
   main: path.join(here, 'index.html'),
   edit: path.join(here, 'edit/index.html'),
   demo: path.join(here, 'demo/index.html'),
+  dashboard: path.join(here, 'dashboard/index.html'),
+  devmail: path.join(here, 'dev-mail/index.html'),
 };
 
 
@@ -221,6 +223,8 @@ export default defineConfig({
   },
   build: {
     rollupOptions: { input: buildInputs },
+    // Watch rebuilds (dev-up.sh) must not wipe dist/components between passes
+    emptyOutDir: !process.env.ARCHURA_WATCH,
   },
   plugins: [
     {
@@ -229,7 +233,7 @@ export default defineConfig({
       name: 'dir-trailing-slash-redirect',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
-          for (const dir of ['/demo', '/edit']) {
+          for (const dir of ['/demo', '/edit', '/dashboard', '/dev-mail']) {
             if (req.url === dir || req.url?.startsWith(`${dir}?`)) {
               res.statusCode = 302;
               res.setHeader('Location', req.url.replace(dir, `${dir}/`));

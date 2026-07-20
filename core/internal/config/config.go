@@ -18,6 +18,7 @@ type Config struct {
 	DatabaseURL      string // empty in local scaffold runs => DB features disabled
 	PlatformAdminKey string // gates platform-admin endpoints (client onboarding)
 	CoreServiceKey   string // authenticates the Cloudflare Worker to the core
+	ConfirmURLBase   string // Worker confirmation URL; required by confirmation creation in dev
 	RequireEdgeAuth  bool   // optional in dev; always true in prod
 }
 
@@ -33,6 +34,7 @@ func Load() (Config, error) {
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
 		PlatformAdminKey: os.Getenv("PLATFORM_ADMIN_KEY"),
 		CoreServiceKey:   os.Getenv("CORE_SERVICE_KEY"),
+		ConfirmURLBase:   os.Getenv("CONFIRM_URL_BASE"),
 		RequireEdgeAuth:  requireEdgeAuth,
 	}
 	if cfg.Env == "prod" {

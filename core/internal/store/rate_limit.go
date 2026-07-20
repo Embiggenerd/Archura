@@ -3,15 +3,20 @@ package store
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
-// ConsumeRateLimit atomically increments a one-minute fixed window. PostgreSQL
-// supplies the window clock so multiple core machines agree on its boundary.
-func (s *Store) ConsumeRateLimit(ctx context.Context, subject, operation string, limit int) (RateLimitResult, error) {
+// ConsumeRateLimit atomically increments a fixed window. PostgreSQL supplies
+// the window clock so multiple core machines agree on its boundary.
+func (s *Store) ConsumeRateLimit(ctx context.Context, subject, operation string, limit int, window time.Duration) (RateLimitResult, error) {
+	windowSeconds := int64(window / time.Second)
+	if windowSeconds < 1 || window != time.Duration(windowSeconds)*time.Second {
+		return RateLimitResult{}, fmt.Errorf("rate limit window must be a whole positive number of seconds")
+	}
 	var result RateLimitResult
 	err := s.Pool.QueryRow(ctx, `
 		WITH current_window AS (
-			SELECT date_trunc('minute', now()) AS window_start
+			SELECT date_bin($3 * interval '1 second', now(), TIMESTAMPTZ '1970-01-01') AS window_start
 		), consumed AS (
 			INSERT INTO rate_limit_buckets (subject, operation, window_start, request_count)
 			SELECT $1, $2, window_start, 1
@@ -21,9 +26,9 @@ func (s *Store) ConsumeRateLimit(ctx context.Context, subject, operation string,
 			RETURNING request_count, window_start
 		)
 		SELECT request_count,
-			GREATEST(1, CEIL(EXTRACT(EPOCH FROM (window_start + interval '1 minute' - now())))::int)
+			GREATEST(1, CEIL(EXTRACT(EPOCH FROM (window_start + $3 * interval '1 second' - now())))::int)
 		FROM consumed`,
-		subject, operation,
+		subject, operation, windowSeconds,
 	).Scan(&result.Count, &result.RetryAfterSeconds)
 	if err != nil {
 		return RateLimitResult{}, fmt.Errorf("consume rate limit: %w", err)

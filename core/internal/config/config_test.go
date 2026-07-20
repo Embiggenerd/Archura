@@ -11,12 +11,13 @@ func TestDevelopmentDefaultsAllowScaffoldMode(t *testing.T) {
 	t.Setenv("PLATFORM_ADMIN_KEY", "")
 	t.Setenv("CORE_SERVICE_KEY", "")
 	t.Setenv("REQUIRE_EDGE_AUTH", "")
+	t.Setenv("CONFIRM_URL_BASE", "http://localhost:8787/confirm")
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Env != "dev" || cfg.RequireEdgeAuth {
+	if cfg.Env != "dev" || cfg.RequireEdgeAuth || cfg.ConfirmURLBase != "http://localhost:8787/confirm" {
 		t.Fatalf("unexpected development defaults: %+v", cfg)
 	}
 }

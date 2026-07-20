@@ -1,0 +1,141 @@
+// Funnel chrome shared by the pages that host the editor (edit page, front
+// page): deploy + sign-in modals over the anonymous <archura-editor>. Injects
+// its own styles so any host page can import it without CSS coordination.
+import { defaultComponents } from '../src/components/index.ts';
+import { buildEmbedModules } from '../src/component-data/embed.ts';
+
+const STYLE_ID = 'archura-funnel-ui-style';
+const CSS = `
+.overlay {
+  position: fixed; inset: 0; background: rgba(17, 24, 39, 0.45);
+  display: grid; place-items: center; z-index: 50;
+}
+.modal { background: white; color: #111827; border-radius: 16px; padding: 28px; width: min(440px, 92vw); }
+.modal h2 { margin: 0 0 4px; font-size: 1.2rem; }
+.modal p { margin: 0 0 16px; color: #6b7280; font-size: 0.9rem; }
+.modal a { color: #4f46e5; }
+.modal form { display: flex; flex-direction: column; gap: 10px; }
+.modal input {
+  padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 0.95rem;
+  background: white; color: #111827;
+}
+.modal button {
+  padding: 10px 18px; border: none; border-radius: 8px;
+  background: #111827; color: white; font-weight: 600; cursor: pointer; font-size: 0.95rem;
+}
+.modal .error { color: #dc2626; font-size: 0.85rem; min-height: 1.2em; margin: 0; }
+.modal .spin {
+  width: 32px; height: 32px; margin: 8px auto; border: 3px solid #e5e7eb;
+  border-top-color: #4f46e5; border-radius: 50%; animation: archura-spin 0.8s linear infinite;
+}
+@keyframes archura-spin { to { transform: rotate(360deg); } }
+`;
+
+/** Injects the overlay/modal styles. Host pages that build their own
+ *  `.overlay` elements (the claim screen) must call this up front. */
+export function ensureFunnelStyles() {
+  if (document.getElementById(STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent = CSS;
+  document.head.appendChild(style);
+}
+const ensureStyles = ensureFunnelStyles;
+
+export function showOverlay(innerHtml) {
+  ensureStyles();
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.innerHTML = `<div class="modal">${innerHtml}</div>`;
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+export function checkEmailHtml(email) {
+  return `
+    <h2>Check your email</h2>
+    <div class="spin"></div>
+    <p>We sent a confirmation link to <strong>${email}</strong>.
+       Click it to publish your component — your work is safe until then.</p>
+    <p><a href="/dev-mail/">Running locally? Open the dev mailbox.</a></p>`;
+}
+
+export function showRegisterModal() {
+  const overlay = showOverlay(`
+    <h2>Sign in or register</h2>
+    <p>Enter your email and we'll send you a sign-in link — new emails get
+       an account automatically.</p>
+    <form><input name="email" type="email" placeholder="you@example.com" required />
+    <button type="submit">Send link</button></form>
+    <p class="error"></p>`);
+  overlay.querySelector('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = overlay.querySelector('input').value.trim();
+    const errorEl = overlay.querySelector('.error');
+    const res = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      errorEl.textContent =
+        res?.status === 429 ? 'Too many attempts — wait a bit and try again.' :
+        res?.status === 503 ? 'Registration is unavailable (core not running).' :
+        'Could not send the link.';
+      return;
+    }
+    overlay.querySelector('.modal').innerHTML = checkEmailHtml(email);
+  });
+}
+
+/** Deploy the editor's current state (funnel flow 2). `components` is the
+ *  host page's definition list when it overrides module URLs (built app). */
+export function showDeployModal(editorEl, components) {
+  const componentPath = editorEl.componentPath ?? [];
+  const overlay = showOverlay(`
+    <h2>Publish your component</h2>
+    <p>Pick a name and enter your email — we'll send a link with its hosted preview and embed code.</p>
+    <form>
+      <input name="site" placeholder="my-site" autocomplete="off"
+             pattern="[a-z0-9][a-z0-9\\-]{1,38}[a-z0-9]" required />
+      <input name="email" type="email" placeholder="you@example.com" required />
+      <button type="submit">Publish component</button>
+    </form>
+    <p class="error"></p>`);
+  overlay.querySelector('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const site = overlay.querySelector('input[name="site"]').value.trim().toLowerCase();
+    const email = overlay.querySelector('input[name="email"]').value.trim();
+    const errorEl = overlay.querySelector('.error');
+    const controller = editorEl.getController();
+    if (!controller) return;
+    const [artifact] = await controller.save();
+    const modules = buildEmbedModules(artifact, components ?? defaultComponents, location.href);
+    const targetName = `${componentPath.at(-1)}.js`;
+    const targetModule = modules.find((module) => module.name === targetName);
+    const res = await fetch('/api/deploys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        site,
+        email,
+        artifact,
+        targetEmbed: targetModule ? { name: targetModule.name, tag: targetModule.tag } : null,
+        embeds: Object.fromEntries(modules.map((m) => [m.name, m.source])),
+      }),
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      errorEl.textContent =
+        res?.status === 409 ? 'That name is taken (or the email already has a site).' :
+        res?.status === 403 ? 'Deploys are currently restricted.' :
+        res?.status === 429 ? 'Too many attempts — wait a bit and try again.' :
+        res?.status === 503 ? 'Deploys are unavailable (core not running).' :
+        'Deploy failed — try again.';
+      return;
+    }
+    overlay.querySelector('.modal').innerHTML = checkEmailHtml(email);
+  });
+}

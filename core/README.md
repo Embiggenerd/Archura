@@ -1,7 +1,7 @@
 # Archura Core Server (Go)
 
 The regulated system-of-record and authorization server. Sits behind the Cloudflare Worker
-edge. Design & roadmap: `../archura-editor/docs/CORE_SERVER.md`.
+edge. Design & roadmap: `../docs/CORE_SERVER.md`.
 
 ## Run locally
 
@@ -32,6 +32,7 @@ is added to chi without being documented.
 | `DATABASE_URL`       | —       | Postgres; empty = scaffold mode        |
 | `PLATFORM_ADMIN_KEY` | —       | gates client-onboarding endpoints (M1) |
 | `CORE_SERVICE_KEY`   | —       | authenticates the Worker to core       |
+| `CONFIRM_URL_BASE`   | —       | dev magic-link target (for example, `http://localhost:8787/confirm`) |
 | `REQUIRE_EDGE_AUTH`  | `false` | enables production-like edge auth locally |
 
 Production requires the database, admin key, and an environment-matched `svc_live_...`
@@ -55,25 +56,25 @@ Generate a standalone publishable key for component fixtures:
 # PUBLISHABLE_KEY=pk_test_...
 ```
 
-This standalone key is not registered to a tenant. For API requests, use the publishable
+This standalone key is not registered to an organization. For API requests, use the publishable
 key returned by `POST /v1/clients`, which has a corresponding database record.
 
 Start the server with that value in your environment. `POST /v1/clients` then returns a
-`pk_test_...` publishable key and an `sk_test_...` tenant secret. Component sessions minted
+`pk_test_...` publishable key and an `sk_test_...` organization secret. Component sessions minted
 through `POST /v1/component-sessions` return short-lived `ct_test_...` bearer tokens. Test
 keys are generated randomly and are valid only when their hashes exist in the local database.
 
 ## Client and component identity API
 
-- `POST /v1/clients` — platform-admin authenticated; creates a tenant and returns its
+- `POST /v1/clients` — legacy platform-admin endpoint; creates an organization and returns its
   publishable and secret keys. The secret is returned once and stored only as a hash.
-  An optional `edge_claim_token` binds the tenant slug to its edge content namespace;
+  An optional `edge_claim_token` binds the organization slug to its edge content namespace;
   the credential is stored but never returned.
-- `POST /v1/components` — tenant-secret authenticated; creates a `cmp_test_...` component
+- `POST /v1/components` — organization-secret authenticated; creates a `cmp_test_...` component
   identifier and stores its Stripe Price, mode, redirect URLs, and allowed origins.
-- `PUT /v1/components/{componentID}` — updates an existing tenant-owned component.
-- `POST /v1/component-sessions` — tenant-secret authenticated; returns a 10-minute bearer
-  token bound to the tenant, component, `checkout:create` scope, audience, and origin.
+- `PUT /v1/components/{componentID}` — updates an existing organization-owned component.
+- `POST /v1/component-sessions` — organization-secret authenticated; returns a 10-minute bearer
+  token bound to the organization, component, `checkout:create` scope, audience, and origin.
 
 Send credentials through `Authorization: Bearer <key>`. Component IDs use the
 `cmp_test_...` form in development and `cmp_live_...` in production. Production origins
@@ -88,17 +89,50 @@ The Worker proxies `/api/core/v1/*` to core, removes caller-supplied service/cli
 headers, and adds its own. Put `CORE_SERVICE_KEY` in Wrangler secrets (or `.dev.vars`
 locally); set `CORE_URL=http://127.0.0.1:8080` in `.dev.vars` for a local Worker→core stack.
 
+## Account and site ownership API
+
+- `POST /v1/confirmations` — service-authenticated; creates a one-hour,
+  single-use email confirmation. The normalized email, optional subdomain,
+  and token hash are stored in Postgres. Development responses also include
+  the confirmation URL.
+- `POST /v1/confirmations/verify` — service-authenticated; atomically consumes
+  a confirmation, creates or reuses the account and its default organization,
+  binds the optional site to that organization, and returns a seven-day
+  `sess_...` account session once.
+- `GET /v1/sessions/me` — account-session authenticated; returns the current
+  account, organization memberships, organization publishable keys, and sites.
+- `POST /v1/organizations` — account-session authenticated; creates another
+  organization with an owner membership and returns its secret key once.
+- `POST /v1/sessions/logout` — best-effort account-session revocation. It
+  always returns 204 for missing, unknown, expired, or already-revoked session
+  tokens so the Worker can clear its cookie unconditionally.
+- `POST /v1/site-ownership` — account-session authenticated; binds a subdomain
+  to a selected organization (or the default organization when omitted).
+  Rebinding to the same organization is idempotent; another organization
+  produces `site_owned`. Site counts are unrestricted.
+- `GET /v1/dev/confirmations` — development only; lists the 50 most recent
+  magic-link messages from the process-memory delivery outbox. Used and expired
+  messages remain visible with state flags until eviction or restart. The outbox
+  never writes plaintext tokens to Postgres.
+
+All five routes still require the Worker service credential when edge
+authentication is enabled. Account-session routes additionally use
+`Authorization: Bearer sess_...`. Development confirmation creation requires
+`CONFIRM_URL_BASE`; production deliberately omits `confirm_url` while the real
+transactional-email delivery implementation remains out of scope.
+
 ## Observability and maintenance
 
 - Every request emits a structured JSON access log with its route pattern, status, latency,
-  request ID, and authenticated tenant/component identifiers.
+  request ID, and authenticated organization/component identifiers.
 - Authentication failures are counted on every attempt and security logs are sampled once
   per `(client IP, reason)` per minute.
 - Prometheus metrics are served separately at `http://localhost:9091/metrics`.
 - Client, component, and component-session writes create allowlisted audit rows in the same
   database transaction.
-- Production and local edge-simulation requests use PostgreSQL-backed tenant rate limits;
-  the Worker adds a coarse front-door limit.
+- Production requests use PostgreSQL-backed organization and confirmation rate limits;
+  development bypasses them even when edge authentication is enabled. The Worker
+  adds a coarse production front-door limit.
 
 Run retention cleanup from a scheduler or manually:
 
@@ -106,8 +140,9 @@ Run retention cleanup from a scheduler or manually:
 DATABASE_URL="postgres://..." go run ./cmd/maintenance
 ```
 
-This removes component sessions and fixed-window rate-limit buckets after their 24-hour
-retention period. It does not run as a goroutine in web machines.
+This removes account confirmations and sessions after use, expiry, or revocation,
+and removes component sessions and fixed-window rate-limit buckets after their
+24-hour retention period. It does not run as a goroutine in web machines.
 
 ## Test
 

@@ -1,5 +1,5 @@
 // Per-client styling, end to end (the milestone gate for
-// docs/PLAN_CLIENT_STYLING.md):
+// ../docs/PLAN_CLIENT_STYLING.md):
 // 0. embed generation is a correct pure function;
 // 1. the filesystem backend speaks the same namespace contract as the Worker;
 // 2. two clients style the same component differently, publish, and a

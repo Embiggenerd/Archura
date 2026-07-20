@@ -4,8 +4,8 @@
 edge: publish regenerates a per-client embed module in R2
 (`sites/<slug>/embed/<component>.js`), so embeds update on next load with no core
 round-trip. The full design and all styling work items are editor/Worker side — see
-`archura-editor/docs/PLAN_CLIENT_STYLING.md`, and the "Namespaces & the tenant →
-namespace binding" section of `archura-editor/docs/AUTH_ARCHITECTURE.md` for the model.
+`docs/PLAN_CLIENT_STYLING.md`, and the "Namespaces & the tenant →
+namespace binding" section of `docs/AUTH_ARCHITECTURE.md` for the model.
 
 What core *does* own is identity: core is the single authority for who a client is and
 which content namespace they own. That adds **one small work item** so registration can

@@ -20,13 +20,27 @@ import (
 
 type repository interface {
 	Ping(context.Context) error
-	CreateTenant(context.Context, store.CreateTenantParams, store.AuditEvent) (store.Tenant, error)
-	TenantBySecretHash(context.Context, string) (store.Tenant, error)
+	CreateOrganization(context.Context, store.CreateOrganizationParams, store.AuditEvent) (store.Organization, error)
+	OrganizationBySecretHash(context.Context, string) (store.Organization, error)
 	UpsertPaymentComponent(context.Context, store.PaymentComponent, store.AuditEvent) (store.PaymentComponent, error)
-	PaymentComponentForTenant(context.Context, string, string) (store.PaymentComponent, error)
+	PaymentComponentForOrganization(context.Context, string, string) (store.PaymentComponent, error)
 	CreateComponentSession(context.Context, store.ComponentSession, store.AuditEvent) (store.ComponentSession, error)
 	ComponentSessionByTokenHash(context.Context, string) (store.ComponentSession, error)
-	ConsumeRateLimit(context.Context, string, string, int) (store.RateLimitResult, error)
+	CreateConfirmation(context.Context, store.EmailConfirmation, store.AuditEvent) (store.EmailConfirmation, error)
+	ConfirmationByTokenHash(context.Context, string) (store.EmailConfirmation, error)
+	VerifyConfirmation(context.Context, store.VerifyConfirmationParams) (store.VerifyConfirmationResult, error)
+	SessionByTokenHash(context.Context, string) (store.AccountSession, error)
+	RevokeSessionByTokenHash(context.Context, string) error
+	AccountByEmail(context.Context, string) (store.Account, error)
+	AccountByID(context.Context, string) (store.Account, error)
+	EnsureDefaultOrganization(context.Context, store.Account, store.CreateOrganizationParams, string) (store.AccountOrganization, error)
+	OrganizationsForAccount(context.Context, string) ([]store.AccountOrganization, error)
+	CreateOrganizationForAccount(context.Context, string, store.CreateOrganizationParams, store.AuditEvent) (store.AccountOrganization, error)
+	BindOrganizationSite(context.Context, string, string, string, store.AuditEvent) error
+	SitesForAccount(context.Context, string) ([]string, error)
+	BindSiteOwnership(context.Context, string, string, store.AuditEvent) error
+	RecordAudit(context.Context, store.AuditEvent) error
+	ConsumeRateLimit(context.Context, string, string, int, time.Duration) (store.RateLimitResult, error)
 	DBStats() telemetry.DBStats
 }
 
@@ -37,10 +51,16 @@ type Server struct {
 	log             *slog.Logger
 	securitySampler *securityLogSampler
 	metrics         *telemetry.Metrics
+	devOutbox       *confirmationOutbox
+	delivery        confirmationDelivery
 }
 
 func NewServer(cfg config.Config, st repository, log *slog.Logger) *Server {
 	server := &Server{cfg: cfg, store: st, log: log, securitySampler: newSecurityLogSampler()}
+	if cfg.Env == "dev" {
+		server.devOutbox = newConfirmationOutbox()
+		server.delivery = server.devOutbox
+	}
 	server.metrics = telemetry.New(func() telemetry.DBStats {
 		if server.store == nil {
 			return telemetry.DBStats{}
@@ -73,6 +93,13 @@ func (s *Server) Router() http.Handler {
 		r.Post("/components", s.handleCreateComponent)
 		r.Put("/components/{componentID}", s.handlePutComponent)
 		r.Post("/component-sessions", s.handleCreateComponentSession)
+		r.Post("/confirmations", s.handleCreateConfirmation)
+		r.Post("/confirmations/verify", s.handleVerifyConfirmation)
+		r.Get("/sessions/me", s.handleSessionMe)
+		r.Post("/sessions/logout", s.handleSessionLogout)
+		r.Post("/organizations", s.handleCreateOrganization)
+		r.Post("/site-ownership", s.handleBindSiteOwnership)
+		r.Get("/dev/confirmations", s.handleDevConfirmations)
 	})
 
 	return r

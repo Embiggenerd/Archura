@@ -41,3 +41,15 @@ func TestHashAndEqual(t *testing.T) {
 		t.Fatal("different hashes should not compare equal")
 	}
 }
+
+func TestAccountTokenKindsRoundTrip(t *testing.T) {
+	for _, kind := range []string{"cfm", "sess"} {
+		token, err := Generate(kind, "dev")
+		if err != nil {
+			t.Fatalf("Generate(%q): %v", kind, err)
+		}
+		if !HasKindForEnv(token, kind, "dev") || HasKindForEnv(token, kind, "prod") {
+			t.Fatalf("generated %s token has incorrect environment binding: %q", kind, token)
+		}
+	}
+}

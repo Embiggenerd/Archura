@@ -31,5 +31,7 @@ func main() {
 	}
 	log.Info("maintenance complete",
 		"component_sessions_deleted", result.ComponentSessions,
+		"account_sessions_deleted", result.AccountSessions,
+		"email_confirmations_deleted", result.EmailConfirmations,
 		"rate_limit_buckets_deleted", result.RateLimitBuckets)
 }

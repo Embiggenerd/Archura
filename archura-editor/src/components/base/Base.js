@@ -97,7 +97,10 @@ export class Base extends LitElement {
   // Double-click a [data-edit] element to edit its text in place. The commit
   // is an event, not a DOM/attribute write: the editor bridges it into the
   // GrapesJS model so export, undo, and the traits panel stay authoritative.
+  // Editor-only: armed only inside the editor canvas (the controller marks
+  // its document) — published sites and embeds must never be editable.
   #setupInlineEditing() {
+    if (!this.ownerDocument?.documentElement?.hasAttribute('data-archura-editor')) return;
     for (const el of this.renderRoot.querySelectorAll('[data-edit]')) {
       el.addEventListener('dblclick', () => this.#beginEdit(el));
     }
@@ -107,6 +110,11 @@ export class Base extends LitElement {
     if (el.isContentEditable) return;
     const trait = el.getAttribute('data-edit');
     const original = el.innerText;
+    // Contenteditable typing destroys the text nodes and marker comments Lit
+    // manages inside this element; a later Lit render then writes into dead
+    // references and throws. Keep the original nodes and restore them before
+    // any re-render can run.
+    const originalNodes = [...el.childNodes];
     let done = false;
 
     el.setAttribute('contenteditable', 'plaintext-only');
@@ -126,8 +134,8 @@ export class Base extends LitElement {
       el.removeEventListener('blur', onBlur);
       el.removeEventListener('keydown', onKey);
       const value = el.innerText.trim();
+      el.replaceChildren(...originalNodes);
       if (!commit || value === original.trim()) {
-        el.innerText = original;
         return;
       }
       this.dispatchEvent(

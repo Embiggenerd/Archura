@@ -668,13 +668,13 @@ These are deliberate forks, not details to let implementation choose accidentall
 Use this file for product direction and competitive reasoning. Use the existing documents for implementation contracts:
 
 - [`archura-editor/ARCHURA.md`](archura-editor/ARCHURA.md) — editor package boundary.
-- [`archura-editor/docs/GAPS_AND_SOLUTIONS.md`](archura-editor/docs/GAPS_AND_SOLUTIONS.md) — current editor/platform gaps and implemented foundations.
-- [`archura-editor/docs/EDITOR_PARITY.md`](archura-editor/docs/EDITOR_PARITY.md) — constrained editor capability and polish.
-- [`archura-editor/docs/AUTH_ARCHITECTURE.md`](archura-editor/docs/AUTH_ARCHITECTURE.md) — tenant identity and token exchange.
-- [`archura-editor/docs/DASHBOARD.md`](archura-editor/docs/DASHBOARD.md) — thin tenant console direction.
-- [`archura-editor/docs/ARTICLES_APP.md`](archura-editor/docs/ARTICLES_APP.md) — structured content and publishing direction.
-- [`archura-editor/docs/STRIPE_COMPONENT.md`](archura-editor/docs/STRIPE_COMPONENT.md) — data-connected and transaction component model.
-- [`archura-editor/docs/FINTECH_ARCHITECTURE.md`](archura-editor/docs/FINTECH_ARCHITECTURE.md) — regulated server boundary.
+- [`docs/GAPS_AND_SOLUTIONS.md`](../docs/GAPS_AND_SOLUTIONS.md) — current editor/platform gaps and implemented foundations.
+- [`docs/EDITOR_PARITY.md`](../docs/EDITOR_PARITY.md) — constrained editor capability and polish.
+- [`docs/AUTH_ARCHITECTURE.md`](../docs/AUTH_ARCHITECTURE.md) — tenant identity and token exchange.
+- [`docs/DASHBOARD.md`](../docs/DASHBOARD.md) — thin tenant console direction.
+- [`docs/ARTICLES_APP.md`](../docs/ARTICLES_APP.md) — structured content and publishing direction.
+- [`docs/STRIPE_COMPONENT.md`](../docs/STRIPE_COMPONENT.md) — data-connected and transaction component model.
+- [`docs/FINTECH_ARCHITECTURE.md`](../docs/FINTECH_ARCHITECTURE.md) — regulated server boundary.
 - [`SERVICE_NODE_AND_INTERFACE_DESIGN.md`](SERVICE_NODE_AND_INTERFACE_DESIGN.md) — agent/run/deployment target architecture.
 
 ## Closing recommendation

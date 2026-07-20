@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Archura embed practice client</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: system-ui, sans-serif; color: #111827; background: #f3f4f6; }
+      main { width: min(1100px, calc(100% - 32px)); margin: 28px auto; }
+      h1 { margin-bottom: 4px; }
+      p { color: #6b7280; }
+      .grid { display: grid; grid-template-columns: minmax(280px, 0.8fr) minmax(360px, 1.2fr); gap: 18px; }
+      .panel { background: white; border: 1px solid #e5e7eb; border-radius: 14px; padding: 18px; }
+      textarea { width: 100%; min-height: 220px; resize: vertical; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font: 13px/1.5 ui-monospace, monospace; }
+      button { margin-top: 10px; padding: 9px 16px; border: 0; border-radius: 8px; background: #4f46e5; color: white; font-weight: 700; cursor: pointer; }
+      iframe { width: 100%; min-height: 520px; border: 1px solid #d1d5db; border-radius: 8px; background: white; }
+      @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Embed practice client</h1>
+      <p>Copy an embed snippet from an organization’s dashboard, paste it here, and run it against this separate origin.</p>
+      <div class="grid">
+        <section class="panel">
+          <label for="snippet"><strong>Client snippet</strong></label>
+          <textarea id="snippet" spellcheck="false" placeholder="&lt;script type=&quot;module&quot; src=&quot;http://localhost:8787/embed/pk_test_…/site_…/Landing.js&quot;&gt;&lt;/script&gt;&#10;&lt;archura-landing&gt;&lt;/archura-landing&gt;"></textarea>
+          <button id="run" type="button">Run embed</button>
+        </section>
+        <section class="panel">
+          <strong>Separate-origin preview</strong>
+          <p>The iframe is sandboxed and receives only the pasted snippet.</p>
+          <iframe id="preview" title="Embed preview" sandbox="allow-scripts allow-forms"></iframe>
+        </section>
+      </div>
+    </main>
+    <script>
+      const snippet = document.getElementById('snippet');
+      const preview = document.getElementById('preview');
+      const saved = localStorage.getItem('archura:practice-snippet');
+      if (saved) snippet.value = saved;
+      document.getElementById('run').addEventListener('click', () => {
+        localStorage.setItem('archura:practice-snippet', snippet.value);
+        preview.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head><body>${snippet.value}</body></html>`;
+      });
+    </script>
+  </body>
+</html>

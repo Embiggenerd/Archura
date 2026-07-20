@@ -3,16 +3,20 @@
   "info": {
     "title": "Archura Core API",
     "version": "0.1.0",
-    "description": "Tenant identity and component-session API for Archura's embedded payment components. Production /v1 requests require both the Worker service credential and the endpoint-specific admin or tenant bearer key."
+    "description": "Identity, ownership, and component-session API for Archura. Production /v1 requests require the Worker service credential plus any endpoint-specific bearer credential."
   },
   "servers": [
     { "url": "/", "description": "Current core server" }
   ],
   "tags": [
     { "name": "Operations", "description": "Process and dependency health" },
-    { "name": "Clients", "description": "Platform-admin tenant onboarding" },
-    { "name": "Components", "description": "Tenant-owned payment component configuration" },
-    { "name": "Sessions", "description": "Short-lived component access tokens" }
+    { "name": "Organizations", "description": "Business and billing boundaries shared by account members" },
+    { "name": "Clients", "description": "Legacy platform-admin organization onboarding" },
+    { "name": "Components", "description": "Organization-owned payment component configuration" },
+    { "name": "Sessions", "description": "Component and account sessions" },
+    { "name": "Accounts", "description": "Email-confirmed accounts and site ownership" },
+    { "name": "Confirmations", "description": "Single-use email confirmation links" },
+    { "name": "Development", "description": "Development-only testing helpers" }
   ],
   "components": {
     "securitySchemes": {
@@ -25,8 +29,8 @@
       "BearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "adm_... or sk_...",
-        "description": "Platform-admin key for client creation; tenant secret key for component and session operations."
+        "bearerFormat": "adm_..., sk_..., or sess_...",
+        "description": "Platform-admin key, organization secret key, or account session token, according to the operation."
       }
     },
     "schemas": {
@@ -39,7 +43,7 @@
             "required": ["code", "message"],
             "properties": {
               "code": { "type": "string", "example": "invalid_api_key" },
-              "message": { "type": "string", "example": "The tenant API key is invalid." },
+              "message": { "type": "string", "example": "The organization API key is invalid." },
               "request_id": { "type": "string", "example": "core/abc123-000001" }
             }
           }
@@ -79,7 +83,7 @@
             "type": "string",
             "maxLength": 128,
             "writeOnly": true,
-            "description": "Optional opaque edge namespace credential, limited to 128 UTF-8 bytes. Stored for the tenant binding and never returned."
+            "description": "Optional opaque edge namespace credential, limited to 128 UTF-8 bytes. Stored for the organization binding and never returned."
           }
         }
       },
@@ -133,7 +137,7 @@
         "required": ["component_id", "origin"],
         "properties": {
           "component_id": { "type": "string", "pattern": "^cmp_(?:test|live)_", "example": "cmp_test_..." },
-          "external_user_id": { "type": "string", "description": "Optional tenant-owned user reference. Never written to operational or audit logs." },
+          "external_user_id": { "type": "string", "description": "Optional organization-owned user reference. Never written to operational or audit logs." },
           "origin": { "type": "string", "format": "uri", "example": "https://mikesbakery.example" }
         }
       },
@@ -146,11 +150,133 @@
           "expires_in": { "type": "integer", "const": 600 },
           "expires_at": { "type": "string", "format": "date-time" }
         }
+      },
+      "CreateConfirmationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["email"],
+        "properties": {
+          "email": { "type": "string", "format": "email", "example": "owner@example.com" },
+          "subdomain": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", "example": "mikes-bakery" }
+        }
+      },
+      "ConfirmationCreated": {
+        "type": "object",
+        "required": ["id", "expires_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "expires_at": { "type": "string", "format": "date-time" },
+          "confirm_url": { "type": "string", "format": "uri", "description": "Present only in development." }
+        }
+      },
+      "VerifyConfirmationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["token"],
+        "properties": {
+          "token": { "type": "string", "pattern": "^cfm_(?:test|live)_", "example": "cfm_test_..." }
+        }
+      },
+      "Account": {
+        "type": "object",
+        "required": ["id", "email"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "format": "email" }
+        }
+      },
+      "AccountSession": {
+        "type": "object",
+        "required": ["token", "expires_at"],
+        "properties": {
+          "token": { "type": "string", "pattern": "^sess_(?:test|live)_", "description": "Returned once and stored only as a hash." },
+          "expires_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Organization": {
+        "type": "object",
+        "required": ["id", "name", "slug", "role", "is_default", "publishable_key", "sites", "created_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "slug": { "type": "string" },
+          "role": { "type": "string", "enum": ["owner", "member"] },
+          "is_default": { "type": "boolean" },
+          "publishable_key": { "type": "string", "pattern": "^pk_(?:test|live)_" },
+          "sites": { "type": "array", "items": { "type": "string" } },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreateOrganizationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "slug"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "slug": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$" },
+          "allowed_origins": { "type": "array", "items": { "type": "string", "format": "uri" } }
+        }
+      },
+      "ConfirmationVerified": {
+        "type": "object",
+        "required": ["account", "organization", "subdomain", "session"],
+        "properties": {
+          "account": { "$ref": "#/components/schemas/Account" },
+          "organization": { "$ref": "#/components/schemas/Organization" },
+          "subdomain": { "type": ["string", "null"] },
+          "session": { "$ref": "#/components/schemas/AccountSession" }
+        }
+      },
+      "SessionMe": {
+        "type": "object",
+        "required": ["account", "organizations"],
+        "properties": {
+          "account": { "$ref": "#/components/schemas/Account" },
+          "organizations": { "type": "array", "items": { "$ref": "#/components/schemas/Organization" } }
+        }
+      },
+      "BindSiteOwnershipRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["subdomain"],
+        "properties": {
+          "subdomain": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$" },
+          "organization_id": { "type": "string", "format": "uuid", "description": "Defaults to the account's default organization when omitted." }
+        }
+      },
+      "SiteOwnership": {
+        "type": "object",
+        "required": ["subdomain", "organization_id"],
+        "properties": {
+          "subdomain": { "type": "string" },
+          "organization_id": { "type": "string", "format": "uuid" }
+        }
+      },
+      "DevConfirmations": {
+        "type": "object",
+        "required": ["confirmations"],
+        "properties": {
+          "confirmations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["email", "subdomain", "confirm_url", "created_at", "used", "expired"],
+              "properties": {
+                "email": { "type": "string", "format": "email" },
+                "subdomain": { "type": ["string", "null"] },
+                "confirm_url": { "type": "string", "format": "uri" },
+                "created_at": { "type": "string", "format": "date-time" },
+                "used": { "type": "boolean" },
+                "expired": { "type": "boolean", "description": "True only for an unused confirmation whose TTL elapsed." }
+              }
+            }
+          }
+        }
       }
     },
     "responses": {
       "BadRequest": { "description": "Invalid request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-      "Unauthorized": { "description": "Missing or invalid service/admin/tenant credential", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "Unauthorized": { "description": "Missing or invalid service/admin/organization credential", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "Forbidden": { "description": "Authenticated but not allowed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "NotFound": { "description": "Resource not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "Conflict": { "description": "Resource conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
@@ -187,12 +313,12 @@
       "post": {
         "tags": ["Clients"],
         "operationId": "createClient",
-        "summary": "Create a tenant and issue API keys",
-        "description": "Requires a platform-admin bearer key. The returned tenant secret is shown once.",
+        "summary": "Create an organization and issue API keys",
+        "description": "Legacy platform-admin route. The returned organization secret is shown once.",
         "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateClientRequest" } } } },
         "responses": {
-          "201": { "description": "Tenant created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ClientCreated" } } } },
+          "201": { "description": "Organization created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ClientCreated" } } } },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "409": { "$ref": "#/components/responses/Conflict" },
@@ -206,8 +332,8 @@
       "post": {
         "tags": ["Components"],
         "operationId": "createComponent",
-        "summary": "Create a tenant-owned payment component",
-        "description": "Requires the tenant secret. Price and redirect configuration are stored server-side and later bound to component sessions.",
+        "summary": "Create an organization-owned payment component",
+        "description": "Requires the organization secret. Price and redirect configuration are stored server-side and later bound to component sessions.",
         "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ComponentConfiguration" } } } },
         "responses": {
@@ -224,7 +350,7 @@
       "put": {
         "tags": ["Components"],
         "operationId": "updateComponent",
-        "summary": "Update a tenant-owned payment component",
+        "summary": "Update an organization-owned payment component",
         "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
         "parameters": [
           { "name": "componentID", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^cmp_(?:test|live)_" } }
@@ -246,7 +372,7 @@
         "tags": ["Sessions"],
         "operationId": "createComponentSession",
         "summary": "Mint a short-lived component bearer token",
-        "description": "Called by the tenant backend after it authenticates its own user. The token is bound to the tenant, component, checkout:create scope, checkout audience, origin, and ten-minute expiry.",
+        "description": "Called by the organization backend after it authenticates its own user. The token is bound to the organization, component, checkout:create scope, checkout audience, origin, and ten-minute expiry.",
         "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateComponentSessionRequest" } } } },
         "responses": {
@@ -258,6 +384,114 @@
           "429": { "$ref": "#/components/responses/RateLimited" },
           "500": { "$ref": "#/components/responses/InternalError" },
           "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/confirmations": {
+      "post": {
+        "tags": ["Confirmations"],
+        "operationId": "createConfirmation",
+        "summary": "Create a single-use email confirmation",
+        "security": [{ "ServiceAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateConfirmationRequest" } } } },
+        "responses": {
+          "201": { "description": "Confirmation created", "headers": { "Cache-Control": { "schema": { "type": "string", "example": "no-store" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConfirmationCreated" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/confirmations/verify": {
+      "post": {
+        "tags": ["Confirmations"],
+        "operationId": "verifyConfirmation",
+        "summary": "Consume a confirmation and create an account session",
+        "security": [{ "ServiceAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VerifyConfirmationRequest" } } } },
+        "responses": {
+          "200": { "description": "Confirmation verified", "headers": { "Cache-Control": { "schema": { "type": "string", "example": "no-store" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConfirmationVerified" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/sessions/me": {
+      "get": {
+        "tags": ["Accounts", "Sessions"],
+        "operationId": "getAccountSession",
+        "summary": "Return the current account and its organizations",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Current account session", "headers": { "Cache-Control": { "schema": { "type": "string", "example": "no-store" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SessionMe" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/organizations": {
+      "post": {
+        "tags": ["Organizations", "Accounts"],
+        "operationId": "createOrganization",
+        "summary": "Create another organization for the current account",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateOrganizationRequest" } } } },
+        "responses": {
+          "201": { "description": "Organization created; secret_key is returned once", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Organization" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/sessions/logout": {
+      "post": {
+        "tags": ["Accounts", "Sessions"],
+        "operationId": "logoutAccountSession",
+        "summary": "Revoke an account session",
+        "description": "Best-effort and idempotent. Missing, malformed, unknown, expired, or already-revoked account session tokens still return 204 so the Worker can always clear its cookie.",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "responses": {
+          "204": { "description": "Logout accepted", "headers": { "Cache-Control": { "schema": { "type": "string", "example": "no-store" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/v1/site-ownership": {
+      "post": {
+        "tags": ["Accounts"],
+        "operationId": "bindSiteOwnership",
+        "summary": "Bind a subdomain to one of the current account's organizations",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BindSiteOwnershipRequest" } } } },
+        "responses": {
+          "201": { "description": "Site ownership bound", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SiteOwnership" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/dev/confirmations": {
+      "get": {
+        "tags": ["Development"],
+        "operationId": "listDevConfirmations",
+        "summary": "List recent in-memory confirmation messages in development",
+        "security": [{ "ServiceAuth": [] }],
+        "responses": {
+          "200": { "description": "Recent development confirmation messages", "headers": { "Cache-Control": { "schema": { "type": "string", "example": "no-store" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DevConfirmations" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     }

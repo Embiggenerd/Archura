@@ -441,11 +441,11 @@ That journey is narrow enough to ship, sell, and validate. It also leaves every 
 
 - [`DUDA_PLATFORM_REFERENCE.md`](DUDA_PLATFORM_REFERENCE.md) — Duda’s platform, business model, and the longer-term capability map.
 - [`archura-editor/ARCHURA.md`](archura-editor/ARCHURA.md) — editor and host responsibility boundary.
-- [`archura-editor/docs/AUTH_ARCHITECTURE.md`](archura-editor/docs/AUTH_ARCHITECTURE.md) — tenant identity and token exchange.
-- [`archura-editor/docs/STRIPE_COMPONENT.md`](archura-editor/docs/STRIPE_COMPONENT.md) — payment and data-connected component direction.
-- [`archura-editor/docs/FINTECH_ARCHITECTURE.md`](archura-editor/docs/FINTECH_ARCHITECTURE.md) — regulated system-of-record boundary.
-- [`archura-editor/docs/DASHBOARD.md`](archura-editor/docs/DASHBOARD.md) — tenant console direction.
-- [`archura-editor/docs/FUNNEL.md`](archura-editor/docs/FUNNEL.md) — anonymous-to-persistent publishing funnel.
+- [`docs/AUTH_ARCHITECTURE.md`](../docs/AUTH_ARCHITECTURE.md) — tenant identity and token exchange.
+- [`docs/STRIPE_COMPONENT.md`](../docs/STRIPE_COMPONENT.md) — payment and data-connected component direction.
+- [`docs/FINTECH_ARCHITECTURE.md`](../docs/FINTECH_ARCHITECTURE.md) — regulated system-of-record boundary.
+- [`docs/DASHBOARD.md`](../docs/DASHBOARD.md) — tenant console direction.
+- [`docs/FUNNEL.md`](../docs/FUNNEL.md) — anonymous-to-persistent publishing funnel.
 - [`SERVICE_NODE_AND_INTERFACE_DESIGN.md`](SERVICE_NODE_AND_INTERFACE_DESIGN.md) — future agent/run/deployment architecture.
 
 ## 17. Source index
