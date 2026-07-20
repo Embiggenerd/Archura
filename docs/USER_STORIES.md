@@ -15,4 +15,4 @@ If the domain are used, or an email is not valid or already used, user should ge
 User goes to the editor, clicks Register.
 Enters email (must be valid). Gets told to check inbox (local: dev-mail).
 Clicks the confirm link, lands signed in on their dashboard.
-Dashboard offers claiming a site (or they can return to the editor to build/deploy).
+Dashboard offers claiming a site (or they can return to the editor to build/deploy)
