@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	ErrConflict = errors.New("store conflict")
-	ErrNotFound = errors.New("store record not found")
+	ErrConflict      = errors.New("store conflict")
+	ErrAlreadyMember = errors.New("account is already an organization member")
+	ErrNotFound      = errors.New("store record not found")
 )
 
 func (s *Store) CreateOrganization(ctx context.Context, p CreateOrganizationParams, audit AuditEvent) (Organization, error) {

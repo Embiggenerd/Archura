@@ -18,7 +18,10 @@ type Config struct {
 	DatabaseURL      string // empty in local scaffold runs => DB features disabled
 	PlatformAdminKey string // gates platform-admin endpoints (client onboarding)
 	CoreServiceKey   string // authenticates the Cloudflare Worker to the core
-	ConfirmURLBase   string // Worker confirmation URL; required by confirmation creation in dev
+	ConfirmURLBase   string // Public Worker confirmation URL; required in production and for local email links
+	EmailAccountID   string // Cloudflare account used by Email Service in production
+	EmailAPIToken    string // Cloudflare Email Service API token
+	EmailFrom        string // verified sender address
 	RequireEdgeAuth  bool   // optional in dev; always true in prod
 }
 
@@ -35,6 +38,9 @@ func Load() (Config, error) {
 		PlatformAdminKey: os.Getenv("PLATFORM_ADMIN_KEY"),
 		CoreServiceKey:   os.Getenv("CORE_SERVICE_KEY"),
 		ConfirmURLBase:   os.Getenv("CONFIRM_URL_BASE"),
+		EmailAccountID:   os.Getenv("CLOUDFLARE_EMAIL_ACCOUNT_ID"),
+		EmailAPIToken:    os.Getenv("CLOUDFLARE_EMAIL_API_TOKEN"),
+		EmailFrom:        os.Getenv("EMAIL_FROM"),
 		RequireEdgeAuth:  requireEdgeAuth,
 	}
 	if cfg.Env == "prod" {
@@ -51,7 +57,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("ARCHURA_ENV must be dev or prod")
 	}
 	if c.Env == "prod" {
-		missing := make([]string, 0, 3)
+		missing := make([]string, 0, 7)
 		if c.DatabaseURL == "" {
 			missing = append(missing, "DATABASE_URL")
 		}
@@ -60,6 +66,18 @@ func (c Config) Validate() error {
 		}
 		if c.CoreServiceKey == "" {
 			missing = append(missing, "CORE_SERVICE_KEY")
+		}
+		if c.ConfirmURLBase == "" {
+			missing = append(missing, "CONFIRM_URL_BASE")
+		}
+		if c.EmailAccountID == "" {
+			missing = append(missing, "CLOUDFLARE_EMAIL_ACCOUNT_ID")
+		}
+		if c.EmailAPIToken == "" {
+			missing = append(missing, "CLOUDFLARE_EMAIL_API_TOKEN")
+		}
+		if c.EmailFrom == "" {
+			missing = append(missing, "EMAIL_FROM")
 		}
 		if len(missing) > 0 {
 			return fmt.Errorf("production configuration missing %s", strings.Join(missing, ", "))

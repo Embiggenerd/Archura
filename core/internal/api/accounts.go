@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/mail"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	archauth "github.com/archura/core/internal/auth"
@@ -19,6 +21,8 @@ const (
 	confirmationTTL       = time.Hour
 	accountSessionTTL     = 7 * 24 * time.Hour
 	confirmationRateLimit = 5
+	invitationRateLimit   = 20
+	invitationTTL         = 7 * 24 * time.Hour
 	devMailboxLimit       = 50
 )
 
@@ -42,6 +46,10 @@ type createOrganizationRequest struct {
 	AllowedOrigins []string `json:"allowed_origins,omitempty"`
 }
 
+type createInvitationRequest struct {
+	Email string `json:"email"`
+}
+
 type pendingConfirmation struct {
 	ID         string
 	TokenHash  string
@@ -53,15 +61,25 @@ type pendingConfirmation struct {
 	Used       bool
 }
 
-type confirmationOutbox struct {
-	mu      sync.Mutex
-	entries []pendingConfirmation
+type pendingInvitationEmail struct {
+	InvitationID     string
+	OrganizationID   string
+	OrganizationName string
+	Email            string
+	InvitedByEmail   string
+	AccountURL       string
+	CreatedAt        time.Time
 }
 
-// confirmationDelivery is the seam for a future transactional email provider.
-// The only implementation in this milestone is the development outbox.
-type confirmationDelivery interface {
-	deliver(pendingConfirmation)
+type confirmationOutbox struct {
+	mu          sync.Mutex
+	entries     []pendingConfirmation
+	invitations []pendingInvitationEmail
+}
+
+type emailDelivery interface {
+	deliverConfirmation(context.Context, pendingConfirmation) error
+	deliverInvitation(context.Context, pendingInvitationEmail) error
 	consumed(string)
 }
 
@@ -69,13 +87,30 @@ func newConfirmationOutbox() *confirmationOutbox {
 	return &confirmationOutbox{}
 }
 
-func (o *confirmationOutbox) deliver(entry pendingConfirmation) {
+func (o *confirmationOutbox) deliverConfirmation(_ context.Context, entry pendingConfirmation) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.entries = append(o.entries, entry)
 	if len(o.entries) > devMailboxLimit {
 		o.entries = append([]pendingConfirmation(nil), o.entries[len(o.entries)-devMailboxLimit:]...)
 	}
+	return nil
+}
+
+// deliver keeps the small outbox unit-test seam while production delivery uses
+// the context-aware emailDelivery interface.
+func (o *confirmationOutbox) deliver(entry pendingConfirmation) {
+	_ = o.deliverConfirmation(context.Background(), entry)
+}
+
+func (o *confirmationOutbox) deliverInvitation(_ context.Context, entry pendingInvitationEmail) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.invitations = append(o.invitations, entry)
+	if len(o.invitations) > devMailboxLimit {
+		o.invitations = append([]pendingInvitationEmail(nil), o.invitations[len(o.invitations)-devMailboxLimit:]...)
+	}
+	return nil
 }
 
 func (o *confirmationOutbox) consumed(tokenHash string) {
@@ -98,6 +133,19 @@ func (o *confirmationOutbox) list(limit int) []pendingConfirmation {
 	result := make([]pendingConfirmation, 0, limit)
 	for i := len(o.entries) - 1; i >= len(o.entries)-limit; i-- {
 		result = append(result, o.entries[i])
+	}
+	return result
+}
+
+func (o *confirmationOutbox) listInvitations(limit int) []pendingInvitationEmail {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if limit > len(o.invitations) {
+		limit = len(o.invitations)
+	}
+	result := make([]pendingInvitationEmail, 0, limit)
+	for i := len(o.invitations) - 1; i >= len(o.invitations)-limit; i-- {
+		result = append(result, o.invitations[i])
 	}
 	return result
 }
@@ -128,13 +176,13 @@ func (s *Server) handleCreateConfirmation(w http.ResponseWriter, r *http.Request
 	}) {
 		return
 	}
-	var confirmURL string
 	token, err := archauth.Generate("cfm", s.cfg.Env)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	if s.cfg.Env == "dev" {
+	var confirmURL string
+	if s.cfg.Env == "dev" || s.delivery != nil {
 		confirmURL, err = confirmationURL(s.cfg.ConfirmURLBase, token)
 		if err != nil {
 			s.internalError(w, r, err)
@@ -157,11 +205,14 @@ func (s *Server) handleCreateConfirmation(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if s.delivery != nil {
-		s.delivery.deliver(pendingConfirmation{
+		if err := s.delivery.deliverConfirmation(r.Context(), pendingConfirmation{
 			ID: created.ID, TokenHash: created.TokenHash, Email: created.Email,
 			Subdomain: created.Subdomain, ConfirmURL: confirmURL,
 			CreatedAt: created.CreatedAt, ExpiresAt: created.ExpiresAt,
-		})
+		}); err != nil {
+			s.internalError(w, r, err)
+			return
+		}
 	}
 	response := map[string]any{"id": created.ID, "expires_at": created.ExpiresAt}
 	if s.cfg.Env == "dev" {
@@ -227,7 +278,10 @@ func (s *Server) handleVerifyConfirmation(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{
-		"account": map[string]any{"id": result.Account.ID, "email": result.Account.Email},
+		"account": map[string]any{
+			"id": result.Account.ID, "email": result.Account.Email,
+			"email_verified_at": result.Account.EmailVerifiedAt,
+		},
 		"organization": organizationResponse(store.AccountOrganization{
 			Organization: result.Organization, Role: "owner", IsDefault: true,
 			PublishableKey: result.PublishableKey,
@@ -280,11 +334,120 @@ func (s *Server) handleSessionMe(w http.ResponseWriter, r *http.Request) {
 	for _, organization := range organizations {
 		organizationBodies = append(organizationBodies, organizationResponse(organization))
 	}
+	invitations, err := s.store.PendingInvitationsForEmail(r.Context(), account.Email)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	invitationBodies := make([]map[string]any, 0, len(invitations))
+	for _, invitation := range invitations {
+		invitationBodies = append(invitationBodies, invitationResponse(invitation))
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{
-		"account":       map[string]any{"id": account.ID, "email": account.Email},
+		"account": map[string]any{
+			"id": account.ID, "email": account.Email, "email_verified_at": account.EmailVerifiedAt,
+		},
 		"organizations": organizationBodies,
+		"invitations":   invitationBodies,
 	})
+}
+
+func (s *Server) handleCreateInvitation(w http.ResponseWriter, r *http.Request) {
+	account, ok := s.authenticateAccountSession(w, r)
+	if !ok {
+		return
+	}
+	organizationID := chi.URLParam(r, "organizationID")
+	var input createInvitationRequest
+	if err := decodeJSON(w, r, &input); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "The request body is invalid.")
+		return
+	}
+	email := normalizeEmail(input.Email)
+	if organizationID == "" || !validEmail(email) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "The invitation fields are invalid.")
+		return
+	}
+	if !s.enforceRateLimits(w, r, []rateLimitRequest{
+		{subject: "organization:" + organizationID, operation: "invitation.create.organization", limit: invitationRateLimit, window: time.Hour},
+		{subject: "email:" + archauth.Hash(email), operation: "invitation.create.email", limit: invitationRateLimit, window: 24 * time.Hour},
+	}) {
+		return
+	}
+	invitation, err := s.store.CreateOrganizationInvitation(
+		r.Context(), organizationID, account.ID, email, time.Now().UTC().Add(invitationTTL),
+		store.AuditEvent{
+			ActorType: "account", ActorID: account.ID, Action: "invitation.created",
+			ResourceType: "invitation", RequestID: middleware.GetReqID(r.Context()), Metadata: store.EmptyAuditMetadata{},
+		},
+	)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, r, http.StatusNotFound, "organization_not_found", "The organization was not found.")
+		return
+	}
+	if errors.Is(err, store.ErrAlreadyMember) {
+		writeError(w, r, http.StatusConflict, "already_member", "That account is already a member.")
+		return
+	}
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if s.delivery != nil {
+		accountURL, urlErr := invitationURL(s.cfg.ConfirmURLBase, invitation.ID)
+		if urlErr != nil {
+			s.internalError(w, r, urlErr)
+			return
+		}
+		if err := s.delivery.deliverInvitation(r.Context(), pendingInvitationEmail{
+			InvitationID: invitation.ID, OrganizationID: invitation.OrganizationID,
+			OrganizationName: invitation.OrganizationName, Email: invitation.Email,
+			InvitedByEmail: account.Email, AccountURL: accountURL, CreatedAt: invitation.CreatedAt,
+		}); err != nil {
+			s.log.ErrorContext(r.Context(), "invitation email delivery failed",
+				"request_id", middleware.GetReqID(r.Context()), "invitation_id", invitation.ID, "err", err)
+			writeError(w, r, http.StatusBadGateway, "email_delivery_failed",
+				"The invitation was saved, but its email could not be sent. Retry the invitation.")
+			return
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusCreated, invitationResponse(invitation))
+}
+
+func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) {
+	s.handleInvitationResponse(w, r, true)
+}
+
+func (s *Server) handleDeclineInvitation(w http.ResponseWriter, r *http.Request) {
+	s.handleInvitationResponse(w, r, false)
+}
+
+func (s *Server) handleInvitationResponse(w http.ResponseWriter, r *http.Request, accept bool) {
+	account, ok := s.authenticateAccountSession(w, r)
+	if !ok {
+		return
+	}
+	invitationID := chi.URLParam(r, "invitationID")
+	if invitationID == "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "The invitation is invalid.")
+		return
+	}
+	invitation, err := s.store.RespondToOrganizationInvitation(r.Context(), invitationID, account, accept, store.AuditEvent{
+		ActorType: "account", ActorID: account.ID, ResourceType: "invitation",
+		RequestID: middleware.GetReqID(r.Context()), Metadata: store.EmptyAuditMetadata{},
+	})
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, r, http.StatusNotFound, "invitation_not_found", "The invitation was not found.")
+		return
+	}
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, invitationResponse(invitation))
 }
 
 func (s *Server) handleCreateOrganization(w http.ResponseWriter, r *http.Request) {
@@ -299,6 +462,9 @@ func (s *Server) handleCreateOrganization(w http.ResponseWriter, r *http.Request
 	}
 	input.Name = strings.TrimSpace(input.Name)
 	input.Slug = strings.TrimSpace(input.Slug)
+	if input.AllowedOrigins == nil {
+		input.AllowedOrigins = []string{}
+	}
 	if input.Name == "" || !slugPattern.MatchString(input.Slug) ||
 		(len(input.AllowedOrigins) > 0 && !validOrigins(input.AllowedOrigins, s.cfg.Env)) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "The organization fields are invalid.")
@@ -423,6 +589,18 @@ func organizationResponse(organization store.AccountOrganization) map[string]any
 	}
 }
 
+func invitationResponse(invitation store.OrganizationInvitation) map[string]any {
+	return map[string]any{
+		"id": invitation.ID,
+		"organization": map[string]any{
+			"id": invitation.OrganizationID, "name": invitation.OrganizationName,
+		},
+		"email": invitation.Email, "role": invitation.Role,
+		"invited_by": invitation.InvitedByEmail, "status": invitation.Status,
+		"expires_at": invitation.ExpiresAt, "created_at": invitation.CreatedAt,
+	}
+}
+
 func (s *Server) handleDevConfirmations(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Env != "dev" || s.devOutbox == nil {
 		writeError(w, r, http.StatusNotFound, "not_found", "The resource was not found.")
@@ -430,6 +608,7 @@ func (s *Server) handleDevConfirmations(w http.ResponseWriter, r *http.Request) 
 	}
 	now := time.Now()
 	entries := s.devOutbox.list(devMailboxLimit)
+	invitationEntries := s.devOutbox.listInvitations(devMailboxLimit)
 	confirmations := make([]map[string]any, 0, len(entries))
 	for _, entry := range entries {
 		confirmations = append(confirmations, map[string]any{
@@ -439,7 +618,16 @@ func (s *Server) handleDevConfirmations(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"confirmations": confirmations})
+	invitations := make([]map[string]any, 0, len(invitationEntries))
+	for _, entry := range invitationEntries {
+		invitations = append(invitations, map[string]any{
+			"invitation_id": entry.InvitationID, "organization_id": entry.OrganizationID,
+			"organization_name": entry.OrganizationName, "email": entry.Email,
+			"invited_by": entry.InvitedByEmail, "account_url": entry.AccountURL,
+			"created_at": entry.CreatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"confirmations": confirmations, "invitations": invitations})
 }
 
 func (s *Server) authenticateAccountSession(w http.ResponseWriter, r *http.Request) (store.Account, bool) {
@@ -511,7 +699,7 @@ func validEmail(value string) bool {
 
 func confirmationURL(base, token string) (string, error) {
 	if strings.TrimSpace(base) == "" {
-		return "", errors.New("CONFIRM_URL_BASE is required for development confirmations")
+		return "", errors.New("CONFIRM_URL_BASE is required for confirmations")
 	}
 	parsed, err := url.Parse(base)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -520,5 +708,16 @@ func confirmationURL(base, token string) (string, error) {
 	query := parsed.Query()
 	query.Set("token", token)
 	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
+func invitationURL(confirmBase, invitationID string) (string, error) {
+	parsed, err := url.Parse(confirmBase)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("CONFIRM_URL_BASE must be an absolute URL")
+	}
+	parsed.Path = "/account/"
+	parsed.RawQuery = url.Values{"invitation": []string{invitationID}}.Encode()
+	parsed.Fragment = ""
 	return parsed.String(), nil
 }

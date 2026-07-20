@@ -54,7 +54,9 @@ Everything downstream is a stateless "is it armed? publish-on-visit" / "is it ex
 - **Core (Go):** email-confirmation accounts, organizations + memberships,
   organization-owned sites, subscription/payment state, and the
   `expires_at`/`status` records. The security boundary for identity and money.
-- **Email:** a transactional provider (Resend/Postmark) for the confirmation link.
+- **Email:** Cloudflare Email Service, called by the Go core over its REST API, for
+  confirmation links and organization invitations; local development uses the
+  in-memory mailbox.
 
 ## Data model (new/extended)
 
@@ -64,7 +66,7 @@ Everything downstream is a stateless "is it armed? publish-on-visit" / "is it ex
   confirmed), `draft_ref`, `published_ref`, `created_at`, `confirmed_at`,
   `published_at`, `expires_at`.
 - `email_confirmations` — `token_hash`, `site_id`, `email`, `expires_at`.
-- `accounts` — `email`, magic-link auth. Accounts own nothing but identity and
+- `accounts` — `email`, `email_verified_at`, magic-link auth. Accounts own nothing but identity and
   memberships; the subscription attaches to the organization (the billing
   boundary) when phase 4 ships — see `AUTH_ARCHITECTURE.md` vocabulary note.
 - Ownership: `sites.organization_id → organizations.id`; an account reaches a

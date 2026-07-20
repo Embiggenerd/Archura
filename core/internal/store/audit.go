@@ -50,7 +50,8 @@ func auditMetadata(event AuditEvent) ([]byte, error) {
 		}
 	case "confirmation.created", "confirmation.verified", "confirmation.verify_rejected",
 		"account.created", "session.created", "site_ownership.bound", "site_ownership.rejected",
-		"membership.created":
+		"membership.created", "invitation.created", "invitation.accepted", "invitation.declined",
+		"invitation.revoked":
 		if _, ok := event.Metadata.(EmptyAuditMetadata); !ok {
 			return nil, fmt.Errorf("%s requires EmptyAuditMetadata", event.Action)
 		}

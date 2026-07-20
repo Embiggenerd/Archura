@@ -17,8 +17,9 @@
       header h1 { font-size: 1rem; margin: 0; }
       header .email { color: #9ca3af; font-size: 0.85rem; }
       header .organization { color: #c7d2fe; font-size: 0.85rem; }
+      header .account-link { margin-left: auto; color: #e5e7eb; font-size: 0.82rem; text-decoration: none; }
       header .signout {
-        margin-left: auto; padding: 5px 12px; border: none; border-radius: 6px;
+        padding: 5px 12px; border: none; border-radius: 6px;
         background: #374151; color: white; font-size: 0.8rem; font-weight: 600;
         cursor: pointer; display: none;
       }
@@ -55,13 +56,16 @@
     </style>
   </head>
   <body>
-    <header><h1>Archura</h1><span class="email" id="who"></span><span class="organization" id="current-org"></span>
+    <header><h1>Archura</h1><span class="email" id="who"></span><span class="organization" id="current-org"></span><a class="account-link" href="/account/">Account</a>
       <button class="signout" id="signout">Sign out</button></header>
     <main id="main"></main>
     <script type="module">
       import { defaultComponents } from './../src/components/index.ts';
 
       const main = document.getElementById('main');
+      const escapeHtml = (value) => String(value ?? '')
+        .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
       const tagFor = (embedName) =>
         defaultComponents.find((d) => `${d.path.at(-1)}.js` === embedName)?.tagName ?? null;
       const selectedOrganizationKey = 'archura:selected-organization';
@@ -186,19 +190,19 @@
           <p class="hint">The selected organization owns the sites and embed keys shown below.</p>
           <form class="select-org">
             <select name="organization" style="flex:1;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px">
-              ${me.organizations.map((organization) => `<option value="${organization.id}" ${organization.id === selected.id ? 'selected' : ''}>${organization.name}</option>`).join('')}
+              ${me.organizations.map((organization) => `<option value="${organization.id}" ${organization.id === selected.id ? 'selected' : ''}>${escapeHtml(organization.name)}</option>`).join('')}
             </select>
           </form>
           <details><summary>Create another organization</summary>
             <form class="create-org" style="margin-top:10px;flex-wrap:wrap">
               <input name="name" placeholder="Business name" required />
-              <input name="slug" placeholder="business-slug" pattern="[a-z0-9][a-z0-9\\-]{0,61}[a-z0-9]" required />
+              <input name="slug" placeholder="business-slug" pattern="[a-z0-9](?:[a-z0-9\\-]{0,61}[a-z0-9])?" required />
               <button type="submit">Create</button>
             </form><p class="error"></p>
           </details>`;
         card.querySelector('select').addEventListener('change', (event) => {
           localStorage.setItem(selectedOrganizationKey, event.target.value);
-          location.reload();
+          location.href = `/dashboard/?organization=${encodeURIComponent(event.target.value)}`;
         });
         card.querySelector('.create-org').addEventListener('submit', async (event) => {
           event.preventDefault();
@@ -219,6 +223,38 @@
         main.appendChild(card);
       }
 
+      function renderInvite(organization) {
+        if (organization.role !== 'owner') return;
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <h2>Invite a member</h2>
+          <p class="hint">Invite another person to access this organization.</p>
+          <form><input name="email" type="email" autocomplete="email" placeholder="member@example.com" required />
+          <button type="submit">Send invitation</button></form>
+          <p class="error"></p>`;
+        card.querySelector('form').addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const message = card.querySelector('.error');
+          const response = await fetch(`/api/organizations/${encodeURIComponent(organization.id)}/invitations`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: form.email.value.trim() }),
+          }).catch(() => null);
+          if (!response?.ok) {
+            message.textContent = response?.status === 409 ? 'That account is already a member.' :
+              response?.status === 429 ? 'Too many invitations. Please wait and try again.' :
+              response?.status === 502 ? 'The invitation was saved, but its email failed. Retry to send it again.' :
+              'Could not send the invitation.';
+            return;
+          }
+          message.style.color = '#15803d';
+          message.textContent = `Invitation sent to ${form.email.value.trim()}.`;
+          form.reset();
+        });
+        main.appendChild(card);
+      }
+
       async function init() {
         const pathAccount = location.pathname.match(/^\/([0-9a-fA-F][0-9a-fA-F-]{7,})\/dashboard\/?$/)?.[1] ?? null;
         const me = await fetch('/api/me').then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -230,7 +266,7 @@
         // a different account gets a pointer instead of someone else's data
         if (pathAccount && pathAccount.toLowerCase() !== String(me.id).toLowerCase()) {
           main.innerHTML = `<div class="card"><h2>Different account</h2>
-            <p class="hint">You are signed in as <strong>${me.email}</strong>.</p>
+            <p class="hint">You are signed in as <strong>${escapeHtml(me.email)}</strong>.</p>
             <div class="actions"><a href="/dashboard/">Open your dashboard</a></div></div>`;
           return;
         }
@@ -239,10 +275,11 @@
         signout.style.display = 'inline-block';
         signout.addEventListener('click', async () => {
           await fetch('/api/logout', { method: 'POST' }).catch(() => {});
-          location.href = '/dashboard/';
+          location.href = '/account/';
         });
         main.innerHTML = '';
-        const preferredOrganization = localStorage.getItem(selectedOrganizationKey);
+        const requestedOrganization = new URLSearchParams(location.search).get('organization');
+        const preferredOrganization = requestedOrganization ?? localStorage.getItem(selectedOrganizationKey);
         const organization = me.organizations.find((candidate) => candidate.id === preferredOrganization)
           ?? me.organizations.find((candidate) => candidate.is_default)
           ?? me.organizations[0];
@@ -253,6 +290,7 @@
         localStorage.setItem(selectedOrganizationKey, organization.id);
         document.getElementById('current-org').textContent = `· ${organization.name}`;
         renderOrganizationControls(me, organization);
+        renderInvite(organization);
         for (const site of organization.sites) await renderSite(site, organization.siteUrls?.[site] ?? `/s/${site}/`);
         if (organization.sites.length === 0) {
           const empty = document.createElement('div');

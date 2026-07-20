@@ -182,7 +182,8 @@
         "required": ["id", "email"],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
-          "email": { "type": "string", "format": "email" }
+          "email": { "type": "string", "format": "email" },
+          "email_verified_at": { "type": ["string", "null"], "format": "date-time" }
         }
       },
       "AccountSession": {
@@ -217,6 +218,35 @@
           "allowed_origins": { "type": "array", "items": { "type": "string", "format": "uri" } }
         }
       },
+      "CreateInvitationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["email"],
+        "properties": {
+          "email": { "type": "string", "format": "email" }
+        }
+      },
+      "Invitation": {
+        "type": "object",
+        "required": ["id", "organization", "email", "role", "invited_by", "status", "expires_at", "created_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "organization": {
+            "type": "object",
+            "required": ["id", "name"],
+            "properties": {
+              "id": { "type": "string", "format": "uuid" },
+              "name": { "type": "string" }
+            }
+          },
+          "email": { "type": "string", "format": "email" },
+          "role": { "type": "string", "const": "member" },
+          "invited_by": { "type": "string", "format": "email" },
+          "status": { "type": "string", "enum": ["pending", "accepted", "declined", "revoked"] },
+          "expires_at": { "type": "string", "format": "date-time" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
       "ConfirmationVerified": {
         "type": "object",
         "required": ["account", "organization", "subdomain", "session"],
@@ -229,10 +259,11 @@
       },
       "SessionMe": {
         "type": "object",
-        "required": ["account", "organizations"],
+        "required": ["account", "organizations", "invitations"],
         "properties": {
           "account": { "$ref": "#/components/schemas/Account" },
-          "organizations": { "type": "array", "items": { "$ref": "#/components/schemas/Organization" } }
+          "organizations": { "type": "array", "items": { "$ref": "#/components/schemas/Organization" } },
+          "invitations": { "type": "array", "items": { "$ref": "#/components/schemas/Invitation" } }
         }
       },
       "BindSiteOwnershipRequest": {
@@ -254,7 +285,7 @@
       },
       "DevConfirmations": {
         "type": "object",
-        "required": ["confirmations"],
+        "required": ["confirmations", "invitations"],
         "properties": {
           "confirmations": {
             "type": "array",
@@ -270,6 +301,22 @@
                 "expired": { "type": "boolean", "description": "True only for an unused confirmation whose TTL elapsed." }
               }
             }
+          },
+          "invitations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["invitation_id", "organization_id", "organization_name", "email", "invited_by", "account_url", "created_at"],
+              "properties": {
+                "invitation_id": { "type": "string" },
+                "organization_id": { "type": "string" },
+                "organization_name": { "type": "string" },
+                "email": { "type": "string", "format": "email" },
+                "invited_by": { "type": "string", "format": "email" },
+                "account_url": { "type": "string", "format": "uri" },
+                "created_at": { "type": "string", "format": "date-time" }
+              }
+            }
           }
         }
       }
@@ -281,6 +328,7 @@
       "NotFound": { "description": "Resource not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "Conflict": { "description": "Resource conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "RateLimited": { "description": "Rate limit exceeded", "headers": { "Retry-After": { "schema": { "type": "integer" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "BadGateway": { "description": "Upstream delivery failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "InternalError": { "description": "Internal error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "Unavailable": { "description": "Database unavailable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
     }
@@ -449,6 +497,57 @@
           "409": { "$ref": "#/components/responses/Conflict" },
           "500": { "$ref": "#/components/responses/InternalError" },
           "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/organizations/{organizationID}/invitations": {
+      "post": {
+        "tags": ["Organizations", "Accounts"],
+        "operationId": "createOrganizationInvitation",
+        "summary": "Invite an email address to an organization as a member",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateInvitationRequest" } } } },
+        "responses": {
+          "201": { "description": "Invitation created or refreshed and its notification sent", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invitation" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "502": { "$ref": "#/components/responses/BadGateway" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/invitations/{invitationID}/accept": {
+      "post": {
+        "tags": ["Organizations", "Accounts"],
+        "operationId": "acceptOrganizationInvitation",
+        "summary": "Accept an invitation addressed to the current account email",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "invitationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": {
+          "200": { "description": "Invitation accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invitation" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/v1/invitations/{invitationID}/decline": {
+      "post": {
+        "tags": ["Organizations", "Accounts"],
+        "operationId": "declineOrganizationInvitation",
+        "summary": "Decline an invitation addressed to the current account email",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "invitationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": {
+          "200": { "description": "Invitation declined", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invitation" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/InternalError" }
         }
       }
     },

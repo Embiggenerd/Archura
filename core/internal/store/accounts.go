@@ -57,10 +57,10 @@ func (s *Store) ConfirmationByTokenHash(ctx context.Context, hash string) (Email
 func (s *Store) AccountByEmail(ctx context.Context, email string) (Account, error) {
 	var account Account
 	err := s.Pool.QueryRow(ctx, `
-		SELECT id::text, email, created_at
+		SELECT id::text, email, email_verified_at, created_at
 		FROM accounts
 		WHERE email = $1`, email,
-	).Scan(&account.ID, &account.Email, &account.CreatedAt)
+	).Scan(&account.ID, &account.Email, &account.EmailVerifiedAt, &account.CreatedAt)
 	if err != nil {
 		return Account{}, mapStoreError("find account by email", err)
 	}
@@ -167,21 +167,25 @@ func (s *Store) VerifyConfirmation(ctx context.Context, p VerifyConfirmationPara
 func upsertAccount(ctx context.Context, tx pgx.Tx, email string) (Account, bool, error) {
 	var account Account
 	err := tx.QueryRow(ctx, `
-		INSERT INTO accounts (email)
-		VALUES ($1)
+		INSERT INTO accounts (email, email_verified_at)
+		VALUES ($1, now())
 		ON CONFLICT (email) DO NOTHING
-		RETURNING id::text, email, created_at`, email,
-	).Scan(&account.ID, &account.Email, &account.CreatedAt)
+		RETURNING id::text, email, email_verified_at, created_at`, email,
+	).Scan(&account.ID, &account.Email, &account.EmailVerifiedAt, &account.CreatedAt)
 	if err == nil {
 		return account, true, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return Account{}, false, mapStoreError("create account", err)
 	}
-	err = tx.QueryRow(ctx, `SELECT id::text, email, created_at FROM accounts WHERE email = $1`, email).
-		Scan(&account.ID, &account.Email, &account.CreatedAt)
+	err = tx.QueryRow(ctx, `
+		UPDATE accounts
+		SET email_verified_at = COALESCE(email_verified_at, now())
+		WHERE email = $1
+		RETURNING id::text, email, email_verified_at, created_at`, email,
+	).Scan(&account.ID, &account.Email, &account.EmailVerifiedAt, &account.CreatedAt)
 	if err != nil {
-		return Account{}, false, mapStoreError("find account after conflict", err)
+		return Account{}, false, mapStoreError("verify existing account", err)
 	}
 	return account, false, nil
 }
@@ -214,8 +218,8 @@ func (s *Store) RevokeSessionByTokenHash(ctx context.Context, hash string) error
 
 func (s *Store) AccountByID(ctx context.Context, id string) (Account, error) {
 	var account Account
-	err := s.Pool.QueryRow(ctx, `SELECT id::text, email, created_at FROM accounts WHERE id = $1::uuid`, id).
-		Scan(&account.ID, &account.Email, &account.CreatedAt)
+	err := s.Pool.QueryRow(ctx, `SELECT id::text, email, email_verified_at, created_at FROM accounts WHERE id = $1::uuid`, id).
+		Scan(&account.ID, &account.Email, &account.EmailVerifiedAt, &account.CreatedAt)
 	if err != nil {
 		return Account{}, mapStoreError("find account", err)
 	}

@@ -52,6 +52,10 @@ func TestProductionForcesEdgeAuthAndRequiredValues(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("PLATFORM_ADMIN_KEY", "adm_live_example")
 	t.Setenv("CORE_SERVICE_KEY", "svc_live_0123456789012345678901234567890123456789012")
+	t.Setenv("CONFIRM_URL_BASE", "https://archura.ai/confirm")
+	t.Setenv("CLOUDFLARE_EMAIL_ACCOUNT_ID", "account-id")
+	t.Setenv("CLOUDFLARE_EMAIL_API_TOKEN", "email-token")
+	t.Setenv("EMAIL_FROM", "hello@archura.ai")
 
 	cfg, err := Load()
 	if err != nil {
@@ -67,6 +71,10 @@ func TestProductionRejectsMissingValuesAndMismatchedServiceKey(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("PLATFORM_ADMIN_KEY", "")
 	t.Setenv("CORE_SERVICE_KEY", "")
+	t.Setenv("CONFIRM_URL_BASE", "")
+	t.Setenv("CLOUDFLARE_EMAIL_ACCOUNT_ID", "")
+	t.Setenv("CLOUDFLARE_EMAIL_API_TOKEN", "")
+	t.Setenv("EMAIL_FROM", "")
 
 	_, err := Load()
 	if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") || !strings.Contains(err.Error(), "PLATFORM_ADMIN_KEY") || !strings.Contains(err.Error(), "CORE_SERVICE_KEY") {
@@ -76,6 +84,10 @@ func TestProductionRejectsMissingValuesAndMismatchedServiceKey(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("PLATFORM_ADMIN_KEY", "adm_live_example")
 	t.Setenv("CORE_SERVICE_KEY", "svc_test_0123456789012345678901234567890123456789012")
+	t.Setenv("CONFIRM_URL_BASE", "https://archura.ai/confirm")
+	t.Setenv("CLOUDFLARE_EMAIL_ACCOUNT_ID", "account-id")
+	t.Setenv("CLOUDFLARE_EMAIL_API_TOKEN", "email-token")
+	t.Setenv("EMAIL_FROM", "hello@archura.ai")
 	_, err = Load()
 	if err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("Load error = %v, want environment mismatch", err)

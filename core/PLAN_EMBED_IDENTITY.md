@@ -1,6 +1,6 @@
-# Core Plan — Organizations + Publishable Keys for Funnel Clients
+# Core Identity Contract — Accounts, Organizations, and Funnel Sites
 
-> **Status: ACTIVE.** Decided 2026-07-19: `pk_` is identity and identity is
+> **Status: IMPLEMENTED.** Decided 2026-07-19: `pk_` is identity and identity is
 > core-owned — no edge-minted placeholder keys, ever. The edge only *stores
 > and resolves* what the core mints. Also decided the same day: **"tenant" is
 > renamed "organization"**, and ownership is restructured to the durable
@@ -8,18 +8,18 @@
 > the organization owns the site. See `docs/AUTH_ARCHITECTURE.md` (vocabulary
 > note at the top).
 
-Work order for the Go core. Companion to `docs/PLAN_EMBEDS.md` (editor/
-Worker side). **This document's "Shared contract" section is canonical.**
+Companion to `docs/PLAN_EMBEDS.md` (editor/Worker side). **This document's
+"Shared contract" section describes the implemented core behavior.**
 
 ## Why
 
 Embedded components must identify their client by the durable public
 identifier — the publishable key — not by the site slug (renamable,
 releasable; `docs/AUTH_ARCHITECTURE.md` § identity vs. address). The embed URL
-becomes `https://embed.archura.ai/<pk_>/<Component>.js`. Funnel accounts have
-no `pk_` because accounts and tenants(organizations) are still separate
-identity systems. This plan merges them at the one point they meet — email
-confirmation — and does the rename while the tables are open.
+is `https://embed.archura.ai/<pk_>/<site_id>/<Component>.js`: the organization
+key establishes the business identity and the permanent site ID selects its
+artifact namespace. Email confirmation creates or reuses the account's
+default organization and therefore its `pk_`; the site slug is only an address.
 
 ## Target model
 
@@ -33,19 +33,19 @@ accounts ←— memberships (account_id, organization_id, role) —→ organizat
 ```
 
 - **Organization = the isolation boundary** (formerly tenant): keys, payment
-  config, audit, end-users, and — after this plan — site ownership all hang
+  config, audit, end-users, and site ownership all hang
   off it, never off a person.
 - **Default organization (decided 2026-07-19):** creating an account creates
   its default organization in the same transaction (name derived from the
-  email local part or the first site; renamable later). Sites created through
-  the funnel bind to the account's default organization until an org selector
-  exists. Accounts can create further organizations
-  (session-authed `POST /v1/organizations`), and other accounts can be
-  members of them (invitation APIs remain out of scope; the schema is ready).
+  email local part; renamable later). Build-first funnel deploys bind to the
+  account's default organization; organization-scoped dashboard claims bind to
+  the selected organization. Accounts can create further organizations
+  (session-authed `POST /v1/organizations`), and other accounts become members
+  through email-addressed, owner-created invitations.
 - **No count restrictions** — sites per organization and organizations per
   account are both unlimited. The earlier "one deploy per email" /
   `account_has_site` rule is **rescinded** (see the note in
-  `core/PLAN_FUNNEL.md`); remove its enforcement as part of this plan.
+  `core/PLAN_FUNNEL.md`) and is not enforced.
   `organization_sites` therefore has NO unique constraint on
   `organization_id` — subdomain stays the primary key.
 - **Membership** carries the role; account creation writes the `owner` row
@@ -60,101 +60,106 @@ accounts ←— memberships (account_id, organization_id, role) —→ organizat
 **1. Confirmation verify mints the client identity.**
 
 `POST /v1/confirmations/verify` (existing) additionally, in the same
-transaction, when the confirmation carries a `subdomain`:
+transaction:
 
-- Ensure an **organization** for the site: create one (name + slug = the
-  subdomain, allowed origins = the site's origins) with the usual
-  publishable + secret key pair; the site becomes organization-owned; the
-  account gets an `owner` membership. Idempotent — re-verify scenarios must
-  not duplicate organizations or memberships.
+- Create or verify the global account and ensure exactly one **default
+  organization** with its publishable + secret key pair and an `owner`
+  membership. Existing accounts reuse their default organization.
+- When the confirmation carries a `subdomain`, bind that site to the default
+  organization. Confirming additional sites must not create more organizations
+  or memberships. The operation is idempotent with respect to account and
+  organization identity.
 - The secret key is **not returned** in this flow (rotatable later via the
   dashboard per `DASHBOARD.md`).
 
-Response gains the key:
+Response:
 
 ```json
-{ "account": { "id": "…", "email": "…" },
+{ "account": { "id": "…", "email": "…", "email_verified_at": "…" },
+  "organization": {
+    "id": "…", "name": "Mike's organization", "role": "owner",
+    "is_default": true, "publishable_key": "pk_test_…", "sites": []
+  },
   "subdomain": "mikes-bakery",
-  "organization_id": "…",
-  "publishable_key": "pk_test_…",
   "session": { "token": "sess_…", "expires_at": "…" } }
 ```
 
 **2. Session introspection becomes organization-oriented.**
 
-`GET /v1/sessions/me` — the canonical shape lists memberships:
+`GET /v1/sessions/me` — the canonical shape lists memberships, verified email,
+and pending invitations:
 
 ```json
-{ "account": { "id": "…", "email": "…" },
+{ "account": { "id": "…", "email": "…", "email_verified_at": "…" },
   "organizations": [
     { "id": "…", "name": "Mike's Bakery", "role": "owner",
+      "is_default": true,
       "publishable_key": "pk_test_…",
-      "sites": [ { "subdomain": "mikes-bakery" } ] }
+      "sites": ["mikes-bakery"] }
   ],
-  "sites": ["mikes-bakery"],
-  "publishable_keys": { "mikes-bakery": "pk_test_…" } }
+  "invitations": [
+    { "id": "…", "organization": { "id": "…", "name": "Other Bakery" },
+      "email": "mike@example.com", "role": "member", "status": "pending",
+      "expires_at": "…" }
+  ] }
 ```
 
 (`sites` is an array per organization — counts are unrestricted.)
 
-`organizations` is canonical. `sites`/`publishable_keys` are **compatibility
-fields only** (the Worker consumes them today); they are not canonical and
-drop once the Worker migrates. No `subscription` field — billing doesn't
-exist yet and the contract must not invent fields for unbuilt features
+`organizations` is canonical, and each organization contains its own site
+list and publishable key. No `subscription` field — billing doesn't exist yet
+and the contract must not invent fields for unbuilt features
 (billing attaches to the organization when FUNNEL phase 4 ships).
 
 **3. Register-first claims get the same treatment.** `POST /v1/site-ownership`
-(session-authed, existing) performs the same ensure-organization + owner-
-membership step and returns `organization_id` + `publishable_key`.
+(session-authed, existing) binds a site to the requested organization when the
+account is a member, or to the default organization when no organization is
+specified. Site counts are unrestricted.
 
-## Work items
+**4. Invitations add memberships, not identity.** An owner invites a normalized
+email address as a `member`. Repeating the request refreshes and reuses the one
+pending invitation, including after a notification delivery failure. A failed
+email returns `502 email_delivery_failed`; retrying the same request sends the
+same invitation again. Acceptance requires an authenticated account with that
+exact verified email and atomically creates its membership.
+
+## Implemented work
 
 ### 1. Rename tenant → organization
 
-Mechanical but wide; do it first, alone, in one migration + one code sweep so
-review is trivial: `tenants` → `organizations`, `tenant_api_keys` →
-`organization_api_keys`, `tenant_id` columns/FKs, `store.Tenant` →
-`store.Organization`, `authenticateTenant` → `authenticateOrganization`,
-`TenantByPublishableKey` → `OrganizationByPublishableKey`, audit
-`actor_type`/metadata values, log fields, OpenAPI wording. **The external API
-renames too**: `POST /v1/clients` → `POST /v1/organizations` (same handler),
-with `/v1/clients` kept briefly as a compatibility alias for the existing
-scripts (`register-test-client.mjs`, `verify-core-identity.mjs`) until they
-are updated — early is the cheapest time to unify vocabulary.
+The live schema, Go types, handlers, logs, and OpenAPI contract use
+`organization`; historical migrations retain old vocabulary where rewriting
+history would be unsafe. `POST /v1/clients` remains a platform-admin
+compatibility endpoint, while account-authenticated organization creation is
+`POST /v1/organizations`.
 
-*Verify:* `go test ./...` green with zero behavior change; both routes serve
-identically during the alias window; grep finds no live `tenant` outside
-migrations history.
+*Verify:* `go test ./...` is green; live vocabulary uses organization outside
+migration history and explicit compatibility surfaces.
 
 ### 2. Memberships + organization-owned sites
 
-Migration (next free number): `memberships` (account_id FK, organization_id
-FK, role, created_at; PK account+org). `account_sites` →
-`organization_sites` (subdomain PK, organization_id FK); backfill existing
-rows by creating an organization per bound account-site with an owner
-membership (small local/test data — a best-effort backfill is fine, keyless
-legacy rows may instead be dropped).
+`organization_memberships` provides the many-to-many account/organization
+relationship and carries `owner` or `member` plus the per-account default flag.
+`organization_sites` binds unrestricted site addresses to organizations.
 
-*Verify:* migration applies from the current head; a confirmed site resolves
-account → membership → organization → site.
+*Verify:* migrations apply from the current head; a confirmed site resolves
+account → membership → default organization → site.
 
 ### 3. Contract endpoints (per the canonical contract above)
 
-Ensure-organization in confirmation verify + site-ownership; `sessions/me`
-via memberships; `organization_id` + `publishable_key` in responses. Audit:
-`organization.created`, `membership.created` (extend the audit CHECKs as in
-the 0006 pattern).
+Confirmation verification and site ownership resolve through memberships;
+`sessions/me` returns organizations, per-organization sites and keys, verified
+email, and pending invitations. Owners can invite an email as a member;
+acceptance requires a session for that exact verified email.
 
-*Verify:* confirm-with-subdomain creates exactly one organization + owner
-membership and returns pk; re-runs don't duplicate; `sessions/me` maps sites
-to pks; register-first claim path equivalent; one-site rule now enforced
-per-organization; existing component-session tests unaffected;
-`go test ./...` green.
+*Verify:* confirmation creates or reuses exactly one default organization and
+owner membership; additional sites bind to it without count restrictions;
+invitations create member memberships; existing component-session tests remain
+unaffected; `go test ./...` is green.
 
 ## Out of scope
 
-- Invites / additional members / roles beyond `owner` (the table is ready;
-  the features wait for a second human).
+- Roles and permission levels beyond `owner` and `member`.
 - Checkout endpoints, secret-key exposure, Connect (later milestones).
 - Any styling/config serving by pk — the edge serves baked modules; core
   only mints identity (edge-first doctrine).

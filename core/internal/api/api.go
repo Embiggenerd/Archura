@@ -36,6 +36,9 @@ type repository interface {
 	EnsureDefaultOrganization(context.Context, store.Account, store.CreateOrganizationParams, string) (store.AccountOrganization, error)
 	OrganizationsForAccount(context.Context, string) ([]store.AccountOrganization, error)
 	CreateOrganizationForAccount(context.Context, string, store.CreateOrganizationParams, store.AuditEvent) (store.AccountOrganization, error)
+	CreateOrganizationInvitation(context.Context, string, string, string, time.Time, store.AuditEvent) (store.OrganizationInvitation, error)
+	PendingInvitationsForEmail(context.Context, string) ([]store.OrganizationInvitation, error)
+	RespondToOrganizationInvitation(context.Context, string, store.Account, bool, store.AuditEvent) (store.OrganizationInvitation, error)
 	BindOrganizationSite(context.Context, string, string, string, store.AuditEvent) error
 	SitesForAccount(context.Context, string) ([]string, error)
 	BindSiteOwnership(context.Context, string, string, store.AuditEvent) error
@@ -52,7 +55,7 @@ type Server struct {
 	securitySampler *securityLogSampler
 	metrics         *telemetry.Metrics
 	devOutbox       *confirmationOutbox
-	delivery        confirmationDelivery
+	delivery        emailDelivery
 }
 
 func NewServer(cfg config.Config, st repository, log *slog.Logger) *Server {
@@ -60,6 +63,8 @@ func NewServer(cfg config.Config, st repository, log *slog.Logger) *Server {
 	if cfg.Env == "dev" {
 		server.devOutbox = newConfirmationOutbox()
 		server.delivery = server.devOutbox
+	} else if cfg.EmailAccountID != "" && cfg.EmailAPIToken != "" && cfg.EmailFrom != "" {
+		server.delivery = newCloudflareEmailDelivery(cfg.EmailAccountID, cfg.EmailAPIToken, cfg.EmailFrom)
 	}
 	server.metrics = telemetry.New(func() telemetry.DBStats {
 		if server.store == nil {
@@ -98,6 +103,9 @@ func (s *Server) Router() http.Handler {
 		r.Get("/sessions/me", s.handleSessionMe)
 		r.Post("/sessions/logout", s.handleSessionLogout)
 		r.Post("/organizations", s.handleCreateOrganization)
+		r.Post("/organizations/{organizationID}/invitations", s.handleCreateInvitation)
+		r.Post("/invitations/{invitationID}/accept", s.handleAcceptInvitation)
+		r.Post("/invitations/{invitationID}/decline", s.handleDeclineInvitation)
 		r.Post("/site-ownership", s.handleBindSiteOwnership)
 		r.Get("/dev/confirmations", s.handleDevConfirmations)
 	})

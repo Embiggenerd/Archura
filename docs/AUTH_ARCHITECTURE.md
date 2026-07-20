@@ -39,6 +39,10 @@ verification as a first filter.
 > selected organization; sites and embedded components belong to the
 > organization.**
 >
+> Organization owners invite a normalized email address. The invitation grants
+> nothing by itself: only an authenticated account with that verified email can
+> accept it and create a `member` membership.
+>
 > Older text below says "tenant"; read it as organization.
 
 ## Three principals, all tenant-scoped

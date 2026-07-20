@@ -39,6 +39,7 @@ type fakeRepository struct {
 	accountByEmail   map[string]string
 	accountSessions  map[string]store.AccountSession
 	organizations    map[string][]store.AccountOrganization
+	invitations      map[string]store.OrganizationInvitation
 	sites            map[string]string
 	nextID           int
 	rateLimitCalls   []fakeRateLimitCall
@@ -156,8 +157,14 @@ func (f *fakeRepository) VerifyConfirmation(_ context.Context, p store.VerifyCon
 	if created {
 		f.nextID++
 		accountID = "account-" + strconv.Itoa(f.nextID)
-		f.accounts[accountID] = store.Account{ID: accountID, Email: confirmation.Email, CreatedAt: time.Now().UTC()}
+		now := time.Now().UTC()
+		f.accounts[accountID] = store.Account{ID: accountID, Email: confirmation.Email, EmailVerifiedAt: &now, CreatedAt: now}
 		f.accountByEmail[confirmation.Email] = accountID
+	} else if f.accounts[accountID].EmailVerifiedAt == nil {
+		account := f.accounts[accountID]
+		now := time.Now().UTC()
+		account.EmailVerifiedAt = &now
+		f.accounts[accountID] = account
 	}
 	organization := f.ensureFakeDefaultOrganization(f.accounts[accountID], p.PublishableKey)
 	if f.sites == nil {
@@ -296,6 +303,99 @@ func (f *fakeRepository) CreateOrganizationForAccount(_ context.Context, account
 	f.organizations[accountID] = append(f.organizations[accountID], organization)
 	f.audits = append(f.audits, audit)
 	return organization, nil
+}
+
+func (f *fakeRepository) CreateOrganizationInvitation(
+	_ context.Context,
+	organizationID, invitedByAccountID, email string,
+	expiresAt time.Time,
+	audit store.AuditEvent,
+) (store.OrganizationInvitation, error) {
+	owner := false
+	for _, organization := range f.organizations[invitedByAccountID] {
+		if organization.ID == organizationID && organization.Role == "owner" {
+			owner = true
+			break
+		}
+	}
+	if !owner {
+		return store.OrganizationInvitation{}, store.ErrNotFound
+	}
+	for accountID, account := range f.accounts {
+		if account.Email == email && f.accountOwnsOrganization(accountID, organizationID) {
+			return store.OrganizationInvitation{}, store.ErrAlreadyMember
+		}
+	}
+	if f.invitations == nil {
+		f.invitations = make(map[string]store.OrganizationInvitation)
+	}
+	for id, invitation := range f.invitations {
+		if invitation.OrganizationID == organizationID && invitation.Email == email && invitation.Status == "pending" {
+			invitation.InvitedByAccountID = invitedByAccountID
+			invitation.InvitedByEmail = f.accounts[invitedByAccountID].Email
+			invitation.ExpiresAt = expiresAt
+			invitation.RespondedAt = nil
+			f.invitations[id] = invitation
+			f.audits = append(f.audits, audit)
+			return invitation, nil
+		}
+	}
+	f.nextID++
+	invitation := store.OrganizationInvitation{
+		ID: "invitation-" + strconv.Itoa(f.nextID), OrganizationID: organizationID,
+		Email: email, Role: "member", InvitedByAccountID: invitedByAccountID,
+		InvitedByEmail: f.accounts[invitedByAccountID].Email, Status: "pending",
+		ExpiresAt: expiresAt, CreatedAt: time.Now().UTC(),
+	}
+	for _, organizations := range f.organizations {
+		for _, organization := range organizations {
+			if organization.ID == organizationID {
+				invitation.OrganizationName = organization.Name
+			}
+		}
+	}
+	f.invitations[invitation.ID] = invitation
+	f.audits = append(f.audits, audit)
+	return invitation, nil
+}
+
+func (f *fakeRepository) PendingInvitationsForEmail(_ context.Context, email string) ([]store.OrganizationInvitation, error) {
+	result := make([]store.OrganizationInvitation, 0)
+	for _, invitation := range f.invitations {
+		if invitation.Email == email && invitation.Status == "pending" && invitation.ExpiresAt.After(time.Now()) {
+			result = append(result, invitation)
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeRepository) RespondToOrganizationInvitation(
+	_ context.Context,
+	invitationID string,
+	account store.Account,
+	accept bool,
+	audit store.AuditEvent,
+) (store.OrganizationInvitation, error) {
+	invitation, ok := f.invitations[invitationID]
+	if !ok || account.EmailVerifiedAt == nil || invitation.Email != account.Email ||
+		invitation.Status != "pending" || !invitation.ExpiresAt.After(time.Now()) {
+		return store.OrganizationInvitation{}, store.ErrNotFound
+	}
+	now := time.Now().UTC()
+	invitation.RespondedAt = &now
+	invitation.Status = "declined"
+	if accept {
+		invitation.Status = "accepted"
+		if !f.accountOwnsOrganization(account.ID, invitation.OrganizationID) {
+			f.organizations[account.ID] = append(f.organizations[account.ID], store.AccountOrganization{
+				Organization: store.Organization{ID: invitation.OrganizationID, Name: invitation.OrganizationName, Status: "active"},
+				Role:         "member", Sites: []string{},
+			})
+		}
+	}
+	f.invitations[invitationID] = invitation
+	f.audits = append(f.audits, audit)
+	return invitation, nil
 }
 
 func (f *fakeRepository) BindOrganizationSite(_ context.Context, subdomain, organizationID, accountID string, audit store.AuditEvent) error {

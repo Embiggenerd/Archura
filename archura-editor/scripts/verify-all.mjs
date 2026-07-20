@@ -8,6 +8,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = join(here, '..');
 
 const SUITES = [
+  'verify-account-summary',
+  'verify-account-flow',
   'verify-section1',
   'verify-section2',
   'verify-section3',

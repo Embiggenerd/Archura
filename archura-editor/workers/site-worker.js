@@ -100,6 +100,10 @@ export default {
       return handleConfirm(request, env, url);
     }
 
+    if (url.pathname === '/account') {
+      return Response.redirect(new URL('/account/', request.url), 302);
+    }
+
     // Legacy /<accountId>/dashboard/ links still serve the dashboard app;
     // the canonical URL is plain /dashboard/ (identity lives in the session —
     // an id in the path adds nothing while sessions hold exactly one account)
@@ -424,24 +428,63 @@ async function serveApi(request, env, url) {
     });
   }
 
+  const createInvitationMatch = url.pathname.match(/^\/api\/organizations\/([^/]+)\/invitations$/);
+  if (createInvitationMatch && request.method === 'POST') {
+    const sessionToken = sessionTokenFromRequest(request);
+    if (!sessionToken || !coreConfigured(env)) return json({ error: 'Unauthorized' }, 401);
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: 'Invalid body' }, 400);
+    }
+    const organizationID = encodeURIComponent(createInvitationMatch[1]);
+    const response = await coreRequest(env, `/v1/organizations/${organizationID}/invitations`, {
+      body,
+      bearer: sessionToken,
+    });
+    return new Response(response.body, {
+      status: response.status,
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+    });
+  }
+
+  const invitationResponseMatch = url.pathname.match(/^\/api\/invitations\/([^/]+)\/(accept|decline)$/);
+  if (invitationResponseMatch && request.method === 'POST') {
+    const sessionToken = sessionTokenFromRequest(request);
+    if (!sessionToken || !coreConfigured(env)) return json({ error: 'Unauthorized' }, 401);
+    const invitationID = encodeURIComponent(invitationResponseMatch[1]);
+    const action = invitationResponseMatch[2];
+    const response = await coreRequest(env, `/v1/invitations/${invitationID}/${action}`, {
+      method: 'POST',
+      bearer: sessionToken,
+    });
+    return new Response(response.body, {
+      status: response.status,
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+    });
+  }
+
   if (url.pathname === '/api/me' && request.method === 'GET') {
     const session = await sessionAccount(request, env);
     if (!session) return json({ error: 'Unauthorized' }, 401);
     const organizations = session.organizations ?? [];
     const sites = organizations.flatMap((organization) => organization.sites ?? []);
     const siteUrls = Object.fromEntries(sites.map((s) => [s, siteUrlFor(request, env, s)]));
-    const organizationViews = organizations.map((organization) => ({
-      ...organization,
-      siteUrls: Object.fromEntries((organization.sites ?? []).map((site) => [site, siteUrlFor(request, env, site)])),
+    const organizationViews = await Promise.all(organizations.map(async (organization) => {
+      const organizationSites = organization.sites ?? [];
+      const componentCount = await publishedComponentCount(env, organizationSites).catch(() => null);
+      await Promise.all(organizationSites.map((site) => bindEmbedIdentity(env, site, organization)));
+      return {
+        ...organization,
+        siteUrls: Object.fromEntries(organizationSites.map((site) => [site, siteUrlFor(request, env, site)])),
+        component_count: componentCount,
+      };
     }));
-    await Promise.all(
-      organizationViews.flatMap((organization) =>
-        (organization.sites ?? []).map((site) => bindEmbedIdentity(env, site, organization))
-      )
-    );
     return json({
       id: session.account.id, email: session.account.email,
-      organizations: organizationViews, sites, siteUrls,
+      email_verified_at: session.account.email_verified_at ?? null,
+      organizations: organizationViews, invitations: session.invitations ?? [], sites, siteUrls,
     });
   }
 
@@ -589,6 +632,19 @@ async function serveApi(request, env, url) {
   return json({ error: 'Not found' }, 404);
 }
 
+export async function publishedComponentCount(env, sites) {
+  const counts = await Promise.all(sites.map(async (site) => {
+    const prefix = `sites/${site}/`;
+    const objects = await listAllObjects(env.ARTIFACTS, prefix);
+    return objects.filter((object) => {
+      const relative = object.key.slice(prefix.length);
+      return relative.endsWith('.json') && relative !== 'meta.json' &&
+        !relative.startsWith('assets/') && !relative.startsWith('draft/');
+    }).length;
+  }));
+  return counts.reduce((total, count) => total + count, 0);
+}
+
 // --- Email-confirmation landing (the magic link points here) ---
 
 function messagePage(title, message, links = [], status = 200, snippet = '') {
@@ -639,12 +695,12 @@ async function handleConfirm(request, env, url) {
     // back in. With a live session, send them straight to their dashboard.
     const session = await sessionAccount(request, env);
     if (session) {
-      return Response.redirect(new URL('/dashboard/', url.origin), 302);
+      return Response.redirect(new URL('/account/', url.origin), 302);
     }
     return messagePage(
       'Link already used or expired',
-      'If you confirmed on this device before, your dashboard is still yours — open it and enter your email to get a fresh sign-in link.',
-      [['/dashboard/', 'Go to your dashboard']],
+      'If you confirmed on this device before, your account is still yours — open it and enter your email to get a fresh sign-in link.',
+      [['/account/', 'Go to your account']],
       401
     );
   }
@@ -692,7 +748,7 @@ async function handleConfirm(request, env, url) {
     subdomain
       ? 'Your component is published. Preview it or copy its embed code below.'
       : 'You are signed in.',
-    [...(siteUrl ? [[siteUrl, 'Open preview']] : []), ['/dashboard/', 'Go to your dashboard']],
+    [...(siteUrl ? [[siteUrl, 'Open preview']] : []), ['/account/', 'Go to your account']],
     200,
     embedSnippet
   );

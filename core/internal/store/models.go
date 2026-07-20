@@ -84,9 +84,10 @@ type RateLimitResult struct {
 }
 
 type Account struct {
-	ID        string
-	Email     string
-	CreatedAt time.Time
+	ID              string
+	Email           string
+	EmailVerifiedAt *time.Time
+	CreatedAt       time.Time
 }
 
 type EmailConfirmation struct {
@@ -139,4 +140,18 @@ type AccountOrganization struct {
 	IsDefault      bool
 	PublishableKey string
 	Sites          []string
+}
+
+type OrganizationInvitation struct {
+	ID                 string
+	OrganizationID     string
+	OrganizationName   string
+	Email              string
+	Role               string
+	InvitedByAccountID string
+	InvitedByEmail     string
+	Status             string
+	ExpiresAt          time.Time
+	RespondedAt        *time.Time
+	CreatedAt          time.Time
 }

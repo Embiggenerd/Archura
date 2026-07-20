@@ -303,11 +303,11 @@ try {
   check("isolation: account B's session cannot write to account A's site", crossWrite === 401, `status ${crossWrite}`);
 
   // Link reuse: WITH a session it's the user's way back — straight to their
-  // dashboard. WITHOUT one (new device) it explains how to sign in again.
+  // account. WITHOUT one (new device) it explains how to sign in again.
   await pageA.goto(linkA, { waitUntil: 'domcontentloaded' });
   check(
-    'security: a used link with a live session redirects to the dashboard, not an error',
-    new URL(pageA.url()).pathname === '/dashboard/',
+    'security: a used link with a live session redirects to the account, not an error',
+    new URL(pageA.url()).pathname === '/account/',
     pageA.url()
   );
   const freshContext = await browser.newContext();
@@ -315,8 +315,10 @@ try {
   await freshPage.goto(linkA, { waitUntil: 'domcontentloaded' });
   const freshBody = await freshPage.textContent('body');
   check(
-    'security: a used link without a session cannot re-authenticate, but points at the dashboard',
-    freshBody.includes('already used or expired') && freshBody.includes('dashboard'),
+    'security: a used link without a session cannot re-authenticate, but points at the account',
+    freshBody.toLowerCase().includes('already used or expired') &&
+      freshBody.toLowerCase().includes('account') &&
+      (await freshPage.locator('a[href="/account/"]').count()) === 1,
     freshBody.slice(0, 150)
   );
   await freshContext.close();
@@ -351,10 +353,11 @@ try {
   await pageB.goto(`${WORKER}/dashboard/`, { waitUntil: 'domcontentloaded' });
   await pageB.locator('#signout').waitFor({ state: 'visible', timeout: 15000 });
   await pageB.locator('#signout').click();
-  await pageB.locator('.card', { hasText: 'Sign in or register' }).waitFor({ timeout: 15000 });
+  await pageB.waitForURL(`${WORKER}/account/`);
+  await pageB.locator('#register', { hasText: 'Send sign-in link' }).waitFor({ timeout: 15000 });
   const meAfterLogout = await pageB.evaluate(async () => (await fetch('/api/me')).status);
   check(
-    'logout: sign out clears the session — dashboard shows sign-in, /api/me is 401',
+    'logout: sign out clears the session — account shows sign-in, /api/me is 401',
     meAfterLogout === 401,
     `status ${meAfterLogout}`
   );

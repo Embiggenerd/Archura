@@ -32,12 +32,16 @@ is added to chi without being documented.
 | `DATABASE_URL`       | —       | Postgres; empty = scaffold mode        |
 | `PLATFORM_ADMIN_KEY` | —       | gates client-onboarding endpoints (M1) |
 | `CORE_SERVICE_KEY`   | —       | authenticates the Worker to core       |
-| `CONFIRM_URL_BASE`   | —       | dev magic-link target (for example, `http://localhost:8787/confirm`) |
+| `CONFIRM_URL_BASE`   | —       | public Worker magic-link target (for example, `http://localhost:8787/confirm`) |
+| `CLOUDFLARE_EMAIL_ACCOUNT_ID` | — | Cloudflare account used for production transactional email |
+| `CLOUDFLARE_EMAIL_API_TOKEN` | — | Email Service API token; keep secret |
+| `EMAIL_FROM`         | —       | verified Email Service sender address  |
 | `REQUIRE_EDGE_AUTH`  | `false` | enables production-like edge auth locally |
 
-Production requires the database, admin key, and an environment-matched `svc_live_...`
-service key and exits before listening if any are missing. Development keeps the database
-and edge authentication optional.
+Production requires the database, admin key, an environment-matched `svc_live_...`
+service key, the public confirmation URL, and Email Service settings, and exits before
+listening if any are missing. Development keeps the database and edge authentication
+optional and sends mail to the in-memory mailbox.
 
 Generate a random local admin key instead of committing one:
 
@@ -100,9 +104,17 @@ locally); set `CORE_URL=http://127.0.0.1:8080` in `.dev.vars` for a local Worker
   binds the optional site to that organization, and returns a seven-day
   `sess_...` account session once.
 - `GET /v1/sessions/me` — account-session authenticated; returns the current
-  account, organization memberships, organization publishable keys, and sites.
+  verified account, pending invitations, organization memberships, organization
+  publishable keys, and sites.
 - `POST /v1/organizations` — account-session authenticated; creates another
   organization with an owner membership and returns its secret key once.
+- `POST /v1/organizations/{organizationID}/invitations` — owner-only; creates or
+  refreshes a seven-day invitation for a normalized email address. A delivery
+  failure returns `502 email_delivery_failed` while preserving the same pending
+  invitation so repeating the request safely retries its email.
+- `POST /v1/invitations/{invitationID}/accept` and `/decline` — require an account
+  session whose verified email matches the invitation. Acceptance creates a member
+  membership atomically.
 - `POST /v1/sessions/logout` — best-effort account-session revocation. It
   always returns 204 for missing, unknown, expired, or already-revoked session
   tokens so the Worker can clear its cookie unconditionally.
@@ -111,15 +123,15 @@ locally); set `CORE_URL=http://127.0.0.1:8080` in `.dev.vars` for a local Worker
   Rebinding to the same organization is idempotent; another organization
   produces `site_owned`. Site counts are unrestricted.
 - `GET /v1/dev/confirmations` — development only; lists the 50 most recent
-  magic-link messages from the process-memory delivery outbox. Used and expired
-  messages remain visible with state flags until eviction or restart. The outbox
-  never writes plaintext tokens to Postgres.
+  magic-link and invitation messages from the process-memory delivery outbox. Used
+  and expired confirmation messages remain visible until eviction or restart. The
+  outbox never writes plaintext tokens to Postgres.
 
 All five routes still require the Worker service credential when edge
 authentication is enabled. Account-session routes additionally use
 `Authorization: Bearer sess_...`. Development confirmation creation requires
-`CONFIRM_URL_BASE`; production deliberately omits `confirm_url` while the real
-transactional-email delivery implementation remains out of scope.
+`CONFIRM_URL_BASE`; production sends confirmation and invitation messages through
+Cloudflare Email Service while still omitting `confirm_url` from API responses.
 
 ## Observability and maintenance
 

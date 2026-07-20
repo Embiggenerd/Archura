@@ -19,7 +19,7 @@
   <body>
     <main>
       <h1>Dev mailbox</h1>
-      <p class="hint">Pending confirmation links from the local core. Local testing only — this page is empty/unavailable in production. Refreshes every 3s.</p>
+      <p class="hint">Confirmation links and organization invitations from the local core. Local testing only — this page is unavailable in production. Refreshes every 3s.</p>
       <ul id="list"><li>Loading…</li></ul>
     </main>
     <script type="module">
@@ -30,7 +30,7 @@
           list.innerHTML = `<li>Mailbox unavailable (${res?.status ?? 'no connection'}) — is the local core running in dev mode?</li>`;
           return;
         }
-        const { confirmations = [] } = await res.json();
+        const { confirmations = [], invitations = [] } = await res.json();
         list.innerHTML =
           confirmations
             .map(
@@ -38,7 +38,9 @@
                 <div class="meta">${c.created_at ?? ''}${c.used ? ' · used' : ''}${c.expired ? ' · expired' : ''}</div>
                 <a href="${c.confirm_url}">${c.used ? 'Open (already used — takes you to your dashboard)' : 'Confirm'}</a></li>`
             )
-            .join('') || '<li>No confirmations yet.</li>';
+            .join('') + invitations.map((invitation) => `<li><strong>${invitation.email}</strong> invited to ${invitation.organization_name}
+              <div class="meta">${invitation.created_at ?? ''} · invited by ${invitation.invited_by}</div>
+              <a href="${invitation.account_url}">Open account page</a></li>`).join('') || '<li>No messages yet.</li>';
       }
       refresh();
       setInterval(refresh, 3000);

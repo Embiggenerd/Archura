@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,24 @@ import (
 	"github.com/archura/core/internal/config"
 	"github.com/archura/core/internal/store"
 )
+
+type failFirstInvitationDelivery struct {
+	attempts int
+}
+
+func (d *failFirstInvitationDelivery) deliverConfirmation(context.Context, pendingConfirmation) error {
+	return nil
+}
+
+func (d *failFirstInvitationDelivery) deliverInvitation(context.Context, pendingInvitationEmail) error {
+	d.attempts++
+	if d.attempts == 1 {
+		return errors.New("temporary email provider failure")
+	}
+	return nil
+}
+
+func (*failFirstInvitationDelivery) consumed(string) {}
 
 func TestConfirmationAccountSessionAndOwnershipContract(t *testing.T) {
 	repo := &fakeRepository{}
@@ -154,6 +173,140 @@ func TestConfirmationAccountSessionAndOwnershipContract(t *testing.T) {
 		if response.Code != http.StatusNoContent {
 			t.Fatalf("idempotent logout for %q status = %d, body = %s", bearer, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestOrganizationInvitationRequiresOwnerAndMatchingVerifiedEmail(t *testing.T) {
+	now := time.Now().UTC()
+	ownerToken := "sess_test_0123456789012345678901234567890123456789012"
+	memberToken := "sess_test_1123456789012345678901234567890123456789012"
+	otherToken := "sess_test_2123456789012345678901234567890123456789012"
+	owner := store.Account{ID: "account-owner", Email: "owner@example.com", EmailVerifiedAt: &now, CreatedAt: now}
+	member := store.Account{ID: "account-member", Email: "member@example.com", EmailVerifiedAt: &now, CreatedAt: now}
+	other := store.Account{ID: "account-other", Email: "other@example.com", EmailVerifiedAt: &now, CreatedAt: now}
+	repo := &fakeRepository{
+		accounts:       map[string]store.Account{owner.ID: owner, member.ID: member, other.ID: other},
+		accountByEmail: map[string]string{owner.Email: owner.ID, member.Email: member.ID, other.Email: other.ID},
+		accountSessions: map[string]store.AccountSession{
+			archauth.Hash(ownerToken):  {AccountID: owner.ID, ExpiresAt: now.Add(time.Hour)},
+			archauth.Hash(memberToken): {AccountID: member.ID, ExpiresAt: now.Add(time.Hour)},
+			archauth.Hash(otherToken):  {AccountID: other.ID, ExpiresAt: now.Add(time.Hour)},
+		},
+		organizations: map[string][]store.AccountOrganization{
+			owner.ID: {{
+				Organization: store.Organization{ID: "organization-one", Name: "Acme Bakery", Status: "active", CreatedAt: now},
+				Role:         "owner", IsDefault: true, Sites: []string{},
+			}},
+		},
+	}
+	server := NewServer(config.Config{Env: "dev", ConfirmURLBase: "http://localhost:8787/confirm"}, repo, slog.Default())
+	router := server.Router()
+
+	created := performRequest(router, http.MethodPost, "/v1/organizations/organization-one/invitations", `{"email":" MEMBER@Example.com "}`, ownerToken)
+	if created.Code != http.StatusCreated || !strings.Contains(created.Body.String(), `"email":"member@example.com"`) {
+		t.Fatalf("create invitation status=%d body=%s", created.Code, created.Body.String())
+	}
+	var invitation struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(created.Body).Decode(&invitation); err != nil || invitation.ID == "" {
+		t.Fatalf("decode invitation: id=%q err=%v", invitation.ID, err)
+	}
+	resent := performRequest(router, http.MethodPost, "/v1/organizations/organization-one/invitations", `{"email":"member@example.com"}`, ownerToken)
+	var resentInvitation struct {
+		ID string `json:"id"`
+	}
+	if resent.Code != http.StatusCreated || json.NewDecoder(resent.Body).Decode(&resentInvitation) != nil ||
+		resentInvitation.ID != invitation.ID || len(repo.invitations) != 1 {
+		t.Fatalf("resend invitation status=%d id=%q invitations=%d body=%s",
+			resent.Code, resentInvitation.ID, len(repo.invitations), resent.Body.String())
+	}
+
+	mailbox := performRequest(router, http.MethodGet, "/v1/dev/confirmations", "", "")
+	if mailbox.Code != http.StatusOK || !strings.Contains(mailbox.Body.String(), `"invitations"`) ||
+		!strings.Contains(mailbox.Body.String(), "member@example.com") {
+		t.Fatalf("invitation mailbox status=%d body=%s", mailbox.Code, mailbox.Body.String())
+	}
+
+	memberMe := performRequest(router, http.MethodGet, "/v1/sessions/me", "", memberToken)
+	if memberMe.Code != http.StatusOK || !strings.Contains(memberMe.Body.String(), invitation.ID) ||
+		!strings.Contains(memberMe.Body.String(), `"email_verified_at"`) {
+		t.Fatalf("member invitation listing status=%d body=%s", memberMe.Code, memberMe.Body.String())
+	}
+
+	wrongAccount := performRequest(router, http.MethodPost, "/v1/invitations/"+invitation.ID+"/accept", "", otherToken)
+	if wrongAccount.Code != http.StatusNotFound {
+		t.Fatalf("wrong-account acceptance status=%d body=%s", wrongAccount.Code, wrongAccount.Body.String())
+	}
+	unverifiedMember := repo.accounts[member.ID]
+	unverifiedMember.EmailVerifiedAt = nil
+	repo.accounts[member.ID] = unverifiedMember
+	unverified := performRequest(router, http.MethodPost, "/v1/invitations/"+invitation.ID+"/accept", "", memberToken)
+	if unverified.Code != http.StatusNotFound {
+		t.Fatalf("unverified-account acceptance status=%d body=%s", unverified.Code, unverified.Body.String())
+	}
+	repo.accounts[member.ID] = member
+
+	accepted := performRequest(router, http.MethodPost, "/v1/invitations/"+invitation.ID+"/accept", "", memberToken)
+	if accepted.Code != http.StatusOK || !strings.Contains(accepted.Body.String(), `"status":"accepted"`) {
+		t.Fatalf("accept invitation status=%d body=%s", accepted.Code, accepted.Body.String())
+	}
+	memberMe = performRequest(router, http.MethodGet, "/v1/sessions/me", "", memberToken)
+	if memberMe.Code != http.StatusOK || !strings.Contains(memberMe.Body.String(), "Acme Bakery") ||
+		!strings.Contains(memberMe.Body.String(), `"invitations":[]`) {
+		t.Fatalf("accepted membership status=%d body=%s", memberMe.Code, memberMe.Body.String())
+	}
+	existingMember := performRequest(router, http.MethodPost, "/v1/organizations/organization-one/invitations", `{"email":"member@example.com"}`, ownerToken)
+	if existingMember.Code != http.StatusConflict || !strings.Contains(existingMember.Body.String(), `"code":"already_member"`) {
+		t.Fatalf("existing-member invite status=%d body=%s", existingMember.Code, existingMember.Body.String())
+	}
+
+	nonOwner := performRequest(router, http.MethodPost, "/v1/organizations/organization-one/invitations", `{"email":"new@example.com"}`, memberToken)
+	if nonOwner.Code != http.StatusNotFound {
+		t.Fatalf("member invite status=%d body=%s", nonOwner.Code, nonOwner.Body.String())
+	}
+}
+
+func TestOrganizationInvitationDeliveryFailureCanRetrySameInvitation(t *testing.T) {
+	now := time.Now().UTC()
+	ownerToken := "sess_test_3123456789012345678901234567890123456789012"
+	owner := store.Account{ID: "account-owner", Email: "owner@example.com", EmailVerifiedAt: &now, CreatedAt: now}
+	repo := &fakeRepository{
+		accounts:       map[string]store.Account{owner.ID: owner},
+		accountByEmail: map[string]string{owner.Email: owner.ID},
+		accountSessions: map[string]store.AccountSession{
+			archauth.Hash(ownerToken): {AccountID: owner.ID, ExpiresAt: now.Add(time.Hour)},
+		},
+		organizations: map[string][]store.AccountOrganization{
+			owner.ID: {{
+				Organization: store.Organization{ID: "organization-one", Name: "Acme Bakery", Status: "active", CreatedAt: now},
+				Role:         "owner", IsDefault: true, Sites: []string{},
+			}},
+		},
+	}
+	server := NewServer(config.Config{Env: "dev", ConfirmURLBase: "http://localhost:8787/confirm"}, repo, slog.Default())
+	delivery := &failFirstInvitationDelivery{}
+	server.delivery = delivery
+	router := server.Router()
+
+	failed := performRequest(router, http.MethodPost, "/v1/organizations/organization-one/invitations", `{"email":"member@example.com"}`, ownerToken)
+	if failed.Code != http.StatusBadGateway || !strings.Contains(failed.Body.String(), `"code":"email_delivery_failed"`) ||
+		len(repo.invitations) != 1 {
+		t.Fatalf("failed delivery status=%d invitations=%d body=%s", failed.Code, len(repo.invitations), failed.Body.String())
+	}
+	var invitationID string
+	for id := range repo.invitations {
+		invitationID = id
+	}
+
+	retried := performRequest(router, http.MethodPost, "/v1/organizations/organization-one/invitations", `{"email":"member@example.com"}`, ownerToken)
+	var invitation struct {
+		ID string `json:"id"`
+	}
+	if retried.Code != http.StatusCreated || json.NewDecoder(retried.Body).Decode(&invitation) != nil ||
+		invitation.ID != invitationID || delivery.attempts != 2 || len(repo.invitations) != 1 {
+		t.Fatalf("retry status=%d id=%q attempts=%d invitations=%d body=%s",
+			retried.Code, invitation.ID, delivery.attempts, len(repo.invitations), retried.Body.String())
 	}
 }
 
