@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Archura Ops</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        margin: 0; min-height: 100vh; background: #f3f4f6;
+        font-family: Helvetica, Arial, sans-serif; color: #111827;
+      }
+      header {
+        display: flex; align-items: center; gap: 12px;
+        padding: 14px 28px; background: #111827; color: #e5e7eb;
+      }
+      header h1 { font-size: 1rem; margin: 0; }
+      header .badge {
+        font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+        padding: 2px 7px; border-radius: 999px; background: #b91c1c; color: white;
+      }
+      header nav { margin-left: auto; display: flex; gap: 14px; }
+      header nav a { color: #c7d2fe; font-size: 0.85rem; text-decoration: none; cursor: pointer; }
+      main { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+      .card {
+        background: white; border: 1px solid #e5e7eb; border-radius: 14px;
+        padding: 20px; margin-bottom: 18px;
+      }
+      h2 { margin: 0 0 6px; font-size: 1.05rem; }
+      .hint { color: #6b7280; font-size: 0.88rem; margin: 0 0 14px; }
+      .search { display: flex; gap: 8px; margin-bottom: 14px; }
+      input, select {
+        padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 0.9rem;
+      }
+      .search input { flex: 1; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+      th { text-align: left; color: #6b7280; font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+      td, th { padding: 8px 6px; border-bottom: 1px solid #f3f4f6; }
+      code { font-family: ui-monospace, Menlo, monospace; font-size: 0.82em; color: #374151; }
+      button {
+        padding: 7px 13px; border: none; border-radius: 8px; cursor: pointer;
+        background: #4f46e5; color: white; font-size: 0.82rem; font-weight: 600;
+      }
+      button.ghost { background: white; color: #111827; border: 1px solid #d1d5db; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .row-link { background: none; border: none; color: #4f46e5; font-weight: 600; cursor: pointer; padding: 0; font-size: 0.9rem; }
+      .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+      label { display: block; font-size: 0.82rem; color: #374151; margin-bottom: 4px; }
+      .switch { display: flex; align-items: center; gap: 8px; }
+      .stats { display: flex; gap: 20px; margin: 8px 0 14px; }
+      .stat b { display: block; font-size: 1.2rem; }
+      .stat span { color: #6b7280; font-size: 0.78rem; }
+      .error { color: #dc2626; font-size: 0.85rem; min-height: 1.1em; }
+      .ok { color: #16a34a; font-size: 0.85rem; }
+      .badge-pill { font-size: 0.68rem; padding: 2px 8px; border-radius: 999px; background: #eef2ff; color: #3730a3; font-weight: 600; }
+      .denied { text-align: center; color: #6b7280; padding: 60px 0; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Archura Ops</h1>
+      <span class="badge" id="ops-env">Production</span>
+      <nav>
+        <a data-nav="orgs">Organizations</a>
+        <a data-nav="plan">Default plan</a>
+      </nav>
+    </header>
+    <main id="main"><div class="card">Loading…</div></main>
+
+    <script type="module">
+      const main = document.getElementById('main');
+      // Environment badge. Local hosts are Dev; anything else is treated as
+      // Production until core exposes an authoritative ARCHURA_ENV (see the core
+      // plan) — then this should read that instead of guessing from the host.
+      {
+        const h = location.hostname;
+        const isLocal = h === 'localhost' || h.startsWith('127.') || h === '0.0.0.0' || h.endsWith('.local');
+        const badge = document.getElementById('ops-env');
+        badge.textContent = isLocal ? 'Dev' : 'Production';
+        if (isLocal) badge.style.background = '#334155';
+      }
+      const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
+
+      async function api(path, opts) {
+        const res = await fetch(`/api/ops/${path}`, {
+          headers: { 'Content-Type': 'application/json' },
+          ...opts,
+        }).catch(() => null);
+        return res;
+      }
+
+      function renderDenied() {
+        main.innerHTML = `<div class="denied"><h2>Not authorized</h2><p class="hint">This console is for Archura platform owners. Sign in with a staff account.</p></div>`;
+      }
+
+      // --- Organizations list ---
+      async function renderOrgs(query = '') {
+        main.innerHTML = `<div class="card">Loading…</div>`;
+        const res = await api(`organizations?q=${encodeURIComponent(query)}&limit=25`);
+        if (res && (res.status === 401 || res.status === 403)) return renderDenied();
+        if (!res || !res.ok) { main.innerHTML = `<div class="card">Could not load organizations.</div>`; return; }
+        const { organizations = [] } = await res.json();
+        const items = organizations;
+        const rows = items.map((o) => `
+          <tr>
+            <td><button class="row-link" data-open="${esc(o.id)}">${esc(o.name || o.slug || o.id)}</button><br><code>${esc(o.slug || o.id)}</code></td>
+            <td>${esc(o.status || '')}</td>
+          </tr>`).join('') || `<tr><td colspan="2" class="hint">No organizations.</td></tr>`;
+        main.innerHTML = `
+          <div class="card">
+            <h2>Organizations</h2>
+            <p class="hint">Browse any organization read-only, then fork a design to work on it — or edit its free-plan terms.</p>
+            <form class="search"><input id="q" placeholder="Search name, slug, email…" value="${esc(query)}"><button type="submit">Search</button></form>
+            <table><thead><tr><th>Organization</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>
+          </div>`;
+        main.querySelector('.search').addEventListener('submit', (e) => { e.preventDefault(); renderOrgs(main.querySelector('#q').value.trim()); });
+        main.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => renderOrg(b.dataset.open)));
+      }
+
+      // --- Organization detail: designs (read-only) + fork + free-plan terms ---
+      async function renderOrg(id) {
+        main.innerHTML = `<div class="card">Loading…</div>`;
+        const [orgRes, designsRes] = await Promise.all([
+          api(`organizations/${encodeURIComponent(id)}`),
+          api(`organizations/${encodeURIComponent(id)}/designs?limit=100`),
+        ]);
+        if (orgRes && (orgRes.status === 401 || orgRes.status === 403)) return renderDenied();
+        if (!orgRes || !orgRes.ok) { main.innerHTML = `<div class="card">Organization not found.</div>`; return; }
+        const org = await orgRes.json();
+        const designs = designsRes && designsRes.ok ? (await designsRes.json()).designs ?? [] : [];
+        const b = org.billing || {};
+
+        const designRows = designs.map((d) => `
+          <tr>
+            <td><strong>${esc(d.name || d.id)}</strong><br><code>${esc(d.component_path || '')}</code></td>
+            <td>${d.fork_status ? `<span class="badge-pill">fork: ${esc(d.fork_status)}</span>` : ''}</td>
+            <td><button class="ghost" data-fork="${esc(d.id)}">Fork</button></td>
+          </tr>`).join('') || `<tr><td colspan="3" class="hint">No designs.</td></tr>`;
+
+        main.innerHTML = `
+          <div class="card">
+            <button class="row-link" data-back>← Organizations</button>
+            <h2 style="margin-top:8px">${esc(org.name || org.slug || org.id)}</h2>
+            <p class="hint"><code>${esc(org.slug || org.id)}</code> · ${esc(org.status || '')}</p>
+            <div class="stats">
+              <div class="stat"><b>${esc(org.member_count ?? '–')}</b><span>members</span></div>
+              <div class="stat"><b>${esc(org.design_count ?? designs.length)}</b><span>designs</span></div>
+              <div class="stat"><b>${esc(org.site_count ?? '–')}</b><span>sites</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <h2>Designs</h2>
+            <p class="hint">Read-only. Fork copies a design into the platform workspace to edit — the customer's design is untouched.</p>
+            <table><thead><tr><th>Design</th><th></th><th></th></tr></thead><tbody>${designRows}</tbody></table>
+          </div>
+          <div class="card">
+            <h2>Free-plan terms</h2>
+            <p class="hint">This org's own terms. Changes show on the client's next refresh.</p>
+            <div class="form-grid">
+              <div><label>Trial days (before start)</label><input id="fp-trial-days" type="number" value="${esc(b.free_trial_days ?? '')}"></div>
+              <div><label>Trial ends (after start, ISO)</label><input id="fp-trial-ends" placeholder="2026-09-20T00:00:00Z" value="${esc(b.trial_ends_at ?? '')}"></div>
+              <div><label>Designs allowed</label><input id="fp-designs" type="number" value="${esc(b.free_design_limit ?? '')}"></div>
+              <div><label>Subdomains allowed</label><input id="fp-sites" type="number" value="${esc(b.free_site_limit ?? '')}"></div>
+            </div>
+            <div class="switch" style="margin-bottom:12px"><input id="fp-forever" type="checkbox" ${b.free_no_expiry ? 'checked' : ''}><label for="fp-forever" style="margin:0">No expiry (forever)</label></div>
+            <div><label>Reason (required)</label><input id="fp-reason" placeholder="e.g. pilot customer"></div>
+            <div style="margin-top:12px"><button id="fp-save">Save terms</button> <span id="fp-msg" class="error"></span></div>
+          </div>`;
+
+        main.querySelector('[data-back]').addEventListener('click', () => renderOrgs());
+        main.querySelectorAll('[data-fork]').forEach((btn) => btn.addEventListener('click', () => forkDesign(btn)));
+        main.querySelector('#fp-save').addEventListener('click', () => saveTerms(id));
+      }
+
+      async function forkDesign(btn) {
+        btn.disabled = true;
+        btn.textContent = 'Forking…';
+        const res = await api('forks', { method: 'POST', body: JSON.stringify({ source_design_id: btn.dataset.fork }) });
+        const body = res ? await res.json().catch(() => null) : null;
+        if (res && res.status === 201 && body?.fork_design_id) {
+          location.href = `/edit/?design=${encodeURIComponent(body.fork_design_id)}`;
+          return;
+        }
+        btn.disabled = false;
+        btn.textContent = 'Fork';
+        alert(body?.error?.message ?? body?.error ?? 'Fork failed.');
+      }
+
+      async function saveTerms(id) {
+        const msg = main.querySelector('#fp-msg');
+        msg.className = 'error';
+        msg.textContent = '';
+        const reason = main.querySelector('#fp-reason').value.trim();
+        if (!reason) { msg.textContent = 'A reason is required.'; return; }
+        // Send only the fields the operator filled; core validates trial stage.
+        const patch = { reason, free_no_expiry: main.querySelector('#fp-forever').checked };
+        const num = (sel) => { const v = main.querySelector(sel).value.trim(); return v === '' ? undefined : Number(v); };
+        const days = num('#fp-trial-days'); if (days !== undefined) patch.free_trial_days = days;
+        const ends = main.querySelector('#fp-trial-ends').value.trim(); if (ends) patch.trial_ends_at = ends;
+        const dl = num('#fp-designs'); if (dl !== undefined) patch.free_design_limit = dl;
+        const sl = num('#fp-sites'); if (sl !== undefined) patch.free_site_limit = sl;
+        const res = await api(`organizations/${encodeURIComponent(id)}/free-plan`, { method: 'PATCH', body: JSON.stringify(patch) });
+        const body = res ? await res.json().catch(() => null) : null;
+        if (res && res.ok) { msg.className = 'ok'; msg.textContent = 'Saved.'; return; }
+        msg.textContent = body?.error?.message ?? body?.error ?? `Could not save (${res?.status ?? '?'}).`;
+      }
+
+      // --- Default free plan (what new orgs get) ---
+      async function renderDefaultPlan() {
+        main.innerHTML = `<div class="card">Loading…</div>`;
+        const res = await api('default-plan');
+        if (res && (res.status === 401 || res.status === 403)) return renderDenied();
+        if (!res || !res.ok) { main.innerHTML = `<div class="card">Could not load the default plan.</div>`; return; }
+        const p = await res.json();
+        main.innerHTML = `
+          <div class="card">
+            <h2>Default free plan</h2>
+            <p class="hint">What a <strong>new</strong> organization is seeded with. Editing this affects future orgs only — existing orgs keep their own terms.</p>
+            <div class="form-grid">
+              <div><label>Trial days</label><input id="dp-days" type="number" value="${esc(p.trial_days ?? '')}"></div>
+              <div><label>Designs allowed</label><input id="dp-designs" type="number" value="${esc(p.free_design_limit ?? '')}"></div>
+              <div><label>Subdomains allowed</label><input id="dp-sites" type="number" value="${esc(p.free_site_limit ?? '')}"></div>
+            </div>
+            <div class="switch" style="margin-bottom:12px"><input id="dp-forever" type="checkbox" ${p.free_no_expiry ? 'checked' : ''}><label for="dp-forever" style="margin:0">No expiry by default</label></div>
+            <div><button id="dp-save">Save default plan</button> <span id="dp-msg" class="error"></span></div>
+          </div>`;
+        main.querySelector('#dp-save').addEventListener('click', async () => {
+          const msg = main.querySelector('#dp-msg');
+          msg.className = 'error'; msg.textContent = '';
+          const patch = {
+            trial_days: Number(main.querySelector('#dp-days').value),
+            free_design_limit: Number(main.querySelector('#dp-designs').value),
+            free_site_limit: Number(main.querySelector('#dp-sites').value),
+            free_no_expiry: main.querySelector('#dp-forever').checked,
+          };
+          const r = await api('default-plan', { method: 'PATCH', body: JSON.stringify(patch) });
+          const body = r ? await r.json().catch(() => null) : null;
+          if (r && r.ok) { msg.className = 'ok'; msg.textContent = 'Saved.'; return; }
+          msg.textContent = body?.error?.message ?? `Could not save (${r?.status ?? '?'}).`;
+        });
+      }
+
+      document.querySelectorAll('[data-nav]').forEach((a) =>
+        a.addEventListener('click', () => (a.dataset.nav === 'plan' ? renderDefaultPlan() : renderOrgs()))
+      );
+
+      renderOrgs();
+    </script>
+  </body>
+</html>

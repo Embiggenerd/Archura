@@ -17,6 +17,7 @@
     { "name": "Sessions", "description": "Component and account sessions" },
     { "name": "Accounts", "description": "Email-confirmed accounts and site ownership" },
     { "name": "Confirmations", "description": "Single-use email confirmation links" },
+    { "name": "Admin", "description": "Platform-owner organization inspection, design forks, and free-plan administration" },
     { "name": "Development", "description": "Development-only testing helpers" }
   ],
   "components": {
@@ -184,7 +185,8 @@
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "email": { "type": "string", "format": "email" },
-          "email_verified_at": { "type": ["string", "null"], "format": "date-time" }
+          "email_verified_at": { "type": ["string", "null"], "format": "date-time" },
+          "staff_role": { "type": ["string", "null"], "enum": ["platform_owner", null] }
         }
       },
       "AccountSession": {
@@ -222,7 +224,11 @@
           "serve_grace_ends_at": { "type": ["string", "null"], "format": "date-time" },
           "current_period_end": { "type": ["string", "null"], "format": "date-time" },
           "cancel_at_period_end": { "type": "boolean" },
-          "subscription_status": { "type": "string" }
+          "subscription_status": { "type": "string" },
+          "free_trial_days": { "type": "integer" },
+          "free_design_limit": { "type": "integer" },
+          "free_site_limit": { "type": "integer" },
+          "free_no_expiry": { "type": "boolean" }
         }
       },
       "BillingRedirect": {
@@ -305,6 +311,130 @@
         "properties": {
           "subdomain": { "type": "string" },
           "organization_id": { "type": "string", "format": "uuid" }
+        }
+      },
+      "DefaultFreePlan": {
+        "type": "object",
+        "required": ["trial_days", "free_design_limit", "free_site_limit", "free_no_expiry", "updated_at"],
+        "properties": {
+          "trial_days": { "type": "integer", "minimum": 0 },
+          "free_design_limit": { "type": "integer", "minimum": 0 },
+          "free_site_limit": { "type": "integer", "minimum": 0 },
+          "free_no_expiry": { "type": "boolean" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "DefaultFreePlanPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "trial_days": { "type": "integer", "minimum": 0 },
+          "free_design_limit": { "type": "integer", "minimum": 0 },
+          "free_site_limit": { "type": "integer", "minimum": 0 },
+          "free_no_expiry": { "type": "boolean" }
+        }
+      },
+      "OrganizationFreePlanPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reason"],
+        "properties": {
+          "free_trial_days": { "type": "integer", "minimum": 0, "description": "Accepted only before trial_started_at is set." },
+          "trial_ends_at": { "type": "string", "format": "date-time", "description": "Accepted only after trial start; also sets serve_grace_ends_at to this instant." },
+          "free_design_limit": { "type": "integer", "minimum": 0 },
+          "free_site_limit": { "type": "integer", "minimum": 0 },
+          "free_no_expiry": { "type": "boolean" },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      },
+      "AdminBilling": {
+        "type": "object",
+        "required": ["free_trial_days", "free_design_limit", "free_site_limit", "free_no_expiry", "cancel_at_period_end", "updated_at"],
+        "properties": {
+          "trial_started_at": { "type": ["string", "null"], "format": "date-time" },
+          "trial_ends_at": { "type": ["string", "null"], "format": "date-time" },
+          "serve_grace_ends_at": { "type": ["string", "null"], "format": "date-time" },
+          "free_trial_days": { "type": "integer", "minimum": 0 },
+          "free_design_limit": { "type": "integer", "minimum": 0 },
+          "free_site_limit": { "type": "integer", "minimum": 0 },
+          "free_no_expiry": { "type": "boolean" },
+          "stripe_customer_id": { "type": "string" },
+          "stripe_subscription_id": { "type": "string" },
+          "stripe_subscription_status": { "type": "string" },
+          "current_period_end": { "type": ["string", "null"], "format": "date-time" },
+          "cancel_at_period_end": { "type": "boolean" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AdminOrganization": {
+        "type": "object",
+        "required": ["id", "name", "slug", "status", "allowed_origins", "caps_exempt", "is_platform_workspace", "member_count", "design_count", "site_count", "billing", "created_at"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "slug": { "type": "string" },
+          "status": { "type": "string" },
+          "allowed_origins": { "type": "array", "items": { "type": "string" } },
+          "caps_exempt": { "type": "boolean" },
+          "is_platform_workspace": { "type": "boolean" },
+          "member_count": { "type": "integer", "minimum": 0 },
+          "design_count": { "type": "integer", "minimum": 0 },
+          "site_count": { "type": "integer", "minimum": 0 },
+          "billing": { "$ref": "#/components/schemas/AdminBilling" },
+          "member_summary": { "type": "array", "maxItems": 5, "items": { "$ref": "#/components/schemas/AdminMember" } },
+          "design_summary": { "type": "array", "maxItems": 5, "items": { "$ref": "#/components/schemas/AdminDesign" } },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AdminMember": {
+        "type": "object",
+        "required": ["account_id", "email", "role", "created_at"],
+        "properties": {
+          "account_id": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "role": { "type": "string", "enum": ["owner", "member"] },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AdminDesign": {
+        "type": "object",
+        "required": ["id", "organization_id", "name", "component_path", "created_at", "updated_at"],
+        "properties": {
+          "id": { "type": "string" },
+          "organization_id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "component_path": { "type": "string" },
+          "fork_status": { "type": "string", "enum": ["pending", "ready", "failed"] },
+          "forked_from": { "type": "string" },
+          "source_org_id": { "type": "string", "format": "uuid" },
+          "forked_by": { "type": "string", "format": "uuid" },
+          "forked_at": { "type": "string", "format": "date-time" },
+          "source_artifact_kind": { "type": ["string", "null"], "enum": ["published", "draft", "template", null] },
+          "source_etag": { "type": ["string", "null"] },
+          "template_ref": { "type": ["string", "null"] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreateForkRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_design_id", "idempotency_key"],
+        "properties": {
+          "source_design_id": { "type": "string" },
+          "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
+      },
+      "FinalizeForkRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string", "enum": ["ready", "failed"] },
+          "source_artifact_kind": { "type": "string", "enum": ["published", "draft", "template"] },
+          "source_etag": { "type": "string" },
+          "template_ref": { "type": "string" }
         }
       },
       "DevConfirmations": {
@@ -761,6 +891,84 @@
           "500": { "$ref": "#/components/responses/InternalError" },
           "503": { "$ref": "#/components/responses/Unavailable" }
         }
+      }
+    },
+    "/v1/admin/organizations": {
+      "get": {
+        "tags": ["Admin"], "operationId": "listAdminOrganizations", "summary": "Search all organizations", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [
+          { "name": "q", "in": "query", "schema": { "type": "string" } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 25 } }
+        ],
+        "responses": { "200": { "description": "Organizations", "content": { "application/json": { "schema": { "type": "object", "properties": { "organizations": { "type": "array", "items": { "$ref": "#/components/schemas/AdminOrganization" } }, "next_cursor": { "type": ["string", "null"] } } } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/v1/admin/organizations/{organizationID}": {
+      "get": {
+        "tags": ["Admin"], "operationId": "getAdminOrganization", "summary": "Inspect an organization", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Organization", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminOrganization" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/v1/admin/organizations/{organizationID}/designs": {
+      "get": {
+        "tags": ["Admin"], "operationId": "listAdminOrganizationDesigns", "summary": "List an organization's designs", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }, { "name": "cursor", "in": "query", "schema": { "type": "string" } }, { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100 } }],
+        "responses": { "200": { "description": "Designs" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/v1/admin/organizations/{organizationID}/members": {
+      "get": {
+        "tags": ["Admin"], "operationId": "listAdminOrganizationMembers", "summary": "List an organization's members", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }, { "name": "cursor", "in": "query", "schema": { "type": "string" } }, { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100 } }],
+        "responses": { "200": { "description": "Members" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/v1/admin/organizations/{organizationID}/free-plan": {
+      "patch": {
+        "tags": ["Admin"], "operationId": "updateAdminOrganizationFreePlan", "summary": "Update one organization's free-plan terms", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrganizationFreePlanPatch" } } } },
+        "responses": { "200": { "description": "Updated terms", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminBilling" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }, "422": { "$ref": "#/components/responses/BadRequest" } }
+      }
+    },
+    "/v1/admin/designs/{designID}": {
+      "get": {
+        "tags": ["Admin"], "operationId": "getAdminDesign", "summary": "Inspect a design record", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "designID", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Design", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminDesign" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/v1/admin/forks": {
+      "get": {
+        "tags": ["Admin"], "operationId": "listAdminForks", "summary": "List workspace forks", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "state", "in": "query", "schema": { "type": "string", "enum": ["pending", "ready", "failed"], "default": "ready" } }, { "name": "cursor", "in": "query", "schema": { "type": "string" } }, { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100 } }],
+        "responses": { "200": { "description": "Forks" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      },
+      "post": {
+        "tags": ["Admin"], "operationId": "createAdminFork", "summary": "Create an idempotent pending fork record", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateForkRequest" } } } },
+        "responses": { "201": { "description": "Fork", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminDesign" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "422": { "$ref": "#/components/responses/BadRequest" } }
+      }
+    },
+    "/v1/admin/forks/{forkID}/finalize": {
+      "post": {
+        "tags": ["Admin"], "operationId": "finalizeAdminFork", "summary": "Finalize a pending or failed fork", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "forkID", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FinalizeForkRequest" } } } },
+        "responses": { "200": { "description": "Fork", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminDesign" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "422": { "$ref": "#/components/responses/BadRequest" } }
+      }
+    },
+    "/v1/admin/default-plan": {
+      "get": {
+        "tags": ["Admin"], "operationId": "getAdminDefaultFreePlan", "summary": "Get defaults copied to future organizations", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "responses": { "200": { "description": "Default free plan", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DefaultFreePlan" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      },
+      "patch": {
+        "tags": ["Admin"], "operationId": "updateAdminDefaultFreePlan", "summary": "Update defaults for future organizations", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DefaultFreePlanPatch" } } } },
+        "responses": { "200": { "description": "Default free plan", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DefaultFreePlan" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }, "422": { "$ref": "#/components/responses/BadRequest" } }
       }
     },
     "/v1/dev/confirmations": {

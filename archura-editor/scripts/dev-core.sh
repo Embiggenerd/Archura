@@ -35,7 +35,7 @@ if [ -n "$service" ]; then
 else
   echo "› identity verify:  CORE_ADMIN_KEY=$admin node archura-editor/scripts/verify-core-identity.mjs"
 fi
-echo "› core: http://localhost:8080  (Ctrl-C to stop; postgres keeps running)"
+echo "› core: http://localhost:8080  (hot reload enabled; Ctrl-C to stop)"
 
 export DATABASE_URL="postgres://postgres@/archura?host=/tmp&port=$pgport"
 export PLATFORM_ADMIN_KEY="$admin"
@@ -43,4 +43,4 @@ if [ -n "$service" ]; then
   export CORE_SERVICE_KEY="$service"
 fi
 export PORT=8080
-exec go run ./cmd/server
+exec go tool air -c "$core_dir/.air.toml"

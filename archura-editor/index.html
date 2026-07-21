@@ -210,7 +210,7 @@
             </div>
             <div class="viz-controls" aria-label="Editor output type">
               <button type="button" class="btn btn-primary" data-mode="page" aria-pressed="true">Page-sized component</button>
-              <button type="button" class="btn" data-mode="component" aria-pressed="false">Payment component</button>
+              <button type="button" class="btn" data-mode="component" aria-pressed="false">Payment component · Basic</button>
               <button type="button" class="btn btn-primary" data-deploy>Deploy</button>
             </div>
           </div>
@@ -239,12 +239,17 @@
 
           // The editor is its own embeddable web component — mount it directly,
           // exactly the way a client page would.
-          const components = import.meta.env.PROD
+          const base = import.meta.env.PROD
             ? defaultComponents.map((def) => ({ ...def, moduleUrl: `/components/${def.path.join('/')}.js` }))
-            : undefined;
+            : defaultComponents;
+          // Free / anonymous front page: page-building only. Backend components
+          // (Stripe payments, and other dev-aimed standalone components) need the
+          // Basic plan, so they aren't offered here.
+          const requiresBasic = (def) => def.path[0] === 'payments';
+          const components = base.filter((def) => !requiresBasic(def));
           const editorEl = document.createElement('archura-editor');
           editorEl.componentPath = ['pages', 'Landing'];
-          if (components) editorEl.components = components;
+          editorEl.components = components;
           root.querySelector('[data-editor-mount]').appendChild(editorEl);
 
           root.querySelectorAll('[data-start]').forEach((button) => {
@@ -258,14 +263,18 @@
           modeButtons.forEach((button) => {
             button.addEventListener('click', () => {
               const mode = button.dataset.mode;
-              const isPage = mode === 'page';
-
+              if (mode !== 'page') {
+                // Standalone components (like Stripe payments) need the Basic plan.
+                // Free / anonymous visitors build full pages — send them to sign up.
+                showRegisterModal();
+                return;
+              }
               modeButtons.forEach((candidate) => {
                 const active = candidate.dataset.mode === mode;
                 candidate.setAttribute('aria-pressed', String(active));
                 candidate.classList.toggle('btn-primary', active);
               });
-              editorEl.componentPath = isPage ? ['pages', 'Landing'] : ['payments', 'StripePayment'];
+              editorEl.componentPath = ['pages', 'Landing'];
             });
           });
 

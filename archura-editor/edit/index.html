@@ -150,6 +150,7 @@
       import { defaultComponents } from './../src/components/index.ts';
       import { createFileSystemAdapter, createR2Adapter } from './../src/adapters/index.ts';
       import { ensureFunnelStyles, showDeployModal, showRegisterModal } from './funnel-ui.js';
+      import { showUpgradeModal } from './../src/upgrade-modal.ts';
       ensureFunnelStyles(); // the claim screen builds its own .overlay
 
       const params = new URLSearchParams(location.search);
@@ -333,6 +334,12 @@
           notice.className = 'billing-notice';
           notice.innerHTML = `This organization is read-only until an owner starts the Basic plan ($5/month, with a 14-day free trial). <a href="/dashboard/?organization=${encodeURIComponent(organization.id)}">Manage billing</a>`;
           document.body.appendChild(notice);
+          // Time-limit boundary: the free trial has ended, so editing/publishing is
+          // paused. Surface the upgrade path as a modal, with the notice persisting.
+          const ended = organization.billing?.status === 'grace'
+            ? 'Your free trial has ended — your published sites stay live for a short grace period.'
+            : 'Your free trial has ended, so editing and publishing are paused.';
+          showUpgradeModal(organization, ended);
         }
         const editorEl = mountEditor(guardedPersistence);
         if (readOnly) {

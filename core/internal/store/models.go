@@ -3,12 +3,14 @@ package store
 import "time"
 
 type Organization struct {
-	ID             string
-	Name           string
-	Slug           string
-	AllowedOrigins []string
-	Status         string
-	CreatedAt      time.Time
+	ID                  string
+	Name                string
+	Slug                string
+	AllowedOrigins      []string
+	Status              string
+	CapsExempt          bool
+	IsPlatformWorkspace bool
+	CreatedAt           time.Time
 }
 
 type CreateOrganizationParams struct {
@@ -87,6 +89,7 @@ type Account struct {
 	ID              string
 	Email           string
 	EmailVerifiedAt *time.Time
+	StaffRole       string
 	CreatedAt       time.Time
 }
 
@@ -148,6 +151,10 @@ type OrganizationBilling struct {
 	TrialStartedAt           *time.Time
 	TrialEndsAt              *time.Time
 	ServeGraceEndsAt         *time.Time
+	FreeTrialDays            int
+	FreeDesignLimit          int
+	FreeSiteLimit            int
+	FreeNoExpiry             bool
 	StripeCustomerID         string
 	StripeSubscriptionID     string
 	StripeSubscriptionStatus string
@@ -181,6 +188,72 @@ type StripeSubscriptionUpdate struct {
 	CurrentPeriodEnd  *time.Time
 	CancelAtPeriodEnd bool
 	EventCreatedAt    time.Time
+}
+
+type DefaultFreePlan struct {
+	TrialDays       int       `json:"trial_days"`
+	FreeDesignLimit int       `json:"free_design_limit"`
+	FreeSiteLimit   int       `json:"free_site_limit"`
+	FreeNoExpiry    bool      `json:"free_no_expiry"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type FreePlanPatch struct {
+	TrialDays       *int
+	FreeDesignLimit *int
+	FreeSiteLimit   *int
+	FreeNoExpiry    *bool
+}
+
+type OrganizationFreePlanPatch struct {
+	FreeTrialDays   *int
+	TrialEndsAt     *time.Time
+	FreeDesignLimit *int
+	FreeSiteLimit   *int
+	FreeNoExpiry    *bool
+	Reason          string
+}
+
+type AdminOrganization struct {
+	Organization
+	MemberCount int
+	DesignCount int
+	SiteCount   int
+	Billing     OrganizationBilling
+}
+
+type AdminOrganizationMember struct {
+	AccountID string
+	Email     string
+	Role      string
+	CreatedAt time.Time
+}
+
+type AdminPage[T any] struct {
+	Items      []T
+	NextCursor string
+}
+
+type ForkFinalize struct {
+	Status             string
+	SourceArtifactKind string
+	SourceETag         string
+	TemplateRef        string
+}
+
+type FreePlanAuditMetadata struct {
+	Before any    `json:"before"`
+	After  any    `json:"after"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type ForkAuditMetadata struct {
+	SourceOrganizationID string `json:"source_organization_id"`
+	SourceDesignID       string `json:"source_design_id"`
+	DestinationForkID    string `json:"destination_fork_id"`
+	SourceArtifactKind   string `json:"source_artifact_kind,omitempty"`
+	SourceETag           string `json:"source_etag,omitempty"`
+	TemplateRef          string `json:"template_ref,omitempty"`
 }
 
 type OrganizationInvitation struct {

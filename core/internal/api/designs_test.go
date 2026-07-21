@@ -18,7 +18,7 @@ func TestDesignCreateListGetAndCap(t *testing.T) {
 
 	// Free floor is 3 designs; the 4th is rejected with a distinct code so the
 	// editor can show the upgrade modal.
-	for i := 0; i < freeDesignLimit; i++ {
+	for i := 0; i < 3; i++ {
 		if resp := create(); resp.Code != http.StatusCreated {
 			t.Fatalf("create design %d: status=%d body=%s", i, resp.Code, resp.Body.String())
 		}

@@ -35,6 +35,7 @@ const buildInputs = {
   demo: path.join(here, 'demo/index.html'),
   dashboard: path.join(here, 'dashboard/index.html'),
   account: path.join(here, 'account/index.html'),
+  ops: path.join(here, 'ops/index.html'),
   devmail: path.join(here, 'dev-mail/index.html'),
 };
 

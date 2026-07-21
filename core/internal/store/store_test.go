@@ -54,6 +54,25 @@ func TestMigrateIdempotent(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("schema_migrations rows for 0006 = %d, want 1", count)
 	}
+	if err := st.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM schema_migrations WHERE version = '0012_admin_console'`,
+	).Scan(&count); err != nil {
+		t.Fatalf("query admin-console migration: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("schema_migrations rows for 0012 = %d, want 1", count)
+	}
+	if err := st.Pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM organizations o
+		LEFT JOIN organization_billing b ON b.organization_id = o.id
+		WHERE b.organization_id IS NULL`,
+	).Scan(&count); err != nil {
+		t.Fatalf("query organization billing invariant: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("organizations without billing rows = %d, want 0", count)
+	}
 	if err := st.RecordAudit(ctx, AuditEvent{
 		ActorType: "anonymous", Action: "confirmation.verify_rejected",
 		ResourceType: "confirmation", Outcome: "rejected", RequestID: "migration-audit-test",

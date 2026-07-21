@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -80,6 +81,19 @@ func insertOrganization(ctx context.Context, tx pgx.Tx, p CreateOrganizationPara
 		organization.ID, p.PublishableKey, p.SecretKeyHash,
 	); err != nil {
 		return Organization{}, mapStoreError("insert organization keys", err)
+	}
+	result, err := tx.Exec(ctx, `
+		INSERT INTO organization_billing (
+			organization_id, free_trial_days, free_design_limit, free_site_limit, free_no_expiry
+		)
+		SELECT $1::uuid, trial_days, free_design_limit, free_site_limit, free_no_expiry
+		FROM default_free_plan
+		WHERE singleton`, organization.ID)
+	if err != nil {
+		return Organization{}, mapStoreError("insert organization billing", err)
+	}
+	if result.RowsAffected() != 1 {
+		return Organization{}, errors.New("default free plan is missing")
 	}
 	return organization, nil
 }
@@ -319,11 +333,42 @@ func (s *Store) ReleaseOrganizationSite(
 }
 
 func bindOrganizationSite(ctx context.Context, tx pgx.Tx, subdomain, organizationID string) (string, error) {
-	if _, err := tx.Exec(ctx, `
+	var existingOwner string
+	err := tx.QueryRow(ctx, `
+		SELECT organization_id::text FROM organization_sites WHERE subdomain = $1`, subdomain,
+	).Scan(&existingOwner)
+	if err == nil {
+		return existingOwner, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", mapStoreError("find organization site owner", err)
+	}
+	limits, exempt, err := effectiveResourceLimitsTx(ctx, tx, organizationID, time.Now().UTC())
+	if err != nil {
+		return "", err
+	}
+	result, err := tx.Exec(ctx, `
 		INSERT INTO organization_sites (subdomain, organization_id)
-		VALUES ($1, $2::uuid)
-		ON CONFLICT DO NOTHING`, subdomain, organizationID); err != nil {
+		SELECT $1, $2::uuid
+		WHERE $3 OR (
+			SELECT count(*) FROM organization_sites WHERE organization_id = $2::uuid
+		) < $4
+		ON CONFLICT DO NOTHING`, subdomain, organizationID, exempt, limits.Sites)
+	if err != nil {
 		return "", mapStoreError("bind organization site", err)
+	}
+	if result.RowsAffected() == 0 {
+		var ownerID string
+		err := tx.QueryRow(ctx, `
+			SELECT organization_id::text FROM organization_sites WHERE subdomain = $1`, subdomain,
+		).Scan(&ownerID)
+		if err == nil {
+			return ownerID, nil
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrLimitReached
+		}
+		return "", mapStoreError("find organization site owner", err)
 	}
 	var ownerID string
 	if err := tx.QueryRow(ctx, `

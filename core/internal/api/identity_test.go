@@ -475,7 +475,15 @@ func (f *fakeRepository) BillingForOrganization(_ context.Context, organizationI
 	return f.billing[organizationID], nil
 }
 
-func (f *fakeRepository) CreateDesign(_ context.Context, organizationID, name, componentPath string, limit int, audit store.AuditEvent) (store.Design, error) {
+func (f *fakeRepository) CreateDesign(_ context.Context, organizationID, name, componentPath string, audit store.AuditEvent) (store.Design, error) {
+	limit := 3
+	if billing, ok := f.billing[organizationID]; ok {
+		if billing.StripeSubscriptionStatus == "active" || billing.StripeSubscriptionStatus == "trialing" {
+			limit = 10
+		} else {
+			limit = billing.FreeDesignLimit
+		}
+	}
 	if f.designs == nil {
 		f.designs = make(map[string][]store.Design)
 	}

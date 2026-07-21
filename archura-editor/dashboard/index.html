@@ -78,6 +78,7 @@
     <main id="main"></main>
     <script type="module">
       import { defaultComponents } from './../src/components/index.ts';
+      import { showUpgradeModal } from './../src/upgrade-modal.ts';
 
       const main = document.getElementById('main');
       const escapeHtml = (value) => String(value ?? '')
@@ -98,6 +99,17 @@
       // status 'active', so subscription_status tells the trial from a paid sub.
       function billingCopy(billing) {
         if (!billing) return { tone: 'bad', title: 'Billing unavailable', detail: 'Try again shortly.' };
+        // The org's own free-plan terms (per-org, editable by a platform owner).
+        const freeSites = billing.free_site_limit ?? 1;
+        const freeDesigns = billing.free_design_limit ?? 3;
+        const freeTrialDays = billing.free_trial_days ?? 2;
+        const freeLimits = `${freeSites} hosted site${freeSites === 1 ? '' : 's'} and ${freeDesigns} design${freeDesigns === 1 ? '' : 's'}`;
+        const paid = billing.subscription_status === 'active' || billing.subscription_status === 'trialing';
+        // A no-expiry free tier resolves to entitlement status "active" with no
+        // Stripe subscription — show it as the Free plan, not a paid one.
+        if (billing.free_no_expiry && !paid) {
+          return { tone: 'good', title: 'Free plan — no expiry', detail: `This organization is on the Free plan with no end date — ${freeLimits}.` };
+        }
         if (billing.status === 'active') {
           if (billing.subscription_status === 'trialing') {
             const days = daysRemaining(billing.current_period_end);
@@ -117,7 +129,7 @@
           return {
             tone: days != null && days <= 1 ? 'warn' : 'good',
             title: days != null ? `Free plan — ${days} day${days === 1 ? '' : 's'} left` : 'Free plan',
-            detail: 'The Free plan includes 1 hosted site and 3 designs. Add a card to start the 14-day Basic trial — 3 sites and 10 designs, free until it ends, then $5/month.',
+            detail: `The Free plan includes ${freeLimits}. Add a card to start the 14-day Basic trial — 3 sites and 10 designs, free until it ends, then $5/month.`,
           };
         }
         if (billing.status === 'grace') {
@@ -126,7 +138,7 @@
         if (billing.status === 'expired') {
           return { tone: 'bad', title: 'Plan ended', detail: 'Editing, publishing, and hosted pages are paused. Start the Basic plan to bring them back.' };
         }
-        return { tone: '', title: 'Free plan', detail: 'Your 2-day Free plan starts when this organization first publishes — 1 site and 3 designs. Add a card any time to start the 14-day Basic trial.' };
+        return { tone: '', title: 'Free plan', detail: `Your ${freeTrialDays}-day Free plan starts when this organization first publishes — ${freeLimits}. Add a card any time to start the 14-day Basic trial.` };
       }
 
       function attributesFor(artifact, embedName) {
@@ -233,6 +245,11 @@
             body: JSON.stringify({ site, organizationId: organization.id }),
           }).catch(() => null);
           if (!res || !res.ok) {
+            const body = await res?.json().catch(() => null);
+            if (res?.status === 409 && body?.error?.code === 'site_limit_reached') {
+              showUpgradeModal(organization, body.error.message);
+              return;
+            }
             card.querySelector('.error').textContent =
               res?.status === 409 ? 'That name is taken.' :
               res?.status === 403 ? 'Claiming is currently restricted.' : 'Invalid name.';
@@ -304,12 +321,16 @@
             <div class="plan-price">${price}</div>
             <ul class="plan-limits">${limits.map((l) => `<li>${l}</li>`).join('')}</ul>
           </div>`;
+        // The Free card reflects this org's actual (possibly admin-edited) terms.
+        const fSites = billing?.free_site_limit ?? 1;
+        const fDesigns = billing?.free_design_limit ?? 3;
+        const fPrice = billing?.free_no_expiry ? 'no card · no expiry' : `${billing?.free_trial_days ?? 2} days · no card`;
         card.innerHTML = `
           <h2>Plan</h2>
           <div class="billing-status"><span class="billing-dot ${copy.tone}"></span><strong>${escapeHtml(copy.title)}</strong></div>
           <p class="hint">${escapeHtml(copy.detail)}</p>
           <div class="plans">
-            ${plan('free', 'Free', '2 days · no card', ['1 hosted site', '3 designs'])}
+            ${plan('free', 'Free', fPrice, [`${fSites} hosted site${fSites === 1 ? '' : 's'}`, `${fDesigns} design${fDesigns === 1 ? '' : 's'}`])}
             ${plan('basic', 'Basic', '$5/mo · 14-day free trial', ['3 hosted sites', '10 designs'])}
           </div>
           ${canManage ? `<div class="actions"><button data-billing-action="${portal ? 'portal' : 'checkout'}">${portal ? 'Manage billing' : 'Start Basic trial'}</button></div>` : '<p class="hint">Ask an organization owner to manage billing.</p>'}

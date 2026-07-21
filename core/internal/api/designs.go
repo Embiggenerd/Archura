@@ -11,22 +11,6 @@ import (
 	"github.com/archura/core/internal/store"
 )
 
-// Per-plan design caps. Free (no-card taste / no active subscription) vs Basic.
-const (
-	freeDesignLimit  = 3
-	basicDesignLimit = 10
-)
-
-// designLimit picks the cap from the organization's plan: Basic while a Stripe
-// subscription is active or in its trial, otherwise the free floor.
-func designLimit(billing store.OrganizationBilling) int {
-	switch billing.StripeSubscriptionStatus {
-	case "active", "trialing":
-		return basicDesignLimit
-	}
-	return freeDesignLimit
-}
-
 type createDesignRequest struct {
 	Name          string `json:"name"`
 	ComponentPath string `json:"component_path"`
@@ -54,18 +38,16 @@ func (s *Server) handleCreateDesign(w http.ResponseWriter, r *http.Request) {
 		componentPath = "pages/Landing"
 	}
 
-	billing, err := s.store.BillingForOrganization(r.Context(), organization.ID)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		s.internalError(w, r, err)
-		return
-	}
-
-	design, err := s.store.CreateDesign(r.Context(), organization.ID, name, componentPath, designLimit(billing), store.AuditEvent{
+	design, err := s.store.CreateDesign(r.Context(), organization.ID, name, componentPath, store.AuditEvent{
 		ActorType: "account", ActorID: account.ID, RequestID: middleware.GetReqID(r.Context()),
 		Metadata: store.EmptyAuditMetadata{},
 	})
 	if errors.Is(err, store.ErrLimitReached) {
 		writeError(w, r, http.StatusConflict, "design_limit_reached", "This plan's design limit is reached. Upgrade to add more.")
+		return
+	}
+	if errors.Is(err, store.ErrReadOnly) {
+		writeError(w, r, http.StatusForbidden, "organization_read_only", "This organization is read-only.")
 		return
 	}
 	if err != nil {

@@ -42,6 +42,7 @@ is added to chi without being documented.
 | `STRIPE_BASIC_PRICE_ID` | —    | recurring $5/month Stripe Price ID |
 | `BILLING_PUBLIC_ORIGIN` | —    | Worker origin for Checkout and portal returns |
 | `REQUIRE_EDGE_AUTH`  | `false` | enables production-like edge auth locally |
+| `ADMIN_API_ENABLED`  | dev: `true`, prod: `false` | exposes staff-gated `/v1/admin/*` routes |
 
 Production requires the database, admin key, an environment-matched `svc_live_...`
 service key, the public confirmation URL, and Email Service settings, and exits before
@@ -56,6 +57,14 @@ go run ./cmd/devkeys
 
 go run ./cmd/devkeys service
 # CORE_SERVICE_KEY=svc_test_...
+```
+
+Bootstrap the platform workspace and manage platform owners with the database-backed CLI:
+
+```sh
+go run ./cmd/adminctl bootstrap
+go run ./cmd/adminctl grant-staff owner@example.com
+go run ./cmd/adminctl revoke-staff owner@example.com
 ```
 
 Generate a standalone publishable key for component fixtures:

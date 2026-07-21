@@ -65,6 +65,18 @@ func TestVerifyConfirmationIsSingleUseAndConflictRollsBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find verified account: %v", err)
 	}
+	organizations, err := st.OrganizationsForAccount(ctx, account.ID)
+	if err != nil || len(organizations) != 1 {
+		t.Fatalf("find verified organization: organizations=%+v err=%v", organizations, err)
+	}
+	threeSites := 3
+	if _, err := st.UpdateOrganizationFreePlan(ctx, organizations[0].ID, OrganizationFreePlanPatch{
+		FreeSiteLimit: &threeSites, Reason: "Exercise multiple-site confirmation flow",
+	}, AuditEvent{
+		ActorType: "account", ActorID: account.ID, RequestID: requestPrefix + "-site-limit",
+	}); err != nil {
+		t.Fatalf("raise site limit for flow test: %v", err)
+	}
 	if err := st.BindSiteOwnership(ctx, "second-"+suffix, account.ID, AuditEvent{
 		ActorType: "account", ActorID: account.ID, Action: "site_ownership.bound",
 		ResourceType: "site", ResourceID: "second-" + suffix,

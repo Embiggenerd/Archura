@@ -100,6 +100,7 @@ cleanup() {
   [ "$cleaned_up" = false ] || return 0
   cleaned_up=true
   [ -n "$child_pids" ] && kill $child_pids 2>/dev/null || true
+  pgrep -f "$core_dir/.air.toml" 2>/dev/null | xargs kill 2>/dev/null || true
   lsof -ti :8080 2>/dev/null | xargs kill 2>/dev/null || true
   lsof -ti :9091 2>/dev/null | xargs kill 2>/dev/null || true
   lsof -ti :8787 2>/dev/null | xargs kill 2>/dev/null || true
@@ -115,6 +116,7 @@ stop_recorded_stack
 # Clean up processes launched by older dev-up.sh versions that predate pidfile.
 pgrep -f "$av2/node_modules/.bin/vite build --watch" 2>/dev/null | xargs kill 2>/dev/null || true
 pgrep -f "$av2/node_modules/.bin/wrangler dev --port 8787" 2>/dev/null | xargs kill 2>/dev/null || true
+pgrep -f "$core_dir/.air.toml" 2>/dev/null | xargs kill 2>/dev/null || true
 lsof -ti :8080 2>/dev/null | xargs kill 2>/dev/null || true
 lsof -ti :9091 2>/dev/null | xargs kill 2>/dev/null || true
 lsof -ti :8787 2>/dev/null | xargs kill 2>/dev/null || true
@@ -143,14 +145,14 @@ internal=$(go run ./cmd/devkeys internal | cut -d= -f2)
 moderation=$(openssl rand -hex 32)
 ok 'dev keys minted'
 
-# --- Core (background) ---
-step 'starting Go core'
+# --- Core (background, watched by Air) ---
+step 'starting Go core watcher'
 DATABASE_URL="postgres://postgres@/archura?host=/tmp&port=$pgport" \
 PLATFORM_ADMIN_KEY="$admin" CORE_SERVICE_KEY="$service" \
 CORE_INTERNAL_KEY="$internal" \
 REQUIRE_EDGE_AUTH=true PORT=8080 ARCHURA_ENV=dev \
 CONFIRM_URL_BASE="http://localhost:8787/confirm" \
-  go run ./cmd/server > /tmp/core-run.log 2>&1 &
+  go tool air -c "$core_dir/.air.toml" > /tmp/core-run.log 2>&1 &
 record_pid "$!"
 
 if wait_for http://localhost:8080/healthz 'core /healthz' 40; then
@@ -158,6 +160,21 @@ if wait_for http://localhost:8080/healthz 'core /healthz' 40; then
 else
   printf '%s\n' 'Core failed to start; see /tmp/core-run.log' >&2
   exit 1
+fi
+
+# --- Platform owner (adminctl reads PLATFORM_OWNER_EMAIL from the sourced .env) ---
+# Bootstraps the ops workspace and grants staff to that email. Non-fatal: on a
+# fresh DB the account won't exist until you sign up, so re-running dev-up (or
+# `adminctl bootstrap`) after signup grants it.
+if [ -n "${PLATFORM_OWNER_EMAIL:-}" ]; then
+  step "granting platform owner ($PLATFORM_OWNER_EMAIL)"
+  if ( cd "$core_dir" && DATABASE_URL="postgres://postgres@/archura?host=/tmp&port=$pgport" \
+      ARCHURA_ENV=dev PLATFORM_OWNER_EMAIL="$PLATFORM_OWNER_EMAIL" \
+      go run ./cmd/adminctl grant-staff > /tmp/archura-adminctl.log 2>&1 ); then
+    ok 'platform owner granted (visit /ops/)'
+  else
+    ok "owner not granted yet — sign up as $PLATFORM_OWNER_EMAIL, then re-run (see /tmp/archura-adminctl.log)"
+  fi
 fi
 
 # --- Worker (wrangler dev against the built app; the funnel lives here) ---

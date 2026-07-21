@@ -29,15 +29,24 @@ type Config struct {
 	StripeBasicPriceID  string // recurring $5 Basic price
 	BillingPublicOrigin string // Worker origin used for Checkout and portal returns
 	RequireEdgeAuth     bool   // optional in dev; always true in prod
+	AdminAPIEnabled     bool   // defaults on in dev and off in production
 }
 
 func Load() (Config, error) {
+	env := getenv("ARCHURA_ENV", "dev")
 	requireEdgeAuth, err := optionalBool("REQUIRE_EDGE_AUTH")
 	if err != nil {
 		return Config{}, err
 	}
+	adminAPIEnabled := env != "prod"
+	if os.Getenv("ADMIN_API_ENABLED") != "" {
+		adminAPIEnabled, err = optionalBool("ADMIN_API_ENABLED")
+		if err != nil {
+			return Config{}, err
+		}
+	}
 	cfg := Config{
-		Env:                 getenv("ARCHURA_ENV", "dev"),
+		Env:                 env,
 		Port:                getenv("PORT", "8080"),
 		MetricsPort:         getenv("METRICS_PORT", "9091"),
 		DatabaseURL:         os.Getenv("DATABASE_URL"),
@@ -53,6 +62,7 @@ func Load() (Config, error) {
 		StripeBasicPriceID:  os.Getenv("STRIPE_BASIC_PRICE_ID"),
 		BillingPublicOrigin: os.Getenv("BILLING_PUBLIC_ORIGIN"),
 		RequireEdgeAuth:     requireEdgeAuth,
+		AdminAPIEnabled:     adminAPIEnabled,
 	}
 	if cfg.Env == "prod" {
 		cfg.RequireEdgeAuth = true

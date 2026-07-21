@@ -269,6 +269,14 @@ func (s *Server) handleVerifyConfirmation(w http.ResponseWriter, r *http.Request
 		writeError(w, r, http.StatusConflict, "site_owned", "The site is already owned by another account.")
 		return
 	}
+	if errors.Is(err, store.ErrLimitReached) {
+		writeError(w, r, http.StatusConflict, "site_limit_reached", "This plan's site limit is reached. Upgrade to add more.")
+		return
+	}
+	if errors.Is(err, store.ErrReadOnly) {
+		writeError(w, r, http.StatusForbidden, "organization_read_only", "This organization is read-only.")
+		return
+	}
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -281,6 +289,7 @@ func (s *Server) handleVerifyConfirmation(w http.ResponseWriter, r *http.Request
 		"account": map[string]any{
 			"id": result.Account.ID, "email": result.Account.Email,
 			"email_verified_at": result.Account.EmailVerifiedAt,
+			"staff_role":        emptyAsNil(result.Account.StaffRole),
 		},
 		"organization": organizationResponse(store.AccountOrganization{
 			Organization: result.Organization, Role: "owner", IsDefault: true,
@@ -354,6 +363,7 @@ func (s *Server) handleSessionMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"account": map[string]any{
 			"id": account.ID, "email": account.Email, "email_verified_at": account.EmailVerifiedAt,
+			"staff_role": emptyAsNil(account.StaffRole),
 		},
 		"organizations": organizationBodies,
 		"invitations":   invitationBodies,
@@ -579,6 +589,14 @@ func (s *Server) handleBindSiteOwnership(w http.ResponseWriter, r *http.Request)
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, r, http.StatusNotFound, "organization_not_found", "The organization was not found.")
+		return
+	}
+	if errors.Is(err, store.ErrLimitReached) {
+		writeError(w, r, http.StatusConflict, "site_limit_reached", "This plan's site limit is reached. Upgrade to add more.")
+		return
+	}
+	if errors.Is(err, store.ErrReadOnly) {
+		writeError(w, r, http.StatusForbidden, "organization_read_only", "This organization is read-only.")
 		return
 	}
 	if err != nil {

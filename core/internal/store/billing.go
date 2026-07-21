@@ -48,14 +48,10 @@ func OrganizationEntitlementFor(billing OrganizationBilling, role string, now ti
 			entitlement.ServeGraceEndsAt = &graceEnd
 			return entitlement
 		}
-		entitlement.Status = "expired"
-		entitlement.CanEdit = false
-		entitlement.CanServe = false
 		if graceStartedAt != nil {
 			graceEnd := graceStartedAt.Add(ServingGracePeriod)
 			entitlement.ServeGraceEndsAt = &graceEnd
 		}
-		return entitlement
 	case "canceled":
 		if billing.CurrentPeriodEnd != nil && now.Before(*billing.CurrentPeriodEnd) {
 			entitlement.Status = "active"
@@ -73,13 +69,15 @@ func OrganizationEntitlementFor(billing OrganizationBilling, role string, now ti
 			entitlement.ServeGraceEndsAt = &graceEnd
 			return entitlement
 		}
-		entitlement.Status = "expired"
-		entitlement.CanEdit = false
-		entitlement.CanServe = false
 		if billing.CurrentPeriodEnd != nil {
 			graceEnd := billing.CurrentPeriodEnd.Add(ServingGracePeriod)
 			entitlement.ServeGraceEndsAt = &graceEnd
 		}
+	}
+	if billing.FreeNoExpiry {
+		entitlement.Status = "active"
+		entitlement.CanEdit = true
+		entitlement.CanServe = true
 		return entitlement
 	}
 
@@ -108,27 +106,20 @@ func (s *Store) BillingForOrganization(ctx context.Context, organizationID strin
 	billing := OrganizationBilling{OrganizationID: organizationID}
 	err := s.Pool.QueryRow(ctx, `
 		SELECT organization_id::text, trial_started_at, trial_ends_at, serve_grace_ends_at,
+			free_trial_days, free_design_limit, free_site_limit, free_no_expiry,
 			COALESCE(stripe_customer_id, ''), COALESCE(stripe_subscription_id, ''),
 			COALESCE(stripe_subscription_status, ''), current_period_end,
 			cancel_at_period_end, last_stripe_event_at, created_at, updated_at
 		FROM organization_billing
 		WHERE organization_id = $1::uuid`, organizationID).Scan(
 		&billing.OrganizationID, &billing.TrialStartedAt, &billing.TrialEndsAt,
-		&billing.ServeGraceEndsAt, &billing.StripeCustomerID, &billing.StripeSubscriptionID,
+		&billing.ServeGraceEndsAt, &billing.FreeTrialDays, &billing.FreeDesignLimit,
+		&billing.FreeSiteLimit, &billing.FreeNoExpiry, &billing.StripeCustomerID, &billing.StripeSubscriptionID,
 		&billing.StripeSubscriptionStatus, &billing.CurrentPeriodEnd,
 		&billing.CancelAtPeriodEnd, &billing.LastStripeEventAt, &billing.CreatedAt, &billing.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		var exists bool
-		if checkErr := s.Pool.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM organizations WHERE id = $1::uuid)`, organizationID,
-		).Scan(&exists); checkErr != nil {
-			return OrganizationBilling{}, fmt.Errorf("check billing organization: %w", checkErr)
-		}
-		if !exists {
-			return OrganizationBilling{}, ErrNotFound
-		}
-		return billing, nil
+		return OrganizationBilling{}, ErrNotFound
 	}
 	if err != nil {
 		return OrganizationBilling{}, fmt.Errorf("get organization billing: %w", err)
@@ -148,19 +139,29 @@ func (s *Store) StartOrganizationTrial(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	trialEndsAt := now.Add(TrialDuration)
+	var freeTrialDays int
+	if err := tx.QueryRow(ctx, `
+		SELECT free_trial_days
+		FROM organization_billing
+		WHERE organization_id = $1::uuid
+		FOR UPDATE`, organizationID).Scan(&freeTrialDays); err != nil {
+		return OrganizationBilling{}, mapStoreError("lock organization billing", err)
+	}
+	trialEndsAt := now.Add(time.Duration(freeTrialDays) * 24 * time.Hour)
+	if freeTrialDays == 0 {
+		// The existing billing CHECK requires trial_ends_at > trial_started_at.
+		// One microsecond preserves the configured zero-day behavior while keeping
+		// the factual start/end row valid.
+		trialEndsAt = now.Add(time.Microsecond)
+	}
 	graceEndsAt := trialEndsAt.Add(ServingGracePeriod)
 	result, err := tx.Exec(ctx, `
-		INSERT INTO organization_billing (
-			organization_id, trial_started_at, trial_ends_at, serve_grace_ends_at
-		)
-		VALUES ($1::uuid, $2, $3, $4)
-		ON CONFLICT (organization_id) DO UPDATE
-		SET trial_started_at = EXCLUDED.trial_started_at,
-			trial_ends_at = EXCLUDED.trial_ends_at,
-			serve_grace_ends_at = EXCLUDED.serve_grace_ends_at,
+		UPDATE organization_billing
+		SET trial_started_at = $2,
+			trial_ends_at = $3,
+			serve_grace_ends_at = $4,
 			updated_at = now()
-		WHERE organization_billing.trial_started_at IS NULL`,
+		WHERE organization_id = $1::uuid AND trial_started_at IS NULL`,
 		organizationID, now, trialEndsAt, graceEndsAt,
 	)
 	if err != nil {
@@ -182,14 +183,16 @@ func (s *Store) StartOrganizationTrial(
 }
 
 func (s *Store) SetStripeCustomer(ctx context.Context, organizationID, customerID string) error {
-	_, err := s.Pool.Exec(ctx, `
-		INSERT INTO organization_billing (organization_id, stripe_customer_id)
-		VALUES ($1::uuid, $2)
-		ON CONFLICT (organization_id) DO UPDATE
-		SET stripe_customer_id = COALESCE(organization_billing.stripe_customer_id, EXCLUDED.stripe_customer_id),
-			updated_at = now()`, organizationID, customerID)
+	result, err := s.Pool.Exec(ctx, `
+		UPDATE organization_billing
+		SET stripe_customer_id = COALESCE(stripe_customer_id, $2),
+			updated_at = now()
+		WHERE organization_id = $1::uuid`, organizationID, customerID)
 	if err != nil {
 		return fmt.Errorf("set stripe customer: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

@@ -515,9 +515,157 @@ async function handleModerationApi(request, env, url) {
   return json({ site, moderation });
 }
 
+// --- Platform operations console (staff-gated BFF → core /v1/admin/*) ---
+// The browser talks only to /api/ops/*; the Worker forwards to core's admin API
+// with the session bearer and lets core enforce the platform_owner check (401/
+// 403). Reads and free-plan PATCHes are pass-through; fork is orchestrated here
+// because the Worker owns R2 (Core owns rows). Never mutates customer content —
+// a fork only reads the source blob and writes a copy into the workspace.
+
+const opsPassthrough = (response) =>
+  new Response(response.body, {
+    status: response.status,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+  });
+
+// Which /api/ops/<rest> paths forward verbatim to /v1/admin/<rest>.
+function opsForwardAllowed(method, rest) {
+  if (method === 'GET') {
+    return (
+      rest === 'organizations' ||
+      /^organizations\/[^/]+$/.test(rest) ||
+      /^organizations\/[^/]+\/(designs|members)$/.test(rest) ||
+      rest === 'forks' ||
+      rest === 'default-plan'
+    );
+  }
+  if (method === 'PATCH') {
+    return rest === 'default-plan' || /^organizations\/[^/]+\/free-plan$/.test(rest);
+  }
+  return false;
+}
+
+async function handleOpsApi(request, env, url) {
+  const sessionToken = sessionTokenFromRequest(request);
+  if (!sessionToken || !coreConfigured(env)) return json({ error: 'Unauthorized' }, 401);
+  const rest = url.pathname.slice('/api/ops/'.length);
+
+  // POST /api/ops/forks — the one orchestrated flow (create row → copy blob → finalize).
+  if (rest === 'forks' && request.method === 'POST') {
+    return handleOpsFork(request, env, sessionToken);
+  }
+
+  // GET /api/ops/designs/:id — core record enriched with R2 artifact presence.
+  const designMatch = rest.match(/^designs\/([^/]+)$/);
+  if (designMatch && request.method === 'GET') {
+    const response = await coreRequest(env, `/v1/admin/designs/${encodeURIComponent(designMatch[1])}`, {
+      bearer: sessionToken,
+    });
+    if (!response.ok) return opsPassthrough(response);
+    const record = await response.json();
+    return json({ ...record, artifacts: await designArtifactPresence(env, record) });
+  }
+
+  // Everything else on the allowlist: gate-then-forward verbatim (core enforces staff).
+  if (!opsForwardAllowed(request.method, rest)) return json({ error: 'Not found' }, 404);
+  let body;
+  if (request.method === 'PATCH') {
+    try {
+      body = await readBoundedJSON(request);
+    } catch {
+      return json({ error: 'Invalid body' }, 400);
+    }
+  }
+  return opsPassthrough(
+    await coreRequest(env, `/v1/admin/${rest}${url.search}`, { method: request.method, bearer: sessionToken, body })
+  );
+}
+
+// Orchestrate a fork: core mints the row + gates staff; the Worker copies the
+// source design's artifact into the workspace namespace, then finalizes. Core's
+// fork create returns the fork's design record: id (the fork), organization_id
+// (the workspace), forked_from (source design), source_org_id, and component_path
+// (copied from the source, used as template_ref when there is no stored artifact).
+async function handleOpsFork(request, env, sessionToken) {
+  let input;
+  try {
+    input = await readBoundedJSON(request);
+  } catch {
+    return json({ error: 'Invalid body' }, 400);
+  }
+  const sourceDesignId = input.source_design_id;
+  if (!DESIGN_ID.test(sourceDesignId ?? '')) return json({ error: 'Bad request' }, 400);
+
+  // 1. Core creates the pending fork row (and 403s if the caller isn't staff, so
+  //    the source blob below is only ever read for a platform owner).
+  const created = await coreRequest(env, '/v1/admin/forks', {
+    method: 'POST',
+    bearer: sessionToken,
+    body: { source_design_id: sourceDesignId, idempotency_key: crypto.randomUUID() },
+  });
+  if (!created.ok) return opsPassthrough(created);
+  const fork = await created.json();
+  const forkId = fork.id;
+  const workspaceOrgId = fork.organization_id;
+  const sourceOrgId = fork.source_org_id;
+  const forkedFrom = fork.forked_from;
+
+  const finalize = (finBody) =>
+    coreRequest(env, `/v1/admin/forks/${encodeURIComponent(forkId)}/finalize`, {
+      method: 'POST',
+      bearer: sessionToken,
+      body: finBody,
+    }).then((r) => (r.ok ? r : Promise.reject(r)));
+
+  try {
+    // 2. Read the source design's canonical artifact.
+    const source = await env.ARTIFACTS.get(`orgs/${sourceOrgId}/designs/${forkedFrom}/artifact.json`);
+    let finBody;
+    if (source) {
+      // 3. Copy it into the workspace namespace (never touch the source).
+      const bytes = await source.arrayBuffer();
+      await env.ARTIFACTS.put(`orgs/${workspaceOrgId}/designs/${forkId}/artifact.json`, bytes, {
+        httpMetadata: { contentType: 'application/json' },
+      });
+      finBody = { status: 'ready', source_artifact_kind: 'published', source_etag: source.etag ?? source.httpEtag ?? null };
+    } else {
+      // No stored artifact → the fork starts from the component template.
+      finBody = { status: 'ready', source_artifact_kind: 'template', template_ref: fork.component_path ?? null };
+    }
+    // 4. Finalize ready.
+    await finalize(finBody);
+    return json({ fork_design_id: forkId, workspace_org_id: workspaceOrgId }, 201);
+  } catch (error) {
+    // A core finalize rejection (Response) passes through; a copy error → 502.
+    if (error instanceof Response) return opsPassthrough(error);
+    await coreRequest(env, `/v1/admin/forks/${encodeURIComponent(forkId)}/finalize`, {
+      method: 'POST',
+      bearer: sessionToken,
+      body: { status: 'failed' },
+    }).catch(() => {});
+    return json({ error: 'Fork copy failed' }, 502);
+  }
+}
+
+// Report which R2 artifact blobs a design has, so the read can show live/draft.
+async function designArtifactPresence(env, record) {
+  const orgId = record.organization_id ?? record.source_org_id;
+  const designId = record.id ?? record.design_id;
+  if (!orgId || !designId) return { published: false, draft: false };
+  const base = `orgs/${orgId}/designs/${designId}`;
+  const [published, draft] = await Promise.all([
+    env.ARTIFACTS.get(`${base}/artifact.json`),
+    env.ARTIFACTS.get(`${base}/artifact.draft.json`),
+  ]);
+  return { published: published != null, draft: draft != null };
+}
+
 async function serveApi(request, env, url) {
   if (url.pathname.startsWith('/api/core/')) {
     return proxyCore(request, env, url);
+  }
+  if (url.pathname.startsWith('/api/ops/')) {
+    return handleOpsApi(request, env, url);
   }
   if (url.pathname.startsWith('/api/moderation/')) {
     return handleModerationApi(request, env, url);
@@ -578,6 +726,12 @@ async function serveApi(request, env, url) {
       });
       if (bind.status === 409) {
         await env.ARTIFACTS.delete(metaKey);
+        // Preserve the plan-limit signal so the client can prompt an upgrade
+        // rather than showing a generic "name taken" conflict.
+        const detail = await bind.json().catch(() => null);
+        if (detail?.error?.code === 'site_limit_reached') {
+          return json({ error: { code: 'site_limit_reached', message: detail.error.message ?? 'Site limit reached.' } }, 409);
+        }
         return json({ error: 'Site owned' }, 409);
       }
       if (!bind.ok) {

@@ -25,6 +25,8 @@ const SUITES = [
   'verify-deploy',
   'verify-client-styling',
   'verify-funnel',
+  'verify-ops-fork',
+  'verify-ops-panel',
 ];
 
 const startServer = (args) =>

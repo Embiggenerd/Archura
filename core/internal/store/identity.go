@@ -14,6 +14,8 @@ var (
 	ErrAlreadyMember = errors.New("account is already an organization member")
 	ErrNotFound      = errors.New("store record not found")
 	ErrLimitReached  = errors.New("plan limit reached")
+	ErrReadOnly      = errors.New("organization is read-only")
+	ErrInvalidState  = errors.New("invalid state transition")
 )
 
 func (s *Store) CreateOrganization(ctx context.Context, p CreateOrganizationParams, audit AuditEvent) (Organization, error) {
@@ -23,23 +25,9 @@ func (s *Store) CreateOrganization(ctx context.Context, p CreateOrganizationPara
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var organization Organization
-	err = tx.QueryRow(ctx, `
-		INSERT INTO organizations (name, slug, allowed_origins, edge_claim_token)
-		VALUES ($1, $2, $3, NULLIF($4, ''))
-		RETURNING id::text, name, slug, allowed_origins, status, created_at`,
-		p.Name, p.Slug, p.AllowedOrigins, p.EdgeClaimToken,
-	).Scan(&organization.ID, &organization.Name, &organization.Slug, &organization.AllowedOrigins, &organization.Status, &organization.CreatedAt)
+	organization, err := insertOrganization(ctx, tx, p)
 	if err != nil {
-		return Organization{}, mapStoreError("insert organization", err)
-	}
-
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO organization_api_keys (organization_id, publishable_key, secret_key_hash)
-		VALUES ($1::uuid, $2, $3)`,
-		organization.ID, p.PublishableKey, p.SecretKeyHash,
-	); err != nil {
-		return Organization{}, mapStoreError("insert organization keys", err)
+		return Organization{}, err
 	}
 	audit.OrganizationID = organization.ID
 	audit.ResourceID = organization.ID

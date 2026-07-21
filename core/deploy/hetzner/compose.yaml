@@ -36,6 +36,7 @@ services:
       CLOUDFLARE_EMAIL_ACCOUNT_ID: ${CLOUDFLARE_EMAIL_ACCOUNT_ID:?Set CLOUDFLARE_EMAIL_ACCOUNT_ID in .env}
       CLOUDFLARE_EMAIL_API_TOKEN: ${CLOUDFLARE_EMAIL_API_TOKEN:?Set CLOUDFLARE_EMAIL_API_TOKEN in .env}
       EMAIL_FROM: ${EMAIL_FROM:?Set EMAIL_FROM in .env}
+      ADMIN_API_ENABLED: ${ADMIN_API_ENABLED:-false}
       # Stripe billing (test or live). Optional as a group: leave all four
       # unset to run with billing disabled; set all four to enable it. `:-`
       # (not `:?`) so their absence does not block core from starting.

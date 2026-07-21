@@ -11,13 +11,14 @@ func TestDevelopmentDefaultsAllowScaffoldMode(t *testing.T) {
 	t.Setenv("PLATFORM_ADMIN_KEY", "")
 	t.Setenv("CORE_SERVICE_KEY", "")
 	t.Setenv("REQUIRE_EDGE_AUTH", "")
+	t.Setenv("ADMIN_API_ENABLED", "")
 	t.Setenv("CONFIRM_URL_BASE", "http://localhost:8787/confirm")
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Env != "dev" || cfg.RequireEdgeAuth || cfg.ConfirmURLBase != "http://localhost:8787/confirm" {
+	if cfg.Env != "dev" || cfg.RequireEdgeAuth || !cfg.AdminAPIEnabled || cfg.ConfirmURLBase != "http://localhost:8787/confirm" {
 		t.Fatalf("unexpected development defaults: %+v", cfg)
 	}
 }
@@ -57,6 +58,7 @@ func TestProductionForcesEdgeAuthAndRequiredValues(t *testing.T) {
 	t.Setenv("CLOUDFLARE_EMAIL_ACCOUNT_ID", "account-id")
 	t.Setenv("CLOUDFLARE_EMAIL_API_TOKEN", "email-token")
 	t.Setenv("EMAIL_FROM", "hello@archura.ai")
+	t.Setenv("ADMIN_API_ENABLED", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -64,6 +66,9 @@ func TestProductionForcesEdgeAuthAndRequiredValues(t *testing.T) {
 	}
 	if !cfg.RequireEdgeAuth {
 		t.Fatal("production must force edge authentication")
+	}
+	if cfg.AdminAPIEnabled {
+		t.Fatal("production must default the admin API off")
 	}
 }
 

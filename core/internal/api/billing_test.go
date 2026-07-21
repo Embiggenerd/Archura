@@ -93,6 +93,22 @@ func TestOrganizationEntitlementLifecycle(t *testing.T) {
 	if canceledGrace.Status != "grace" || canceledGrace.CanEdit || !canceledGrace.CanServe {
 		t.Fatalf("canceled grace entitlement = %+v", canceledGrace)
 	}
+	billing.FreeNoExpiry = true
+	canceledToFree := store.OrganizationEntitlementFor(billing, "owner", periodEnd.Add(2*store.ServingGracePeriod))
+	if canceledToFree.Status != "active" || !canceledToFree.CanEdit || !canceledToFree.CanServe {
+		t.Fatalf("canceled-to-free entitlement = %+v", canceledToFree)
+	}
+}
+
+func TestFreeNoExpiryKeepsOrganizationEditableAndServing(t *testing.T) {
+	now := time.Now().UTC()
+	past := now.Add(-time.Hour)
+	entitlement := store.OrganizationEntitlementFor(store.OrganizationBilling{
+		TrialEndsAt: &past, ServeGraceEndsAt: &past, FreeNoExpiry: true,
+	}, "owner", now)
+	if entitlement.Status != "active" || !entitlement.CanEdit || !entitlement.CanServe {
+		t.Fatalf("free-no-expiry entitlement = %+v", entitlement)
+	}
 }
 
 func TestTrialStartsAfterCustomerWasCreated(t *testing.T) {

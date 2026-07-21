@@ -16,6 +16,7 @@ primary_region = "sjc"
   CONFIRM_URL_BASE = "https://archura.ai/confirm"
   CLOUDFLARE_EMAIL_ACCOUNT_ID = "replace-with-cloudflare-account-id"
   EMAIL_FROM = "hello@archura.ai"
+  ADMIN_API_ENABLED = "false"
 
 [metrics]
   port = 9091

@@ -48,12 +48,21 @@ func auditMetadata(event AuditEvent) ([]byte, error) {
 		if _, ok := event.Metadata.(ComponentSessionAuditMetadata); !ok {
 			return nil, errors.New("component_session.created requires ComponentSessionAuditMetadata")
 		}
+	case "admin.fork_created", "admin.fork_finalized":
+		if _, ok := event.Metadata.(ForkAuditMetadata); !ok {
+			return nil, fmt.Errorf("%s requires ForkAuditMetadata", event.Action)
+		}
+	case "admin.default_plan_updated", "admin.organization_plan_updated":
+		if _, ok := event.Metadata.(FreePlanAuditMetadata); !ok {
+			return nil, fmt.Errorf("%s requires FreePlanAuditMetadata", event.Action)
+		}
 	case "confirmation.created", "confirmation.verified", "confirmation.verify_rejected",
 		"account.created", "session.created", "site_ownership.bound", "site_ownership.rejected",
 		"site_ownership.released", "billing.trial_started", "billing.checkout_created",
 		"billing.portal_created", "billing.subscription_updated", "billing.payment_failed",
 		"membership.created", "invitation.created", "invitation.accepted", "invitation.declined",
-		"invitation.revoked":
+		"invitation.revoked", "design.created", "design.deleted",
+		"admin.staff_granted", "admin.staff_revoked":
 		if _, ok := event.Metadata.(EmptyAuditMetadata); !ok {
 			return nil, fmt.Errorf("%s requires EmptyAuditMetadata", event.Action)
 		}

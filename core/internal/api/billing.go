@@ -488,7 +488,14 @@ func (s *Server) accountOrganization(w http.ResponseWriter, r *http.Request, own
 }
 
 func billingResponse(billing store.OrganizationBilling, role string, now time.Time) map[string]any {
-	return entitlementResponse(store.OrganizationEntitlementFor(billing, role, now))
+	response := entitlementResponse(store.OrganizationEntitlementFor(billing, role, now))
+	// The organization's own free-plan terms, so the dashboard can render them
+	// (they are per-org and editable by a platform owner) instead of hardcoding.
+	response["free_trial_days"] = billing.FreeTrialDays
+	response["free_design_limit"] = billing.FreeDesignLimit
+	response["free_site_limit"] = billing.FreeSiteLimit
+	response["free_no_expiry"] = billing.FreeNoExpiry
+	return response
 }
 
 func entitlementResponse(entitlement store.OrganizationEntitlement) map[string]any {
