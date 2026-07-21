@@ -36,13 +36,19 @@ type billingCustomerInput struct {
 	Email          string
 }
 
+// The Basic plan's card-captured free trial: Stripe holds the card and does
+// not charge until this many days elapse, and (for trials > 7 days) sends the
+// compliant pre-charge reminder itself when customer emails are enabled.
+const basicTrialDays = 14
+
 type billingCheckoutInput struct {
-	OrganizationID string
-	CustomerID     string
-	PriceID        string
-	SuccessURL     string
-	CancelURL      string
-	IdempotencyKey string
+	OrganizationID  string
+	CustomerID      string
+	PriceID         string
+	SuccessURL      string
+	CancelURL       string
+	IdempotencyKey  string
+	TrialPeriodDays int64
 }
 
 type billingWebhook struct {
@@ -100,6 +106,9 @@ func (p *stripeBillingProvider) CreateCheckout(ctx context.Context, input billin
 		SubscriptionData: &stripe.CheckoutSessionCreateSubscriptionDataParams{
 			Metadata: map[string]string{"organization_id": input.OrganizationID},
 		},
+	}
+	if input.TrialPeriodDays > 0 {
+		params.SubscriptionData.TrialPeriodDays = stripe.Int64(input.TrialPeriodDays)
 	}
 	params.SetIdempotencyKey(input.IdempotencyKey)
 	session, err := p.client.V1CheckoutSessions.Create(ctx, params)
@@ -311,9 +320,10 @@ func (s *Server) handleBillingCheckout(w http.ResponseWriter, r *http.Request) {
 	hour := s.now().UTC().Truncate(time.Hour).Format("2006010215")
 	checkoutURL, err := s.billing.CreateCheckout(r.Context(), billingCheckoutInput{
 		OrganizationID: organization.ID, CustomerID: customerID, PriceID: s.cfg.StripeBasicPriceID,
-		SuccessURL:     origin + "/dashboard/?organization=" + url.QueryEscape(organization.ID) + "&billing=processing",
-		CancelURL:      origin + "/dashboard/?organization=" + url.QueryEscape(organization.ID) + "&billing=canceled",
-		IdempotencyKey: "archura-checkout-" + organization.ID + "-" + hour,
+		SuccessURL:      origin + "/dashboard/?organization=" + url.QueryEscape(organization.ID) + "&billing=processing",
+		CancelURL:       origin + "/dashboard/?organization=" + url.QueryEscape(organization.ID) + "&billing=canceled",
+		IdempotencyKey:  "archura-checkout-" + organization.ID + "-" + hour,
+		TrialPeriodDays: basicTrialDays,
 	})
 	if err != nil {
 		s.internalError(w, r, err)
@@ -487,5 +497,6 @@ func entitlementResponse(entitlement store.OrganizationEntitlement) map[string]a
 		"can_manage_billing": entitlement.CanManageBilling, "trial_ends_at": entitlement.TrialEndsAt,
 		"serve_grace_ends_at": entitlement.ServeGraceEndsAt, "current_period_end": entitlement.CurrentPeriodEnd,
 		"cancel_at_period_end": entitlement.CancelAtPeriodEnd,
+		"subscription_status":  entitlement.SubscriptionStatus,
 	}
 }

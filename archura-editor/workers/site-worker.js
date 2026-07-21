@@ -16,6 +16,10 @@
 
 const RESERVED = new Set(['www', 'api', 'app', 'editor', 'assets', 'components', 'embed', 's']);
 const SITE_NAME = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
+// A design: a top-level embeddable artifact owned by an organization, stored
+// under orgs/<orgId>/designs/<designId>/ independent of any subdomain.
+const DESIGN_ID = /^dsn_[a-f0-9]{24,}$/;
+const ORG_ID = /^[0-9a-fA-F][0-9a-fA-F-]{7,}$/;
 const SITE_ID = /^site_[a-f0-9]{32}$/;
 const PUBLISHABLE_KEY = /^pk_(?:test|live)_[A-Za-z0-9_-]{20,}$/;
 const CUSTOM_ELEMENT_NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/;
@@ -270,6 +274,14 @@ async function sessionAccount(request, env) {
   const response = await coreRequest(env, '/v1/sessions/me', { bearer: token });
   if (!response.ok) return null;
   return response.json();
+}
+
+// Resolve the request's session to the given organization IF the account is a
+// member. Returns the org view (from /api/me) or null. Design storage is
+// org-scoped, so every design route gates on membership.
+async function sessionOrganization(request, env, organizationId) {
+  const session = await sessionAccount(request, env);
+  return session?.organizations?.find((org) => org.id === organizationId) ?? null;
 }
 
 async function organizationEntitlement(env, organizationId, { fresh = false } = {}) {
@@ -857,6 +869,93 @@ async function serveApi(request, env, url) {
     }
   }
 
+  // --- Designs (Phase 3a): org-scoped, session-authed, subdomain-independent.
+  // Additive — the site routes below are unchanged. Storage:
+  // orgs/<orgId>/designs/<designId>/{meta.json,artifact.json,embed/<name>}.
+
+  // Create + list are core-authoritative: core owns the design row (identity +
+  // metadata) and enforces the plan cap; R2 holds only the artifact/embed
+  // blobs (below). The Worker proxies these with the session bearer.
+  const designCollectionMatch = url.pathname.match(/^\/api\/orgs\/([^/]+)\/designs$/);
+  if (designCollectionMatch) {
+    const orgId = designCollectionMatch[1];
+    if (!ORG_ID.test(orgId)) return json({ error: 'Bad request' }, 400);
+    const sessionToken = sessionTokenFromRequest(request);
+    if (!sessionToken || !coreConfigured(env)) return json({ error: 'Unauthorized' }, 401);
+    const passthrough = (response) =>
+      new Response(response.body, {
+        status: response.status,
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      });
+
+    if (request.method === 'GET') {
+      return passthrough(await coreRequest(env, `/v1/organizations/${encodeURIComponent(orgId)}/designs`, { bearer: sessionToken }));
+    }
+    if (request.method === 'POST') {
+      let input = {};
+      try {
+        input = await readBoundedJSON(request);
+      } catch {
+        return json({ error: 'Invalid body' }, 400);
+      }
+      const componentPath = Array.isArray(input.componentPath) ? input.componentPath.join('/') : input.componentPath;
+      return passthrough(await coreRequest(env, `/v1/organizations/${encodeURIComponent(orgId)}/designs`, {
+        method: 'POST', bearer: sessionToken,
+        body: { name: input.name, component_path: componentPath },
+      }));
+    }
+  }
+
+  // Load/save a design's artifact (autosave) and store its embed modules.
+  const designResourceMatch = url.pathname.match(/^\/api\/orgs\/([^/]+)\/designs\/([^/]+)\/(artifact|embed\/[^/]+)$/);
+  if (designResourceMatch) {
+    const [, orgId, designId, resource] = designResourceMatch;
+    if (!ORG_ID.test(orgId) || !DESIGN_ID.test(designId)) return json({ error: 'Bad request' }, 400);
+    const org = await sessionOrganization(request, env, orgId);
+    if (!org) return json({ error: 'Unauthorized' }, 401);
+    const base = `orgs/${orgId}/designs/${designId}`;
+
+    if (resource === 'artifact') {
+      const key = `${base}/artifact.json`;
+      if (request.method === 'GET') {
+        const object = await env.ARTIFACTS.get(key);
+        if (!object) return json({ error: 'Not found' }, 404);
+        return new Response(object.body, { headers: { 'Content-Type': 'application/json' } });
+      }
+      if (request.method === 'PUT') {
+        const limited = await rateLimitRequest(request, env, 'design-autosave');
+        if (limited) return limited;
+        let body;
+        try {
+          body = await readBoundedBody(request, JSON_BODY_LIMIT);
+        } catch (error) {
+          if (error instanceof RangeError) return json({ error: 'Artifact too large' }, 413);
+          return json({ error: 'Invalid artifact' }, 400);
+        }
+        await env.ARTIFACTS.put(key, body, { httpMetadata: { contentType: 'application/json' } });
+        return new Response(null, { status: 204 });
+      }
+    }
+
+    if (resource.startsWith('embed/') && request.method === 'PUT') {
+      const name = decodeURIComponent(resource.slice('embed/'.length));
+      if (!EMBED_NAME.test(name)) return json({ error: 'Bad request' }, 400);
+      const limited = await rateLimitRequest(request, env, 'design-autosave');
+      if (limited) return limited;
+      let body;
+      try {
+        body = await readBoundedBody(request, EMBED_BODY_LIMIT);
+      } catch (error) {
+        if (error instanceof RangeError) return json({ error: 'Embed too large' }, 413);
+        return json({ error: 'Invalid body' }, 400);
+      }
+      await env.ARTIFACTS.put(`${base}/embed/${name}`, body, {
+        httpMetadata: { contentType: 'text/javascript; charset=utf-8' },
+      });
+      return new Response(null, { status: 204 });
+    }
+  }
+
   const artifactMatch = url.pathname.match(/^\/api\/artifacts\/([^/]+)\/(.+)$/);
   if (artifactMatch) {
     const [, site, artifactPath] = artifactMatch;
@@ -895,6 +994,13 @@ async function serveApi(request, env, url) {
       }
       await env.ARTIFACTS.put(key, body, { httpMetadata: { contentType: 'application/json' } });
       await recordModerationResult(env, site, artifact);
+      return new Response(null, { status: 204 });
+    }
+
+    if (request.method === 'DELETE') {
+      const denied = await requireClaimToken(request, env, site);
+      if (denied) return denied;
+      await env.ARTIFACTS.delete(key);
       return new Response(null, { status: 204 });
     }
   }

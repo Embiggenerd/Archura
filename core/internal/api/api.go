@@ -46,6 +46,9 @@ type repository interface {
 	RecordAudit(context.Context, store.AuditEvent) error
 	ConsumeRateLimit(context.Context, string, string, int, time.Duration) (store.RateLimitResult, error)
 	BillingForOrganization(context.Context, string) (store.OrganizationBilling, error)
+	CreateDesign(context.Context, string, string, string, int, store.AuditEvent) (store.Design, error)
+	DesignsForOrganization(context.Context, string) ([]store.Design, error)
+	DesignForOrganization(context.Context, string, string) (store.Design, error)
 	StartOrganizationTrial(context.Context, string, time.Time, store.AuditEvent) (store.OrganizationBilling, error)
 	SetStripeCustomer(context.Context, string, string) error
 	UpdateStripeSubscription(context.Context, store.StripeSubscriptionUpdate, store.AuditEvent) error
@@ -123,6 +126,9 @@ func (s *Server) Router() http.Handler {
 		r.Post("/organizations/{organizationID}/billing/checkout", s.handleBillingCheckout)
 		r.Post("/organizations/{organizationID}/billing/portal", s.handleBillingPortal)
 		r.Delete("/organizations/{organizationID}/sites/{subdomain}", s.handleReleaseOrganizationSite)
+		r.Post("/organizations/{organizationID}/designs", s.handleCreateDesign)
+		r.Get("/organizations/{organizationID}/designs", s.handleListDesigns)
+		r.Get("/organizations/{organizationID}/designs/{designID}", s.handleGetDesign)
 		r.Post("/invitations/{invitationID}/accept", s.handleAcceptInvitation)
 		r.Post("/invitations/{invitationID}/decline", s.handleDeclineInvitation)
 		r.Post("/site-ownership", s.handleBindSiteOwnership)

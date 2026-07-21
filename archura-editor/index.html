@@ -132,6 +132,7 @@
           </div>
           <div class="viz-row">
             <a class="btn btn-ghost" href="/account/">Sign in</a>
+            <button type="button" class="btn" data-register>Register</button>
             <button type="button" class="btn btn-primary" data-start>Start building</button>
           </div>
         </nav>
@@ -230,7 +231,7 @@
         <script type="module">
           import './src/index.ts';
           import { defaultComponents } from './src/components/index.ts';
-          import { showDeployModal } from './edit/funnel-ui.js';
+          import { showDeployModal, showRegisterModal } from './edit/funnel-ui.js';
 
           const root = document.getElementById('archura-frontpage-editor');
           const editorSection = root.querySelector('#editor');
@@ -270,6 +271,7 @@
 
           // The real funnel: same deploy modal as the editor page
           root.querySelector('[data-deploy]').addEventListener('click', () => showDeployModal(editorEl, components));
+          root.querySelector('[data-register]').addEventListener('click', () => showRegisterModal());
         </script>
 
         <style>

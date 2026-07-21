@@ -12,9 +12,10 @@ import type {
   ArchuraEditorConfig,
   ArchuraEditorState,
   ArchuraPageMeta,
-  ArchuraPersistenceAdapter,
+  ArchuraStore,
   ArchuraRenderable,
 } from './types.js';
+import { artifactKey, draftKey, embedKey } from './store-keys.js';
 
 type ArchuraTrait = {
   type: string;
@@ -194,6 +195,11 @@ export class ArchuraEditorController {
   #components: ArchuraComponentDefinition[];
   #definition: ArchuraComponentDefinition | null = null;
   #dirty = false;
+  // Draft/published lifecycle (Sanity-style): a draft blob exists only while
+  // there are unpublished changes. These mirror what's in the store, so the
+  // content state is derived, not an ephemeral flag — it survives reload.
+  #draftExists = false;
+  #publishedExists = false;
   #stylePartsByTag = new Map<string, ArchuraStyleParts>();
   #activePart: { component: Component; part: string } | null = null;
   #breakpoints: ArchuraBreakpoint[];
@@ -252,18 +258,31 @@ export class ArchuraEditorController {
     container.replaceChildren(element);
   }
 
-  save(): Promise<CanonicalComponentData[]> {
-    this.#artifacts = [this.#createCurrentArtifact()];
+  // Save persists the working source to the draft key without touching what is
+  // served. Publish promotes it. So content is saved without being published.
+  async save(): Promise<CanonicalComponentData[]> {
+    const artifact = this.#createCurrentArtifact();
+    this.#artifacts = [artifact];
+    const store = this.#config.persistence;
+    if (store) {
+      await store.put(draftKey(artifact.config.componentPath), JSON.stringify(artifact));
+      this.#draftExists = true;
+    }
     this.#dirty = false;
     this.#config.onSave?.({ artifacts: this.#artifacts });
     this.#config.onChange?.(this.#artifacts);
     this.#notify();
-
-    return Promise.resolve(this.#artifacts);
+    return this.#artifacts;
   }
 
   get dirty(): boolean {
     return this.#dirty;
+  }
+
+  /** Derived publish state (a pure function of what's in the store). */
+  get contentState(): 'empty' | 'draft' | 'changed' | 'published' {
+    if (this.#draftExists) return this.#publishedExists ? 'changed' : 'draft';
+    return this.#publishedExists ? 'published' : 'empty';
   }
 
   #markDirty(): void {
@@ -552,37 +571,43 @@ export class ArchuraEditorController {
     return !!this.#config.persistence;
   }
 
+  // Publish promotes the saved draft to the served artifact + module, then
+  // removes the draft — so "unpublished changes exist" == "a draft exists".
+  // It publishes what was saved, not unsaved buffer edits.
   async publish(): Promise<CanonicalComponentData[]> {
-    const persistence = this.#config.persistence;
-    if (!persistence) {
-      throw new Error('No persistence adapter configured.');
+    const store = this.#config.persistence;
+    if (!store) {
+      throw new Error('No persistence store configured.');
     }
 
-    const artifact = this.#createCurrentArtifact();
+    const artifact = this.#artifacts[0] ?? this.#createCurrentArtifact();
+    const path = artifact.config.componentPath;
     try {
-      await persistence.publish(artifact);
-      await this.#publishEmbeds(persistence, artifact);
+      await store.put(artifactKey(path), JSON.stringify(artifact));
+      await this.#publishEmbeds(store, artifact);
+      if (store.delete) await store.delete(draftKey(path));
     } catch (error) {
       this.#config.onError?.(error);
       throw error;
     }
 
     this.#artifacts = [artifact];
-    this.#dirty = false;
+    this.#publishedExists = true;
+    if (store.delete) this.#draftExists = false;
     this.#config.onSave?.({ artifacts: this.#artifacts, published: true });
     this.#config.onChange?.(this.#artifacts);
     this.#notify();
     return [...this.#artifacts];
   }
 
-  // Per-client embed modules, one per component instance. Skipped for
-  // adapters without namespace support.
-  async #publishEmbeds(persistence: ArchuraPersistenceAdapter, artifact: CanonicalComponentData): Promise<void> {
-    if (!persistence.publishEmbed) return;
+  // Per-client embed modules, one per component instance, written as ordinary
+  // keys — the store just persists bytes. buildEmbedModules returns [] when
+  // there is nothing to embed, so this self-limits with no capability gate.
+  async #publishEmbeds(store: ArchuraStore, artifact: CanonicalComponentData): Promise<void> {
     // Foreign-origin pages need absolute import URLs for the shared modules
     const modules = buildEmbedModules(artifact, this.#components, globalThis.location?.href ?? '');
     for (const module of modules) {
-      await persistence.publishEmbed(module.name, module.source);
+      await store.put(embedKey(module.name), module.source);
     }
   }
 
@@ -1132,7 +1157,15 @@ export class ArchuraEditorController {
     if (!this.#hasSnapshot && this.#config.persistence) {
       try {
         const target = this.getTarget();
-        const artifact = target ? await this.#config.persistence.load(target) : null;
+        const store = this.#config.persistence;
+        // Open the draft over the published; their presence derives the state.
+        const [draftRaw, publishedRaw] = target
+          ? await Promise.all([store.get(draftKey(target.path)), store.get(artifactKey(target.path))])
+          : [null, null];
+        this.#draftExists = draftRaw != null;
+        this.#publishedExists = publishedRaw != null;
+        const raw = draftRaw ?? publishedRaw;
+        const artifact = raw ? (JSON.parse(raw) as CanonicalComponentData) : null;
         if (artifact) {
           this.#state = {
             componentPath: [...artifact.config.componentPath],

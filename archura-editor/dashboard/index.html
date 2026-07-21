@@ -58,6 +58,18 @@
       .billing-dot.good { background: #16a34a; }
       .billing-dot.warn { background: #d97706; }
       .billing-dot.bad { background: #dc2626; }
+      .plans { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0; }
+      .plan { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 14px; }
+      .plan.current { border-color: #4f46e5; background: #eef2ff; }
+      .plan-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 2px; }
+      .plan-name { font-weight: 700; font-size: 0.95rem; color: #111827; }
+      .plan-badge {
+        font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+        color: #4f46e5; background: white; border: 1px solid #c7d2fe; border-radius: 999px; padding: 2px 7px;
+      }
+      .plan-price { font-size: 0.8rem; color: #6b7280; margin-bottom: 8px; }
+      .plan-limits { margin: 0; padding-left: 16px; color: #374151; font-size: 0.82rem; }
+      .plan-limits li { margin: 2px 0; }
     </style>
   </head>
   <body>
@@ -79,22 +91,42 @@
         ? Math.max(0, Math.ceil((new Date(value).getTime() - Date.now()) / 86400000))
         : null;
 
+      const onDate = (value) => (value ? ` on ${new Date(value).toLocaleDateString()}` : '');
+
+      // Two plans: Free (our own 2-day, no-card tier) and Basic ($5/mo with a
+      // 14-day free trial). The entitlement flattens the Basic trial into
+      // status 'active', so subscription_status tells the trial from a paid sub.
       function billingCopy(billing) {
         if (!billing) return { tone: 'bad', title: 'Billing unavailable', detail: 'Try again shortly.' };
         if (billing.status === 'active') {
-          return { tone: 'good', title: billing.cancel_at_period_end ? 'Active until period end' : 'Active subscription', detail: billing.current_period_end ? `Current period ends ${new Date(billing.current_period_end).toLocaleDateString()}.` : 'All sites are included.' };
+          if (billing.subscription_status === 'trialing') {
+            const days = daysRemaining(billing.current_period_end);
+            return {
+              tone: 'good',
+              title: days != null ? `Basic trial — ${days} day${days === 1 ? '' : 's'} left` : 'Basic trial',
+              detail: `Your card won't be charged until the trial ends${onDate(billing.current_period_end)}. After that it's $5/month for every site in this organization.`,
+            };
+          }
+          if (billing.cancel_at_period_end) {
+            return { tone: 'warn', title: 'Basic — canceling', detail: `Your plan stays active until it ends${onDate(billing.current_period_end)}; it won't renew.` };
+          }
+          return { tone: 'good', title: 'Basic plan — active', detail: `$5/month covers every site in this organization.${billing.current_period_end ? ` Renews${onDate(billing.current_period_end)}.` : ''}` };
         }
         if (billing.status === 'trialing') {
           const days = daysRemaining(billing.trial_ends_at);
-          return { tone: 'good', title: `${days} trial day${days === 1 ? '' : 's'} left`, detail: 'Editing, publishing, hosted pages, and embeds are included.' };
+          return {
+            tone: days != null && days <= 1 ? 'warn' : 'good',
+            title: days != null ? `Free plan — ${days} day${days === 1 ? '' : 's'} left` : 'Free plan',
+            detail: 'The Free plan includes 1 hosted site and 3 designs. Add a card to start the 14-day Basic trial — 3 sites and 10 designs, free until it ends, then $5/month.',
+          };
         }
         if (billing.status === 'grace') {
-          return { tone: 'warn', title: 'Publishing paused', detail: `Existing pages and embeds remain live${billing.serve_grace_ends_at ? ` until ${new Date(billing.serve_grace_ends_at).toLocaleDateString()}` : ' during the grace period'}.` };
+          return { tone: 'warn', title: 'Publishing paused', detail: `Your published sites stay live${billing.serve_grace_ends_at ? ` until ${new Date(billing.serve_grace_ends_at).toLocaleDateString()}` : ' during the grace period'}, but editing and publishing need the Basic plan.` };
         }
         if (billing.status === 'expired') {
-          return { tone: 'bad', title: 'Subscription required', detail: 'Editing, publishing, hosted pages, and embeds are paused.' };
+          return { tone: 'bad', title: 'Plan ended', detail: 'Editing, publishing, and hosted pages are paused. Start the Basic plan to bring them back.' };
         }
-        return { tone: '', title: 'Trial not started', detail: 'Your 30-day trial starts when this organization first publishes.' };
+        return { tone: '', title: 'Free plan', detail: 'Your 2-day Free plan starts when this organization first publishes — 1 site and 3 designs. Add a card any time to start the 14-day Basic trial.' };
       }
 
       function attributesFor(artifact, embedName) {
@@ -262,11 +294,25 @@
         card.className = 'card';
         const canManage = billing?.can_manage_billing;
         const portal = billing?.status === 'active' || billing?.current_period_end;
+        const currentPlan =
+          billing?.status === 'active' ? 'basic'
+          : billing?.status === 'trialing' || billing?.status === 'unstarted' ? 'free'
+          : null;
+        const plan = (id, name, price, limits) => `
+          <div class="plan${currentPlan === id ? ' current' : ''}">
+            <div class="plan-head"><span class="plan-name">${name}</span>${currentPlan === id ? '<span class="plan-badge">Current</span>' : ''}</div>
+            <div class="plan-price">${price}</div>
+            <ul class="plan-limits">${limits.map((l) => `<li>${l}</li>`).join('')}</ul>
+          </div>`;
         card.innerHTML = `
           <h2>Plan</h2>
           <div class="billing-status"><span class="billing-dot ${copy.tone}"></span><strong>${escapeHtml(copy.title)}</strong></div>
-          <p class="hint">${escapeHtml(copy.detail)} One $5/month subscription covers every site in this organization.</p>
-          ${canManage ? `<div class="actions"><button data-billing-action="${portal ? 'portal' : 'checkout'}">${portal ? 'Manage billing' : 'Subscribe for $5/month'}</button></div>` : '<p class="hint">Ask an organization owner to manage billing.</p>'}
+          <p class="hint">${escapeHtml(copy.detail)}</p>
+          <div class="plans">
+            ${plan('free', 'Free', '2 days · no card', ['1 hosted site', '3 designs'])}
+            ${plan('basic', 'Basic', '$5/mo · 14-day free trial', ['3 hosted sites', '10 designs'])}
+          </div>
+          ${canManage ? `<div class="actions"><button data-billing-action="${portal ? 'portal' : 'checkout'}">${portal ? 'Manage billing' : 'Start Basic trial'}</button></div>` : '<p class="hint">Ask an organization owner to manage billing.</p>'}
           <p class="error" aria-live="polite"></p>`;
         card.querySelector('[data-billing-action]')?.addEventListener('click', async (event) => {
           const button = event.currentTarget;

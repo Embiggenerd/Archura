@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -47,6 +48,7 @@ type fakeRepository struct {
 	revokeSessionErr    error
 	billing             map[string]store.OrganizationBilling
 	webhookEvents       map[string]string
+	designs             map[string][]store.Design
 }
 
 type fakeRateLimitCall struct {
@@ -471,6 +473,37 @@ func (f *fakeRepository) BillingForOrganization(_ context.Context, organizationI
 		f.billing = make(map[string]store.OrganizationBilling)
 	}
 	return f.billing[organizationID], nil
+}
+
+func (f *fakeRepository) CreateDesign(_ context.Context, organizationID, name, componentPath string, limit int, audit store.AuditEvent) (store.Design, error) {
+	if f.designs == nil {
+		f.designs = make(map[string][]store.Design)
+	}
+	if len(f.designs[organizationID]) >= limit {
+		return store.Design{}, store.ErrLimitReached
+	}
+	f.nextID++
+	now := time.Now().UTC()
+	design := store.Design{
+		ID: fmt.Sprintf("dsn_%032x", f.nextID), OrganizationID: organizationID,
+		Name: name, ComponentPath: componentPath, CreatedAt: now, UpdatedAt: now,
+	}
+	f.designs[organizationID] = append(f.designs[organizationID], design)
+	f.audits = append(f.audits, audit)
+	return design, nil
+}
+
+func (f *fakeRepository) DesignsForOrganization(_ context.Context, organizationID string) ([]store.Design, error) {
+	return f.designs[organizationID], nil
+}
+
+func (f *fakeRepository) DesignForOrganization(_ context.Context, organizationID, designID string) (store.Design, error) {
+	for _, design := range f.designs[organizationID] {
+		if design.ID == designID {
+			return design, nil
+		}
+	}
+	return store.Design{}, store.ErrNotFound
 }
 
 func (f *fakeRepository) StartOrganizationTrial(_ context.Context, organizationID string, now time.Time, audit store.AuditEvent) (store.OrganizationBilling, error) {

@@ -18,32 +18,35 @@ export type ArchuraEditTarget = {
   label: string;
 };
 
-/** One stored item in a client's namespace, as returned by adapter list(). */
-export type ArchuraNamespaceEntry = {
-  path: string[];
-  kind: 'artifact' | 'embed';
+/** One stored object, as returned by a store's list(). */
+export type ArchuraStoreEntry = {
+  key: string;
   updatedAt: string | null;
 };
 
 /**
- * The editor's entire knowledge of storage. Implemented by the host;
- * S3, R2, a local database — the editor cannot tell them apart.
- * Namespace-aware adapters (bound to a client's site) additionally expose
- * list() and publishEmbed(); bespoke host adapters may omit them.
+ * The editor's entire knowledge of storage: an opaque key -> value store, and
+ * the seam for swapping backends. The editor serializes above this layer, so a
+ * store never sees an "artifact", an "embed", a "publish" or a "deploy" — it
+ * only get()s and put()s serialized text (JSON artifacts, JS embed modules)
+ * under string keys. Implement it over R2, a filesystem, Postgres, localStorage
+ * — the editor cannot tell them apart, and there are no hidden capability rules.
+ *
+ * The editor core calls only get() and put(). delete() and list() are optional
+ * extras for host tooling (dashboards, cleanup); the editor never calls them.
  */
-export type ArchuraPersistenceAdapter = {
-  load(target: ArchuraEditTarget): Promise<CanonicalComponentData | null>;
-  publish(artifact: CanonicalComponentData): Promise<void>;
-  /** Enumerate everything stored in this adapter's namespace. */
-  list?(): Promise<ArchuraNamespaceEntry[]>;
-  /** Store a generated per-client embed module (JS source) under the namespace. */
-  publishEmbed?(name: string, source: string): Promise<void>;
+export type ArchuraStore = {
+  get(key: string): Promise<string | null>;
+  put(key: string, value: string): Promise<void>;
+  delete?(key: string): Promise<void>;
+  /** Enumerate stored objects whose key starts with `prefix`. Host-tooling only. */
+  list?(prefix: string): Promise<ArchuraStoreEntry[]>;
 };
 
 export type ArchuraEditorConfig = {
   componentPath?: string[];
   components?: ArchuraComponentDefinition[];
-  persistence?: ArchuraPersistenceAdapter;
+  persistence?: ArchuraStore;
   /** Host-provided asset upload; returns the absolute URL of the stored asset. */
   uploadAsset?: (file: Blob, name: string) => Promise<string>;
   initialArtifact?: CanonicalComponentData | null;

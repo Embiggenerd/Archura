@@ -2,8 +2,9 @@
 # Bring up the whole local stack for manual testing:
 #   Postgres + Go core (with edge auth) + a watched frontend build served by
 #   Wrangler, which owns both the app and its API routes on port 8787.
-# Prints the frontend URL, then waits on Wrangler. Ctrl-C stops the local stack;
-# Postgres is left running for fast restarts. Does not edit ./core — only runs it.
+# Prints staged progress as each piece comes up, then the frontend URL, then
+# waits on Wrangler. Ctrl-C stops the local stack; Postgres is left running for
+# fast restarts. Does not edit ./core — only runs it.
 #
 #   sh scripts/dev-up.sh          (lives at the repo root: it orchestrates
 #                                  core + editor + Worker, not one package)
@@ -20,6 +21,38 @@ pidfile=/tmp/archura-dev-pids
 
 child_pids=""
 cleaned_up=false
+
+# --- Progress output -------------------------------------------------------
+# Colours only when stdout is a terminal; plain otherwise (logs, pipes).
+if [ -t 1 ]; then
+  c_dim=$(printf '\033[2m'); c_grn=$(printf '\033[32m')
+  c_yel=$(printf '\033[33m'); c_bld=$(printf '\033[1m'); c_rst=$(printf '\033[0m')
+else
+  c_dim=; c_grn=; c_yel=; c_bld=; c_rst=
+fi
+start_ts=$(date +%s)
+elapsed() { printf '%ss' "$(( $(date +%s) - start_ts ))"; }
+step() { printf '%s▸%s %s %s(%s)%s\n' "$c_yel" "$c_rst" "$*" "$c_dim" "$(elapsed)" "$c_rst"; }
+ok()   { printf '  %s✓%s %s\n' "$c_grn" "$c_rst" "$*"; }
+# wait_for <url> <label> [max_seconds]: poll once a second, printing a dot each
+# tick so the wait is visible; a ✓ on success, a ✗ on timeout.
+wait_for() {
+  _url=$1; _label=$2; _max=${3:-40}; _i=0
+  printf '  %swaiting for %s%s ' "$c_dim" "$_label" "$c_rst"
+  while [ $_i -lt $_max ]; do
+    if curl -s "$_url" >/dev/null 2>&1; then
+      printf ' %s✓%s\n' "$c_grn" "$c_rst"
+      return 0
+    fi
+    printf '.'
+    sleep 1
+    _i=$((_i + 1))
+  done
+  printf ' %s✗%s\n' "$c_yel" "$c_rst"
+  return 1
+}
+
+printf '%sBringing up the Archura local stack%s\n' "$c_bld" "$c_rst"
 
 # Local Stripe test settings live in the ignored root .env. Billing is enabled
 # only when the secret, webhook signing secret, and recurring Price are all
@@ -39,6 +72,9 @@ if [ -n "$stripe_secret" ] && [ -n "$stripe_webhook" ] && [ -n "$stripe_price" ]
   export STRIPE_WEBHOOK_SECRET="$stripe_webhook"
   export STRIPE_BASIC_PRICE_ID="$stripe_price"
   export BILLING_PUBLIC_ORIGIN="$stripe_origin"
+  printf '  %sbilling: enabled%s\n' "$c_dim" "$c_rst"
+else
+  printf '  %sbilling: disabled (set STRIPE_* in .env to enable)%s\n' "$c_dim" "$c_rst"
 fi
 
 record_pid() {
@@ -74,6 +110,7 @@ trap cleanup EXIT INT TERM
 
 # Preflight: a half-dead previous stack (stale core holding the metrics port,
 # old watchers rewriting dist, or a mismatched service key) breaks the new one.
+step 'clearing any previous stack'
 stop_recorded_stack
 # Clean up processes launched by older dev-up.sh versions that predate pidfile.
 pgrep -f "$av2/node_modules/.bin/vite build --watch" 2>/dev/null | xargs kill 2>/dev/null || true
@@ -86,6 +123,7 @@ sleep 1
 : > "$pidfile"
 
 # --- Postgres ---
+step 'starting Postgres'
 # PG_VERSION check: a stale half-cleaned /tmp dir is not a cluster; re-init it
 if [ ! -f "$pgdata/PG_VERSION" ]; then
   rm -rf "$pgdata"
@@ -94,15 +132,19 @@ fi
 pg_ctl -D "$pgdata" -o "-p $pgport -k /tmp" -l /tmp/archura-pg.log start >/dev/null 2>&1 || true
 sleep 2
 createdb -h /tmp -p "$pgport" -U postgres archura 2>/dev/null || true
+ok "Postgres ready on :$pgport"
 
 # --- Core keys ---
+step 'minting dev keys (first run compiles Go tools)'
 cd "$core_dir"
 admin=$(go run ./cmd/devkeys admin | cut -d= -f2)
 service=$(go run ./cmd/devkeys service | cut -d= -f2)
 internal=$(go run ./cmd/devkeys internal | cut -d= -f2)
 moderation=$(openssl rand -hex 32)
+ok 'dev keys minted'
 
 # --- Core (background) ---
+step 'starting Go core'
 DATABASE_URL="postgres://postgres@/archura?host=/tmp&port=$pgport" \
 PLATFORM_ADMIN_KEY="$admin" CORE_SERVICE_KEY="$service" \
 CORE_INTERNAL_KEY="$internal" \
@@ -111,30 +153,30 @@ CONFIRM_URL_BASE="http://localhost:8787/confirm" \
   go run ./cmd/server > /tmp/core-run.log 2>&1 &
 record_pid "$!"
 
-i=0
-while [ $i -lt 40 ]; do
-  curl -s http://localhost:8080/healthz >/dev/null 2>&1 && break
-  sleep 1
-  i=$((i + 1))
-done
-if ! curl -s http://localhost:8080/healthz >/dev/null 2>&1; then
+if wait_for http://localhost:8080/healthz 'core /healthz' 40; then
+  ok 'core is healthy'
+else
   printf '%s\n' 'Core failed to start; see /tmp/core-run.log' >&2
   exit 1
 fi
 
 # --- Worker (wrangler dev against the built app; the funnel lives here) ---
+step 'building frontend'
 cd "$av2"
 if ! npm run build > /tmp/archura-build.log 2>&1; then
   printf '%s\n' 'Frontend build failed; see /tmp/archura-build.log' >&2
   exit 1
 fi
+ok 'frontend built'
 
 # Source changes re-emit dist/ automatically; Wrangler serves the new assets
 # and its native live reload refreshes open app pages.
+step 'starting file watchers (vite + components)'
 ARCHURA_WATCH=1 "$av2/node_modules/.bin/vite" build --watch > /tmp/archura-watch-app.log 2>&1 &
 record_pid "$!"
 node "$av2/scripts/build-components.mjs" --watch > /tmp/archura-watch-components.log 2>&1 &
 record_pid "$!"
+ok 'watchers running'
 
 # .dev.vars wires the local Worker to the local core. Regenerated every run
 # because the service key is minted fresh above; a hand-made .dev.vars is
@@ -159,24 +201,20 @@ CORE_INTERNAL_KEY=$internal
 ALLOW_CORE_DEV_PROXY=true
 VARS
 
+step 'starting Worker (wrangler dev) + toy client'
 "$av2/node_modules/.bin/wrangler" dev --port 8787 --live-reload > /tmp/archura-wrangler.log 2>&1 &
 wrangler_pid=$!
 record_pid "$wrangler_pid"
 
 node "$av2/toy-client/server.mjs" > /tmp/archura-practice-client.log 2>&1 &
 record_pid "$!"
-i=0
-while [ $i -lt 40 ]; do
-  curl -s http://localhost:8787/ >/dev/null 2>&1 && break
-  sleep 1
-  i=$((i + 1))
-done
-if ! curl -s http://localhost:8787/ >/dev/null 2>&1; then
+if ! wait_for http://localhost:8787/ 'frontend on :8787' 40; then
   printf '%s\n' 'Frontend failed to start; see /tmp/archura-wrangler.log' >&2
   exit 1
 fi
 
-printf '%s\n' 'http://localhost:8787/'
+printf '\n  %s✓ stack ready%s in %s\n' "$c_grn$c_bld" "$c_rst" "$(elapsed)"
+printf '  %s➜%s  %shttp://localhost:8787/%s\n\n' "$c_grn" "$c_rst" "$c_bld" "$c_rst"
 
 # Keep the stack attached to this terminal; Ctrl-C triggers cleanup.
 wait "$wrangler_pid"

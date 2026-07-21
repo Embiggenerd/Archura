@@ -221,7 +221,8 @@
           "trial_ends_at": { "type": ["string", "null"], "format": "date-time" },
           "serve_grace_ends_at": { "type": ["string", "null"], "format": "date-time" },
           "current_period_end": { "type": ["string", "null"], "format": "date-time" },
-          "cancel_at_period_end": { "type": "boolean" }
+          "cancel_at_period_end": { "type": "boolean" },
+          "subscription_status": { "type": "string" }
         }
       },
       "BillingRedirect": {
@@ -575,6 +576,55 @@
           "404": { "$ref": "#/components/responses/NotFound" },
           "500": { "$ref": "#/components/responses/InternalError" },
           "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/organizations/{organizationID}/designs": {
+      "post": {
+        "tags": ["Organizations", "Designs"],
+        "operationId": "createDesign",
+        "summary": "Create a design in the organization",
+        "description": "Account session with organization membership. Enforces the plan's design cap; the content itself lives in R2.",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": {
+          "201": { "description": "Design created" },
+          "400": { "$ref": "#/components/responses/InvalidRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      },
+      "get": {
+        "tags": ["Organizations", "Designs"],
+        "operationId": "listDesigns",
+        "summary": "List the organization's designs",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": {
+          "200": { "description": "Designs owned by the organization" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/v1/organizations/{organizationID}/designs/{designID}": {
+      "get": {
+        "tags": ["Organizations", "Designs"],
+        "operationId": "getDesign",
+        "summary": "Fetch a single design owned by the organization",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [
+          { "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "designID", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "The design" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/InternalError" }
         }
       }
     },

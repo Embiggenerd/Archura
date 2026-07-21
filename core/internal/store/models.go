@@ -167,6 +167,10 @@ type OrganizationEntitlement struct {
 	ServeGraceEndsAt  *time.Time
 	CurrentPeriodEnd  *time.Time
 	CancelAtPeriodEnd bool
+	// Raw Stripe subscription status ("trialing", "active", …). The derived
+	// Status flattens the Basic trial into "active"; this lets the UI tell the
+	// 14-day Basic trial apart from a paid subscription.
+	SubscriptionStatus string
 }
 
 type StripeSubscriptionUpdate struct {

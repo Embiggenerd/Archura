@@ -1,0 +1,1472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Archura Platform Owner Admin Panel</title>
+<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;max-width:736px;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+</head>
+<body>
+<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="Archura Platform Owner Admin Panel" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
+&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
+&lt;title&gt;Archura Platform Owner Admin Panel&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(--background) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: light-dark(rgb(255 255 255), rgb(24 24 24));
+  --foreground: light-dark(rgb(26 28 31), rgb(255 255 255));
+  --card: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --card-foreground: var(--foreground);
+  --popover: light-dark(rgb(255 255 255), rgb(45 45 45));
+  --popover-foreground: var(--foreground);
+  --primary: light-dark(rgb(51 156 255), rgb(131 195 255));
+  --primary-foreground: light-dark(rgb(255 255 255), rgb(13 13 13));
+  --secondary: light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%));
+  --secondary-foreground: var(--foreground);
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: light-dark(
+    rgb(26 28 31 / 49.4%),
+    rgb(255 255 255 / 49.8%)
+  );
+  --accent: light-dark(rgb(229 242 255), rgb(13 39 63));
+  --accent-foreground: var(--primary);
+  --destructive: light-dark(rgb(226 85 7), rgb(255 133 73));
+  --border: light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%));
+  --input: light-dark(
+    rgb(26 28 31 / 11.8%),
+    color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+  );
+  --ring: light-dark(rgb(51 156 255), rgb(131 195 255 / 76%));
+  --font-size-base: 14px;
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: 12.5px;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+  --color-background-primary: var(--background);
+  --color-text-primary: var(--foreground);
+  --color-border-secondary: var(--border);
+}
+
+:root[data-theme=&quot;light&quot;] {
+  color-scheme: light;
+}
+
+:root[data-theme=&quot;dark&quot;] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--viz-font-weight-medium);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: superellipse(1.5);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type=&quot;file&quot;] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type=&quot;file&quot;]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type=&quot;color&quot;] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: superellipse(1.5);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: &quot;&quot;;
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type=&quot;radio&quot;] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type=&quot;radio&quot;]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: &quot;&quot;;
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+    [aria-pressed=&quot;true&quot;],
+    [aria-selected=&quot;true&quot;],
+    .is-selected
+  ) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div id=&quot;archura-ops-visual&quot;&gt;
+  &lt;style&gt;
+    #archura-ops-visual {
+      color: var(--foreground);
+      display: grid;
+      gap: 16px;
+    }
+    #archura-ops-visual * { box-sizing: border-box; }
+    #archura-ops-visual .ops-topbar {
+      display: grid;
+      grid-template-columns: auto minmax(210px, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    #archura-ops-visual .ops-brand,
+    #archura-ops-visual .ops-identity,
+    #archura-ops-visual .entity-title,
+    #archura-ops-visual .status-line,
+    #archura-ops-visual .row-actions,
+    #archura-ops-visual .field-flags,
+    #archura-ops-visual .check-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    #archura-ops-visual .ops-brand { font-weight: 500; white-space: nowrap; }
+    #archura-ops-visual .ops-search { min-width: 0; }
+    #archura-ops-visual .ops-search .form-control { width: 100%; }
+    #archura-ops-visual .ops-shell {
+      display: grid;
+      grid-template-columns: 168px minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+    #archura-ops-visual .ops-nav { display: grid; gap: 8px; }
+    #archura-ops-visual .nav-group { display: grid; gap: 6px; margin-bottom: 8px; }
+    #archura-ops-visual .nav-label {
+      color: var(--muted-foreground);
+      padding: 4px 8px 0;
+    }
+    #archura-ops-visual .ops-main { min-width: 0; display: grid; gap: 16px; }
+    #archura-ops-visual .entity-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    #archura-ops-visual .entity-meta { display: grid; gap: 5px; }
+    #archura-ops-visual .entity-meta h2 { margin: 0; }
+    #archura-ops-visual .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--viz-series-1);
+      display: inline-block;
+    }
+    #archura-ops-visual .content-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 250px;
+      gap: 18px;
+      align-items: start;
+    }
+    #archura-ops-visual .workspace { min-width: 0; display: grid; gap: 14px; }
+    #archura-ops-visual .section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    #archura-ops-visual .section-head h3 { margin: 0; }
+    #archura-ops-visual .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    #archura-ops-visual .form-label { display: grid; gap: 5px; min-width: 0; }
+    #archura-ops-visual .span-two { grid-column: 1 / -1; }
+    #archura-ops-visual .data-table { width: 100%; border-collapse: collapse; }
+    #archura-ops-visual .data-table th,
+    #archura-ops-visual .data-table td {
+      padding: 9px 7px;
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--border);
+    }
+    #archura-ops-visual .data-table th {
+      color: var(--muted-foreground);
+      font-weight: 500;
+    }
+    #archura-ops-visual .data-table tr:last-child td { border-bottom: 0; }
+    #archura-ops-visual .data-table code { overflow-wrap: anywhere; }
+    #archura-ops-visual .change-rail { display: grid; gap: 12px; }
+    #archura-ops-visual .change-rail .card { display: grid; gap: 10px; }
+    #archura-ops-visual .change-rail h3 { margin: 0; }
+    #archura-ops-visual .change-value {
+      display: grid;
+      gap: 4px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    #archura-ops-visual .change-value:last-child { border-bottom: 0; }
+    #archura-ops-visual .change-arrow { color: var(--muted-foreground); }
+    #archura-ops-visual .check-line { align-items: flex-start; }
+    #archura-ops-visual .check-line i { color: var(--viz-series-1); margin-top: 2px; }
+    #archura-ops-visual .danger-zone {
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+      margin-top: 8px;
+    }
+    #archura-ops-visual .source-split {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    #archura-ops-visual .source-column { min-width: 0; }
+    #archura-ops-visual .source-column h3 { margin: 0 0 8px; }
+    #archura-ops-visual .field-list { display: grid; gap: 0; }
+    #archura-ops-visual .field-row {
+      display: grid;
+      grid-template-columns: minmax(120px, .8fr) minmax(150px, 1.2fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    #archura-ops-visual .field-row:last-child { border-bottom: 0; }
+    #archura-ops-visual .empty-change { color: var(--muted-foreground); }
+    #archura-ops-visual .result-message { display: none; }
+    #archura-ops-visual .result-message.is-visible { display: block; }
+    #archura-ops-visual button[aria-selected=&quot;true&quot;] { color: var(--primary-foreground); background: var(--primary); }
+    @media (max-width: 760px) {
+      #archura-ops-visual .content-layout { grid-template-columns: 1fr; }
+      #archura-ops-visual .change-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 590px) {
+      #archura-ops-visual .ops-topbar { grid-template-columns: 1fr auto; }
+      #archura-ops-visual .ops-search { grid-column: 1 / -1; grid-row: 2; }
+      #archura-ops-visual .ops-shell { grid-template-columns: 1fr; }
+      #archura-ops-visual .ops-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      #archura-ops-visual .nav-group { margin: 0; }
+      #archura-ops-visual .nav-label { grid-column: 1 / -1; }
+      #archura-ops-visual .form-grid,
+      #archura-ops-visual .source-split,
+      #archura-ops-visual .change-rail { grid-template-columns: 1fr; }
+      #archura-ops-visual .field-row { grid-template-columns: 1fr; }
+      #archura-ops-visual .span-two { grid-column: auto; }
+      #archura-ops-visual .data-table thead { display: none; }
+      #archura-ops-visual .data-table,
+      #archura-ops-visual .data-table tbody,
+      #archura-ops-visual .data-table tr,
+      #archura-ops-visual .data-table td { display: block; width: 100%; }
+      #archura-ops-visual .data-table tr { padding: 8px 0; border-bottom: 1px solid var(--border); }
+      #archura-ops-visual .data-table td { border: 0; padding: 4px 0; }
+    }
+  &lt;/style&gt;
+
+  &lt;header class=&quot;ops-topbar&quot;&gt;
+    &lt;div class=&quot;ops-brand&quot;&gt;&lt;i data-lucide=&quot;shield-check&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Archura Ops &lt;span class=&quot;viz-badge&quot;&gt;Production&lt;/span&gt;&lt;/div&gt;
+    &lt;label class=&quot;ops-search&quot;&gt;
+      &lt;span class=&quot;sr-only&quot;&gt;Global search&lt;/span&gt;
+      &lt;input id=&quot;ops-global-search&quot; class=&quot;form-control&quot; type=&quot;search&quot; placeholder=&quot;Search email, organization, domain, component, Stripe ID…&quot;&gt;
+    &lt;/label&gt;
+    &lt;div class=&quot;ops-identity text-small&quot;&gt;&lt;i data-lucide=&quot;key-round&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; owner@archura.ai&lt;/div&gt;
+  &lt;/header&gt;
+
+  &lt;div class=&quot;ops-shell&quot;&gt;
+    &lt;nav class=&quot;ops-nav&quot; aria-label=&quot;Platform owner navigation&quot;&gt;
+      &lt;div class=&quot;nav-group&quot;&gt;
+        &lt;div class=&quot;nav-label text-small&quot;&gt;OPERATIONS&lt;/div&gt;
+        &lt;button class=&quot;btn btn-ghost btn-block&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;layout-dashboard&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Overview&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;nav-group&quot;&gt;
+        &lt;div class=&quot;nav-label text-small&quot;&gt;DIRECTORY&lt;/div&gt;
+        &lt;button class=&quot;btn btn-ghost btn-block&quot; type=&quot;button&quot; data-entity=&quot;account&quot;&gt;&lt;i data-lucide=&quot;user-round&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Accounts&lt;/button&gt;
+        &lt;button class=&quot;btn btn-ghost btn-block&quot; type=&quot;button&quot; data-entity=&quot;org&quot; aria-selected=&quot;true&quot;&gt;&lt;i data-lucide=&quot;building-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Organizations&lt;/button&gt;
+      &lt;/div&gt;
+      &lt;div class=&quot;nav-group&quot;&gt;
+        &lt;div class=&quot;nav-label text-small&quot;&gt;CONTROL&lt;/div&gt;
+        &lt;button class=&quot;btn btn-ghost btn-block&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;badge-dollar-sign&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Billing &amp; offers&lt;/button&gt;
+        &lt;button class=&quot;btn btn-ghost btn-block&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;boxes&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Content &amp; R2&lt;/button&gt;
+        &lt;button class=&quot;btn btn-ghost btn-block&quot; type=&quot;button&quot;&gt;&lt;i data-lucide=&quot;scroll-text&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Audit log&lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/nav&gt;
+
+    &lt;main class=&quot;ops-main&quot;&gt;
+      &lt;div class=&quot;viz-controls&quot; aria-label=&quot;Selected record type&quot;&gt;
+        &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-entity=&quot;org&quot; aria-selected=&quot;true&quot;&gt;Organization record&lt;/button&gt;
+        &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-entity=&quot;account&quot; aria-selected=&quot;false&quot;&gt;Account record&lt;/button&gt;
+      &lt;/div&gt;
+
+      &lt;section class=&quot;entity-header&quot; aria-live=&quot;polite&quot;&gt;
+        &lt;div class=&quot;entity-meta&quot;&gt;
+          &lt;div id=&quot;entity-breadcrumb&quot; class=&quot;text-small text-muted&quot;&gt;Organizations / org_01J7ACME&lt;/div&gt;
+          &lt;div class=&quot;entity-title&quot;&gt;&lt;h2 id=&quot;entity-name&quot;&gt;Acme Plumbing&lt;/h2&gt;&lt;span class=&quot;viz-badge&quot; id=&quot;entity-state&quot;&gt;Active&lt;/span&gt;&lt;/div&gt;
+          &lt;div id=&quot;entity-subtitle&quot; class=&quot;status-line text-small&quot;&gt;&lt;span class=&quot;status-dot&quot;&gt;&lt;/span&gt; Production customer · version 17 · updated 8 minutes ago&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;row-actions&quot;&gt;
+          &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Add internal support note&quot; data-before=&quot;No open note&quot; data-after=&quot;Support follow-up requested&quot;&gt;&lt;i data-lucide=&quot;message-square-plus&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Add note&lt;/button&gt;
+          &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Suspend organization&quot; data-before=&quot;Active&quot; data-after=&quot;Suspended&quot;&gt;&lt;i data-lucide=&quot;circle-pause&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Suspend&lt;/button&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+
+      &lt;div id=&quot;entity-stats&quot; class=&quot;viz-grid&quot;&gt;
+        &lt;div class=&quot;card viz-stat&quot;&gt;&lt;div class=&quot;text-muted&quot;&gt;Members&lt;/div&gt;&lt;div class=&quot;viz-stat-value&quot;&gt;3&lt;/div&gt;&lt;div class=&quot;text-small&quot;&gt;1 owner · 2 members&lt;/div&gt;&lt;/div&gt;
+        &lt;div class=&quot;card viz-stat&quot;&gt;&lt;div class=&quot;text-muted&quot;&gt;Designs&lt;/div&gt;&lt;div class=&quot;viz-stat-value&quot;&gt;8&lt;/div&gt;&lt;div class=&quot;text-small&quot;&gt;6 live · 2 drafts&lt;/div&gt;&lt;/div&gt;
+        &lt;div class=&quot;card viz-stat&quot;&gt;&lt;div class=&quot;text-muted&quot;&gt;Subscription&lt;/div&gt;&lt;div class=&quot;viz-stat-value&quot;&gt;Active&lt;/div&gt;&lt;div class=&quot;text-small&quot;&gt;Basic · $5/month&lt;/div&gt;&lt;/div&gt;
+      &lt;/div&gt;
+
+      &lt;div id=&quot;entity-tabs&quot; class=&quot;viz-controls&quot; role=&quot;tablist&quot; aria-label=&quot;Record sections&quot;&gt;&lt;/div&gt;
+
+      &lt;div class=&quot;content-layout&quot;&gt;
+        &lt;section id=&quot;entity-panel&quot; class=&quot;workspace&quot; aria-live=&quot;polite&quot;&gt;&lt;/section&gt;
+
+        &lt;aside class=&quot;change-rail&quot; aria-label=&quot;Change control&quot;&gt;
+          &lt;div class=&quot;card&quot;&gt;
+            &lt;h3&gt;Pending change&lt;/h3&gt;
+            &lt;div id=&quot;change-empty&quot; class=&quot;empty-change&quot;&gt;Select an editable value or a typed action to stage a change.&lt;/div&gt;
+            &lt;div id=&quot;change-details&quot; hidden&gt;
+              &lt;div class=&quot;change-value&quot;&gt;
+                &lt;span class=&quot;text-small text-muted&quot;&gt;ACTION&lt;/span&gt;
+                &lt;strong id=&quot;change-action&quot;&gt;&lt;/strong&gt;
+              &lt;/div&gt;
+              &lt;div class=&quot;change-value&quot;&gt;
+                &lt;span class=&quot;text-small text-muted&quot;&gt;BEFORE → AFTER&lt;/span&gt;
+                &lt;span&gt;&lt;code id=&quot;change-before&quot;&gt;&lt;/code&gt; &lt;span class=&quot;change-arrow&quot;&gt;→&lt;/span&gt; &lt;code id=&quot;change-after&quot;&gt;&lt;/code&gt;&lt;/span&gt;
+              &lt;/div&gt;
+              &lt;label class=&quot;form-label&quot; for=&quot;change-reason&quot;&gt;Reason
+                &lt;textarea id=&quot;change-reason&quot; class=&quot;form-control&quot; rows=&quot;3&quot; placeholder=&quot;Required for consequential changes&quot;&gt;&lt;/textarea&gt;
+              &lt;/label&gt;
+              &lt;button id=&quot;commit-change&quot; class=&quot;btn btn-primary btn-block&quot; type=&quot;button&quot;&gt;Review and commit&lt;/button&gt;
+              &lt;div id=&quot;result-message&quot; class=&quot;result-message text-small&quot; role=&quot;status&quot;&gt;Recorded as a reversible, audited action.&lt;/div&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+
+          &lt;div class=&quot;card&quot;&gt;
+            &lt;h3&gt;Write gate&lt;/h3&gt;
+            &lt;div class=&quot;check-line text-small&quot;&gt;&lt;i data-lucide=&quot;check-circle-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Version checked before save&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;check-line text-small&quot;&gt;&lt;i data-lucide=&quot;check-circle-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Validation and uniqueness enforced&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;check-line text-small&quot;&gt;&lt;i data-lucide=&quot;check-circle-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Before and after values recorded&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;check-line text-small&quot;&gt;&lt;i data-lucide=&quot;check-circle-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span&gt;Undo created when reversible&lt;/span&gt;&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/aside&gt;
+      &lt;/div&gt;
+    &lt;/main&gt;
+  &lt;/div&gt;
+
+  &lt;script&gt;
+    (() =&gt; {
+      const root = document.getElementById(&#x27;archura-ops-visual&#x27;);
+      const tabs = {
+        org: [&#x27;Overview&#x27;, &#x27;Members&#x27;, &#x27;Billing &amp; offers&#x27;, &#x27;Designs &amp; R2&#x27;, &#x27;All fields&#x27;, &#x27;History&#x27;],
+        account: [&#x27;Overview&#x27;, &#x27;Organizations&#x27;, &#x27;Security&#x27;, &#x27;All fields&#x27;, &#x27;History&#x27;]
+      };
+      const state = { entity: &#x27;org&#x27;, tab: { org: &#x27;Overview&#x27;, account: &#x27;Overview&#x27; } };
+
+      const orgPanels = {
+        &#x27;Overview&#x27;: `
+          &lt;div&gt;
+            &lt;div class=&quot;section-head&quot;&gt;&lt;h3&gt;Organization record&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;Editable Core fields&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;form-grid&quot;&gt;
+              &lt;label class=&quot;form-label&quot;&gt;Name&lt;input class=&quot;form-control&quot; value=&quot;Acme Plumbing&quot; data-input-action=&quot;Change organization name&quot; data-before=&quot;Acme Plumbing&quot;&gt;&lt;/label&gt;
+              &lt;label class=&quot;form-label&quot;&gt;Slug / subdomain&lt;input class=&quot;form-control&quot; value=&quot;acme-plumbing&quot; data-input-action=&quot;Change organization slug&quot; data-before=&quot;acme-plumbing&quot;&gt;&lt;/label&gt;
+              &lt;label class=&quot;form-label&quot;&gt;Lifecycle&lt;select class=&quot;form-select&quot; data-input-action=&quot;Change organization lifecycle&quot; data-before=&quot;active&quot;&gt;&lt;option selected&gt;active&lt;/option&gt;&lt;option&gt;suspended&lt;/option&gt;&lt;option&gt;soft-deleted&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
+              &lt;label class=&quot;form-label&quot;&gt;Default locale&lt;select class=&quot;form-select&quot; data-input-action=&quot;Change organization locale&quot; data-before=&quot;en-US&quot;&gt;&lt;option selected&gt;en-US&lt;/option&gt;&lt;option&gt;es-US&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
+              &lt;label class=&quot;form-label span-two&quot;&gt;Internal support note&lt;textarea class=&quot;form-control&quot; rows=&quot;3&quot; data-input-action=&quot;Update support note&quot; data-before=&quot;Pilot customer; owner prefers email.&quot;&gt;Pilot customer; owner prefers email.&lt;/textarea&gt;&lt;/label&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div&gt;
+            &lt;div class=&quot;section-head&quot;&gt;&lt;h3&gt;Relationships&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;Derived, never hand-set&lt;/span&gt;&lt;/div&gt;
+            &lt;table class=&quot;data-table&quot;&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;Relation&lt;/th&gt;&lt;th&gt;Current state&lt;/th&gt;&lt;th&gt;Source&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;
+              &lt;tr&gt;&lt;td&gt;Owner&lt;/td&gt;&lt;td&gt;jane@acme.example&lt;/td&gt;&lt;td&gt;&lt;code&gt;memberships&lt;/code&gt;&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;Billing customer&lt;/td&gt;&lt;td&gt;&lt;code&gt;cus_S8acme91&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Stripe&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;Design count&lt;/td&gt;&lt;td&gt;8&lt;/td&gt;&lt;td&gt;Recomputed&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;Published host&lt;/td&gt;&lt;td&gt;acme.archura.ai&lt;/td&gt;&lt;td&gt;Cloudflare&lt;/td&gt;&lt;/tr&gt;
+            &lt;/tbody&gt;&lt;/table&gt;
+          &lt;/div&gt;`,
+        &#x27;Members&#x27;: `
+          &lt;div class=&quot;section-head&quot;&gt;&lt;h3&gt;Memberships&lt;/h3&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Add organization member&quot; data-before=&quot;No membership&quot; data-after=&quot;member@example.com · member&quot;&gt;Add member&lt;/button&gt;&lt;/div&gt;
+          &lt;table class=&quot;data-table&quot;&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;Account&lt;/th&gt;&lt;th&gt;Role&lt;/th&gt;&lt;th&gt;Status&lt;/th&gt;&lt;th&gt;Actions&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;strong&gt;Jane Adams&lt;/strong&gt;&lt;br&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;jane@acme.example&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;viz-badge&quot;&gt;Owner&lt;/span&gt;&lt;/td&gt;&lt;td&gt;Active&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Transfer organization ownership&quot; data-before=&quot;Jane Adams&quot; data-after=&quot;Marco Diaz&quot;&gt;Transfer ownership&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;strong&gt;Marco Diaz&lt;/strong&gt;&lt;br&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;marco@acme.example&lt;/span&gt;&lt;/td&gt;&lt;td&gt;Member&lt;/td&gt;&lt;td&gt;Active&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Change membership role&quot; data-before=&quot;Member&quot; data-after=&quot;Owner&quot;&gt;Change role&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;strong&gt;Sam Lee&lt;/strong&gt;&lt;br&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;sam@acme.example&lt;/span&gt;&lt;/td&gt;&lt;td&gt;Member&lt;/td&gt;&lt;td&gt;Active&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Remove organization member&quot; data-before=&quot;Active member&quot; data-after=&quot;Removed&quot;&gt;Remove&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+          &lt;/tbody&gt;&lt;/table&gt;
+          &lt;div class=&quot;danger-zone text-small text-muted&quot;&gt;Ownership transfer runs a typed transaction: promote successor, demote former owner, verify at least one owner remains, then append one audit event.&lt;/div&gt;`,
+        &#x27;Billing &amp; offers&#x27;: `
+          &lt;div class=&quot;source-split&quot;&gt;
+            &lt;div class=&quot;source-column&quot;&gt;
+              &lt;h3&gt;Core-controlled&lt;/h3&gt;
+              &lt;div class=&quot;field-list&quot;&gt;
+                &lt;div class=&quot;field-row&quot;&gt;&lt;span&gt;Trial end&lt;/span&gt;&lt;code&gt;2026-08-20&lt;/code&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Extend organization trial&quot; data-before=&quot;2026-08-20&quot; data-after=&quot;2026-09-20&quot;&gt;Extend&lt;/button&gt;&lt;/div&gt;
+                &lt;div class=&quot;field-row&quot;&gt;&lt;span&gt;Offer&lt;/span&gt;&lt;code&gt;basic-standard&lt;/code&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Assign organization offer&quot; data-before=&quot;basic-standard&quot; data-after=&quot;pilot-free-90d&quot;&gt;Change&lt;/button&gt;&lt;/div&gt;
+                &lt;div class=&quot;field-row&quot;&gt;&lt;span&gt;Override&lt;/span&gt;&lt;code&gt;none&lt;/code&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Grant entitlement override&quot; data-before=&quot;client-comms: default&quot; data-after=&quot;client-comms: enabled until 2026-12-31&quot;&gt;Grant&lt;/button&gt;&lt;/div&gt;
+              &lt;/div&gt;
+            &lt;/div&gt;
+            &lt;div class=&quot;source-column&quot;&gt;
+              &lt;h3&gt;Stripe-controlled mirror&lt;/h3&gt;
+              &lt;div class=&quot;field-list&quot;&gt;
+                &lt;div class=&quot;field-row&quot;&gt;&lt;span&gt;Status&lt;/span&gt;&lt;code&gt;active&lt;/code&gt;&lt;span class=&quot;viz-badge&quot;&gt;Locked&lt;/span&gt;&lt;/div&gt;
+                &lt;div class=&quot;field-row&quot;&gt;&lt;span&gt;Period end&lt;/span&gt;&lt;code&gt;2026-08-05&lt;/code&gt;&lt;span class=&quot;viz-badge&quot;&gt;Locked&lt;/span&gt;&lt;/div&gt;
+                &lt;div class=&quot;field-row&quot;&gt;&lt;span&gt;Customer&lt;/span&gt;&lt;code&gt;cus_S8acme91&lt;/code&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Open Stripe customer action&quot; data-before=&quot;Basic · $5/month&quot; data-after=&quot;Stripe update + webhook reconciliation&quot;&gt;Manage&lt;/button&gt;&lt;/div&gt;
+              &lt;/div&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div&gt;
+            &lt;div class=&quot;section-head&quot;&gt;&lt;h3&gt;Effective entitlements&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;Computed from plan + active overrides&lt;/span&gt;&lt;/div&gt;
+            &lt;table class=&quot;data-table&quot;&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;Feature&lt;/th&gt;&lt;th&gt;Plan value&lt;/th&gt;&lt;th&gt;Override&lt;/th&gt;&lt;th&gt;Effective&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;
+              &lt;tr&gt;&lt;td&gt;Editable hosted page&lt;/td&gt;&lt;td&gt;Enabled&lt;/td&gt;&lt;td&gt;—&lt;/td&gt;&lt;td&gt;Enabled&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;Client communication&lt;/td&gt;&lt;td&gt;Disabled&lt;/td&gt;&lt;td&gt;Enabled until Dec 31&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;viz-badge&quot;&gt;Enabled&lt;/span&gt;&lt;/td&gt;&lt;/tr&gt;
+              &lt;tr&gt;&lt;td&gt;Component limit&lt;/td&gt;&lt;td&gt;Unlimited&lt;/td&gt;&lt;td&gt;—&lt;/td&gt;&lt;td&gt;Unlimited&lt;/td&gt;&lt;/tr&gt;
+            &lt;/tbody&gt;&lt;/table&gt;
+          &lt;/div&gt;`,
+        &#x27;Designs &amp; R2&#x27;: `
+          &lt;div class=&quot;section-head&quot;&gt;&lt;h3&gt;Designs and component artifacts&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;Rows in Core · content in R2&lt;/span&gt;&lt;/div&gt;
+          &lt;table class=&quot;data-table&quot;&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;Design&lt;/th&gt;&lt;th&gt;Lifecycle&lt;/th&gt;&lt;th&gt;R2 artifacts&lt;/th&gt;&lt;th&gt;Actions&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;strong&gt;Main website&lt;/strong&gt;&lt;br&gt;&lt;code&gt;/index.html&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;viz-badge&quot;&gt;Live&lt;/span&gt;&lt;/td&gt;&lt;td&gt;draft + published&lt;/td&gt;&lt;td class=&quot;row-actions&quot;&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Transfer design&quot; data-before=&quot;Acme Plumbing&quot; data-after=&quot;Another organization&quot;&gt;Transfer&lt;/button&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Take down published artifact&quot; data-before=&quot;Published and serving&quot; data-after=&quot;Taken down; blob retained&quot;&gt;Take down&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;strong&gt;Contact form&lt;/strong&gt;&lt;br&gt;&lt;code&gt;/components/contact&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Draft&lt;/td&gt;&lt;td&gt;draft only&lt;/td&gt;&lt;td class=&quot;row-actions&quot;&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Publish as platform operator&quot; data-before=&quot;Draft only&quot; data-after=&quot;Published with operator attribution&quot;&gt;Publish as operator&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;strong&gt;Client portal&lt;/strong&gt;&lt;br&gt;&lt;code&gt;/components/portal&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Suspended&lt;/td&gt;&lt;td&gt;draft + archived publish&lt;/td&gt;&lt;td class=&quot;row-actions&quot;&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Restore published artifact&quot; data-before=&quot;Suspended&quot; data-after=&quot;Live from retained blob&quot;&gt;Restore&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+          &lt;/tbody&gt;&lt;/table&gt;
+          &lt;div class=&quot;card&quot;&gt;
+            &lt;div class=&quot;section-head&quot;&gt;&lt;h3&gt;Operator content edit&lt;/h3&gt;&lt;span class=&quot;viz-badge&quot;&gt;Ghost-publish risk&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;text-small&quot;&gt;Content edits create an operator-owned revision. Publishing requires a reason, records the acting operator, preserves the customer&#x27;s prior blob, and offers one-click rollback.&lt;/div&gt;
+            &lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Create operator content revision&quot; data-before=&quot;Customer revision r42&quot; data-after=&quot;Operator revision r43; unpublished&quot;&gt;Create revision&lt;/button&gt;
+          &lt;/div&gt;`,
+        &#x27;All fields&#x27;: `
+          &lt;div class=&quot;section-head&quot;&gt;&lt;h3&gt;Schema-driven field registry&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;Complete coverage without raw database writes&lt;/span&gt;&lt;/div&gt;
+          &lt;table class=&quot;data-table&quot;&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;Field&lt;/th&gt;&lt;th&gt;Value&lt;/th&gt;&lt;th&gt;Behavior&lt;/th&gt;&lt;th&gt;Control&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;code&gt;organizations.name&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Acme Plumbing&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;viz-badge&quot;&gt;Editable&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Edit registered field&quot; data-before=&quot;Acme Plumbing&quot; data-after=&quot;Acme Services&quot;&gt;Edit&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;code&gt;organizations.slug&lt;/code&gt;&lt;/td&gt;&lt;td&gt;acme-plumbing&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;viz-badge&quot;&gt;Validated&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Edit unique registered field&quot; data-before=&quot;acme-plumbing&quot; data-after=&quot;acme-services&quot;&gt;Edit&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;code&gt;organization_billing.subscription_status&lt;/code&gt;&lt;/td&gt;&lt;td&gt;active&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;viz-badge&quot;&gt;Stripe mirror&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Reconcile Stripe mirror&quot; data-before=&quot;Core: active&quot; data-after=&quot;Refetched from Stripe&quot;&gt;Reconcile&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;code&gt;organizations.design_count&lt;/code&gt;&lt;/td&gt;&lt;td&gt;8&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;viz-badge&quot;&gt;Derived&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Recompute derived value&quot; data-before=&quot;8 cached&quot; data-after=&quot;Recomputed from designs&quot;&gt;Recompute&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;code&gt;organizations.deleted_at&lt;/code&gt;&lt;/td&gt;&lt;td&gt;—&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;viz-badge&quot;&gt;Reversible&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Soft-delete organization&quot; data-before=&quot;Active&quot; data-after=&quot;Soft-deleted&quot;&gt;Soft-delete&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+          &lt;/tbody&gt;&lt;/table&gt;`,
+        &#x27;History&#x27;: `
+          &lt;div class=&quot;section-head&quot;&gt;&lt;h3&gt;Immutable audit history&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;This data cannot be edited&lt;/span&gt;&lt;/div&gt;
+          &lt;table class=&quot;data-table&quot;&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;When&lt;/th&gt;&lt;th&gt;Operator&lt;/th&gt;&lt;th&gt;Change&lt;/th&gt;&lt;th&gt;Recovery&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;
+            &lt;tr&gt;&lt;td&gt;8 min ago&lt;/td&gt;&lt;td&gt;owner@archura.ai&lt;/td&gt;&lt;td&gt;Trial end: Aug 6 → Aug 20&lt;br&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;Reason: onboarding delay&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Revert audited change&quot; data-before=&quot;Trial ends Aug 20&quot; data-after=&quot;Trial ends Aug 6&quot;&gt;Revert&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;Yesterday&lt;/td&gt;&lt;td&gt;stripe-webhook&lt;/td&gt;&lt;td&gt;Subscription: trialing → active&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;External event&lt;/span&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;Jul 28&lt;/td&gt;&lt;td&gt;jane@acme.example&lt;/td&gt;&lt;td&gt;Published Main website revision r42&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Restore content revision&quot; data-before=&quot;Published r42&quot; data-after=&quot;Published r41&quot;&gt;Restore r41&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+          &lt;/tbody&gt;&lt;/table&gt;`
+      };
+
+      const accountPanels = {
+        &#x27;Overview&#x27;: `
+          &lt;div&gt;
+            &lt;div class=&quot;section-head&quot;&gt;&lt;h3&gt;Account record&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;A person, independent of organizations&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;form-grid&quot;&gt;
+              &lt;label class=&quot;form-label&quot;&gt;Display name&lt;input class=&quot;form-control&quot; value=&quot;Jane Adams&quot; data-input-action=&quot;Change account name&quot; data-before=&quot;Jane Adams&quot;&gt;&lt;/label&gt;
+              &lt;label class=&quot;form-label&quot;&gt;Email&lt;input class=&quot;form-control&quot; value=&quot;jane@acme.example&quot; data-input-action=&quot;Change account email&quot; data-before=&quot;jane@acme.example&quot;&gt;&lt;/label&gt;
+              &lt;label class=&quot;form-label&quot;&gt;Verification&lt;select class=&quot;form-select&quot; data-input-action=&quot;Change verification status&quot; data-before=&quot;verified&quot;&gt;&lt;option selected&gt;verified&lt;/option&gt;&lt;option&gt;unverified&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
+              &lt;label class=&quot;form-label&quot;&gt;Account lifecycle&lt;select class=&quot;form-select&quot; data-input-action=&quot;Change account lifecycle&quot; data-before=&quot;active&quot;&gt;&lt;option selected&gt;active&lt;/option&gt;&lt;option&gt;suspended&lt;/option&gt;&lt;option&gt;soft-deleted&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
+            &lt;/div&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;danger-zone&quot;&gt;
+            &lt;div class=&quot;section-head&quot;&gt;&lt;h3&gt;Platform access&lt;/h3&gt;&lt;span class=&quot;viz-badge&quot;&gt;Consequential&lt;/span&gt;&lt;/div&gt;
+            &lt;div class=&quot;row-actions&quot;&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Grant platform-owner access&quot; data-before=&quot;Customer account&quot; data-after=&quot;Platform owner&quot;&gt;Grant staff role&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Suspend account&quot; data-before=&quot;Active&quot; data-after=&quot;Suspended&quot;&gt;Suspend account&lt;/button&gt;&lt;/div&gt;
+          &lt;/div&gt;`,
+        &#x27;Organizations&#x27;: `
+          &lt;div class=&quot;section-head&quot;&gt;&lt;h3&gt;Organization memberships&lt;/h3&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Create account membership&quot; data-before=&quot;No membership&quot; data-after=&quot;New organization · member&quot;&gt;Add membership&lt;/button&gt;&lt;/div&gt;
+          &lt;table class=&quot;data-table&quot;&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;Organization&lt;/th&gt;&lt;th&gt;Role&lt;/th&gt;&lt;th&gt;Billing relationship&lt;/th&gt;&lt;th&gt;Action&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;strong&gt;Acme Plumbing&lt;/strong&gt;&lt;br&gt;&lt;code&gt;org_01J7ACME&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;viz-badge&quot;&gt;Owner&lt;/span&gt;&lt;/td&gt;&lt;td&gt;Subscription owner&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-entity=&quot;org&quot;&gt;Open organization&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;strong&gt;Neighborhood HVAC&lt;/strong&gt;&lt;br&gt;&lt;code&gt;org_01J8HVAC&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Member&lt;/td&gt;&lt;td&gt;None&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Remove account membership&quot; data-before=&quot;Member of Neighborhood HVAC&quot; data-after=&quot;No access&quot;&gt;Remove&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+          &lt;/tbody&gt;&lt;/table&gt;`,
+        &#x27;Security&#x27;: `
+          &lt;div class=&quot;section-head&quot;&gt;&lt;h3&gt;Reset-only security controls&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;Secrets are never shown or hand-edited&lt;/span&gt;&lt;/div&gt;
+          &lt;div class=&quot;field-list&quot;&gt;
+            &lt;div class=&quot;field-row&quot;&gt;&lt;span&gt;Password hash&lt;/span&gt;&lt;code&gt;hidden&lt;/code&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Force password reset&quot; data-before=&quot;Existing credential remains unknown&quot; data-after=&quot;Reset email issued; sessions revoked&quot;&gt;Reset&lt;/button&gt;&lt;/div&gt;
+            &lt;div class=&quot;field-row&quot;&gt;&lt;span&gt;Sessions&lt;/span&gt;&lt;code&gt;4 active&lt;/code&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Revoke account sessions&quot; data-before=&quot;4 active sessions&quot; data-after=&quot;0 active sessions&quot;&gt;Revoke all&lt;/button&gt;&lt;/div&gt;
+            &lt;div class=&quot;field-row&quot;&gt;&lt;span&gt;API credentials&lt;/span&gt;&lt;code&gt;2 active&lt;/code&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Rotate API credentials&quot; data-before=&quot;2 active credentials&quot; data-after=&quot;New credentials generated; old revoked&quot;&gt;Rotate&lt;/button&gt;&lt;/div&gt;
+            &lt;div class=&quot;field-row&quot;&gt;&lt;span&gt;Email verification&lt;/span&gt;&lt;code&gt;verified&lt;/code&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Resend verification flow&quot; data-before=&quot;Verified&quot; data-after=&quot;New verification challenge issued&quot;&gt;Resend&lt;/button&gt;&lt;/div&gt;
+          &lt;/div&gt;`,
+        &#x27;All fields&#x27;: `
+          &lt;div class=&quot;section-head&quot;&gt;&lt;h3&gt;Schema-driven account fields&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;Each field declares its safe mutation behavior&lt;/span&gt;&lt;/div&gt;
+          &lt;table class=&quot;data-table&quot;&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;Field&lt;/th&gt;&lt;th&gt;Value&lt;/th&gt;&lt;th&gt;Behavior&lt;/th&gt;&lt;th&gt;Control&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;code&gt;accounts.email&lt;/code&gt;&lt;/td&gt;&lt;td&gt;jane@acme.example&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;viz-badge&quot;&gt;Editable + unique&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Edit account email&quot; data-before=&quot;jane@acme.example&quot; data-after=&quot;jane@new.example&quot;&gt;Edit&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;code&gt;accounts.password_hash&lt;/code&gt;&lt;/td&gt;&lt;td&gt;hidden&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;viz-badge&quot;&gt;Secret&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Reset account password&quot; data-before=&quot;Existing secret hidden&quot; data-after=&quot;Reset flow created&quot;&gt;Reset&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;code&gt;accounts.verified_at&lt;/code&gt;&lt;/td&gt;&lt;td&gt;2026-07-14&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;viz-badge&quot;&gt;Typed status&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Clear email verification&quot; data-before=&quot;Verified Jul 14&quot; data-after=&quot;Unverified; new challenge required&quot;&gt;Change&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;code&gt;accounts.staff_role&lt;/code&gt;&lt;/td&gt;&lt;td&gt;—&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;viz-badge&quot;&gt;High risk&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Grant support operator role&quot; data-before=&quot;No platform role&quot; data-after=&quot;Support operator&quot;&gt;Edit&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;&lt;code&gt;accounts.organization_count&lt;/code&gt;&lt;/td&gt;&lt;td&gt;2&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;viz-badge&quot;&gt;Derived&lt;/span&gt;&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Recompute account organization count&quot; data-before=&quot;2 cached&quot; data-after=&quot;Recomputed from memberships&quot;&gt;Recompute&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+          &lt;/tbody&gt;&lt;/table&gt;`,
+        &#x27;History&#x27;: `
+          &lt;div class=&quot;section-head&quot;&gt;&lt;h3&gt;Account audit history&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;Immutable&lt;/span&gt;&lt;/div&gt;
+          &lt;table class=&quot;data-table&quot;&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;When&lt;/th&gt;&lt;th&gt;Actor&lt;/th&gt;&lt;th&gt;Change&lt;/th&gt;&lt;th&gt;Recovery&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;
+            &lt;tr&gt;&lt;td&gt;Jul 20&lt;/td&gt;&lt;td&gt;Jane Adams&lt;/td&gt;&lt;td&gt;Password reset completed&lt;/td&gt;&lt;td&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;Not reversible&lt;/span&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;Jul 14&lt;/td&gt;&lt;td&gt;email-verification&lt;/td&gt;&lt;td&gt;Email marked verified&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Clear email verification&quot; data-before=&quot;Verified&quot; data-after=&quot;Unverified&quot;&gt;Revoke verification&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+            &lt;tr&gt;&lt;td&gt;Jul 12&lt;/td&gt;&lt;td&gt;owner@archura.ai&lt;/td&gt;&lt;td&gt;Display name corrected&lt;/td&gt;&lt;td&gt;&lt;button class=&quot;btn btn-ghost&quot; type=&quot;button&quot; data-stage=&quot;Revert account name&quot; data-before=&quot;Jane Adams&quot; data-after=&quot;Jane Adam&quot;&gt;Revert&lt;/button&gt;&lt;/td&gt;&lt;/tr&gt;
+          &lt;/tbody&gt;&lt;/table&gt;`
+      };
+
+      function refreshIcons() {
+        if (window.lucide) window.lucide.createIcons({ attrs: { width: 16, height: 16 } });
+      }
+
+      function renderTabs() {
+        const tabRoot = root.querySelector(&#x27;#entity-tabs&#x27;);
+        tabRoot.innerHTML = tabs[state.entity].map(label =&gt; `&lt;button class=&quot;btn&quot; type=&quot;button&quot; role=&quot;tab&quot; data-tab=&quot;${label}&quot; aria-selected=&quot;${state.tab[state.entity] === label}&quot;&gt;${label}&lt;/button&gt;`).join(&#x27;&#x27;);
+      }
+
+      function renderHeader() {
+        const isOrg = state.entity === &#x27;org&#x27;;
+        root.querySelector(&#x27;#entity-breadcrumb&#x27;).textContent = isOrg ? &#x27;Organizations / org_01J7ACME&#x27; : &#x27;Accounts / acct_01J7JANE&#x27;;
+        root.querySelector(&#x27;#entity-name&#x27;).textContent = isOrg ? &#x27;Acme Plumbing&#x27; : &#x27;Jane Adams&#x27;;
+        root.querySelector(&#x27;#entity-state&#x27;).textContent = isOrg ? &#x27;Active&#x27; : &#x27;Verified&#x27;;
+        root.querySelector(&#x27;#entity-subtitle&#x27;).innerHTML = isOrg
+          ? &#x27;&lt;span class=&quot;status-dot&quot;&gt;&lt;/span&gt; Production customer · version 17 · updated 8 minutes ago&#x27;
+          : &#x27;&lt;span class=&quot;status-dot&quot;&gt;&lt;/span&gt; jane@acme.example · version 9 · signed in 2 hours ago&#x27;;
+        root.querySelector(&#x27;.entity-header .row-actions&#x27;).innerHTML = isOrg
+          ? &#x27;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Add internal support note&quot; data-before=&quot;No open note&quot; data-after=&quot;Support follow-up requested&quot;&gt;&lt;i data-lucide=&quot;message-square-plus&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Add note&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Suspend organization&quot; data-before=&quot;Active&quot; data-after=&quot;Suspended&quot;&gt;&lt;i data-lucide=&quot;circle-pause&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Suspend&lt;/button&gt;&#x27;
+          : &#x27;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Resend account verification&quot; data-before=&quot;Verified&quot; data-after=&quot;New verification link issued&quot;&gt;&lt;i data-lucide=&quot;mail&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Send verification&lt;/button&gt;&lt;button class=&quot;btn&quot; type=&quot;button&quot; data-stage=&quot;Suspend account&quot; data-before=&quot;Active&quot; data-after=&quot;Suspended&quot;&gt;&lt;i data-lucide=&quot;circle-pause&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt; Suspend&lt;/button&gt;&#x27;;
+        root.querySelector(&#x27;#entity-stats&#x27;).innerHTML = isOrg
+          ? &#x27;&lt;div class=&quot;card viz-stat&quot;&gt;&lt;div class=&quot;text-muted&quot;&gt;Members&lt;/div&gt;&lt;div class=&quot;viz-stat-value&quot;&gt;3&lt;/div&gt;&lt;div class=&quot;text-small&quot;&gt;1 owner · 2 members&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;card viz-stat&quot;&gt;&lt;div class=&quot;text-muted&quot;&gt;Designs&lt;/div&gt;&lt;div class=&quot;viz-stat-value&quot;&gt;8&lt;/div&gt;&lt;div class=&quot;text-small&quot;&gt;6 live · 2 drafts&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;card viz-stat&quot;&gt;&lt;div class=&quot;text-muted&quot;&gt;Subscription&lt;/div&gt;&lt;div class=&quot;viz-stat-value&quot;&gt;Active&lt;/div&gt;&lt;div class=&quot;text-small&quot;&gt;Basic · $5/month&lt;/div&gt;&lt;/div&gt;&#x27;
+          : &#x27;&lt;div class=&quot;card viz-stat&quot;&gt;&lt;div class=&quot;text-muted&quot;&gt;Organizations&lt;/div&gt;&lt;div class=&quot;viz-stat-value&quot;&gt;2&lt;/div&gt;&lt;div class=&quot;text-small&quot;&gt;1 owner · 1 member&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;card viz-stat&quot;&gt;&lt;div class=&quot;text-muted&quot;&gt;Sessions&lt;/div&gt;&lt;div class=&quot;viz-stat-value&quot;&gt;4&lt;/div&gt;&lt;div class=&quot;text-small&quot;&gt;Last active 2 hours ago&lt;/div&gt;&lt;/div&gt;&lt;div class=&quot;card viz-stat&quot;&gt;&lt;div class=&quot;text-muted&quot;&gt;Security&lt;/div&gt;&lt;div class=&quot;viz-stat-value&quot;&gt;Verified&lt;/div&gt;&lt;div class=&quot;text-small&quot;&gt;Password updated Jul 20&lt;/div&gt;&lt;/div&gt;&#x27;;
+      }
+
+      function renderPanel() {
+        const panels = state.entity === &#x27;org&#x27; ? orgPanels : accountPanels;
+        root.querySelector(&#x27;#entity-panel&#x27;).innerHTML = panels[state.tab[state.entity]];
+      }
+
+      function renderEntity() {
+        root.querySelectorAll(&#x27;[data-entity]&#x27;).forEach(button =&gt; button.setAttribute(&#x27;aria-selected&#x27;, String(button.dataset.entity === state.entity)));
+        renderHeader();
+        renderTabs();
+        renderPanel();
+        refreshIcons();
+      }
+
+      function stage(action, before, after) {
+        root.querySelector(&#x27;#change-empty&#x27;).hidden = true;
+        root.querySelector(&#x27;#change-details&#x27;).hidden = false;
+        root.querySelector(&#x27;#change-action&#x27;).textContent = action;
+        root.querySelector(&#x27;#change-before&#x27;).textContent = before;
+        root.querySelector(&#x27;#change-after&#x27;).textContent = after;
+        root.querySelector(&#x27;#result-message&#x27;).classList.remove(&#x27;is-visible&#x27;);
+      }
+
+      root.addEventListener(&#x27;click&#x27;, event =&gt; {
+        const entityButton = event.target.closest(&#x27;[data-entity]&#x27;);
+        if (entityButton) {
+          state.entity = entityButton.dataset.entity;
+          renderEntity();
+          return;
+        }
+        const tabButton = event.target.closest(&#x27;[data-tab]&#x27;);
+        if (tabButton) {
+          state.tab[state.entity] = tabButton.dataset.tab;
+          renderTabs();
+          renderPanel();
+          return;
+        }
+        const actionButton = event.target.closest(&#x27;[data-stage]&#x27;);
+        if (actionButton) stage(actionButton.dataset.stage, actionButton.dataset.before, actionButton.dataset.after);
+      });
+
+      root.addEventListener(&#x27;input&#x27;, event =&gt; {
+        const control = event.target.closest(&#x27;[data-input-action]&#x27;);
+        if (control) stage(control.dataset.inputAction, control.dataset.before, control.value);
+      });
+
+      root.addEventListener(&#x27;change&#x27;, event =&gt; {
+        const control = event.target.closest(&#x27;[data-input-action]&#x27;);
+        if (control) stage(control.dataset.inputAction, control.dataset.before, control.value);
+      });
+
+      root.querySelector(&#x27;#commit-change&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; {
+        root.querySelector(&#x27;#result-message&#x27;).classList.add(&#x27;is-visible&#x27;);
+      });
+
+      renderEntity();
+    })();
+  &lt;/script&gt;
+&lt;/div&gt;
+
+&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+
+  const getTrigger = (target) =&gt;
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest(&quot;[data-tooltip]&quot;)
+      : null;
+  const containsTarget = (trigger, target) =&gt;
+    target?.nodeType != null &amp;&amp; trigger.contains(target);
+  const getContent = (trigger) =&gt;
+    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
+  const getPlacement = (trigger) =&gt; {
+    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
+    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
+  };
+  const getTooltip = () =&gt; {
+    if (tooltip == null) {
+      tooltip = document.createElement(&quot;div&quot;);
+      tooltip.id = tooltipId;
+      tooltip.className = &quot;tooltip&quot;;
+      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) =&gt; {
+    const ids = new Set(
+      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute(&quot;aria-describedby&quot;);
+    } else {
+      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
+    }
+  };
+  const clearOpenTimeout = () =&gt; {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) =&gt; {
+    clearOpenTimeout();
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) =&gt; {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-width&quot;,
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-height&quot;,
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: &quot;fixed&quot;,
+    })
+      .then(({ x, y }) =&gt; {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = &quot;visible&quot;;
+      })
+      .catch(() =&gt; {
+        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) =&gt; {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = &quot;hidden&quot;;
+    floating.style.transform = &quot;translate(0, 0)&quot;;
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) =&gt; {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() =&gt; {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) =&gt; {
+    if (event.pointerType === &quot;touch&quot;) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handleLeave = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(&quot;:focus-visible&quot;)) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) =&gt; {
+    if (event.key === &quot;Escape&quot;) {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () =&gt; {
+    closeTooltip(false);
+    document.removeEventListener(&quot;pointerover&quot;, handlePointerOpen);
+    document.removeEventListener(&quot;pointerout&quot;, handleLeave);
+    document.removeEventListener(&quot;focusin&quot;, handleFocusIn);
+    document.removeEventListener(&quot;focusout&quot;, handleLeave);
+    document.removeEventListener(&quot;keydown&quot;, handleKeyDown);
+    document.removeEventListener(&quot;contextmenu&quot;, handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener(&quot;pointerover&quot;, handlePointerOpen);
+  document.addEventListener(&quot;pointerout&quot;, handleLeave);
+  document.addEventListener(&quot;focusin&quot;, handleFocusIn);
+  document.addEventListener(&quot;focusout&quot;, handleLeave);
+  document.addEventListener(&quot;keydown&quot;, handleKeyDown);
+  document.addEventListener(&quot;contextmenu&quot;, handleContextMenu);
+  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  const initialize = () =&gt; {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById(&quot;codex-visualization-lucide&quot;)
+    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
+})();
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+</body>
+</html>

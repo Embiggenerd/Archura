@@ -103,16 +103,20 @@ export class ArchuraToolbar extends LitElement {
           </button>
           ${this.controller?.canPublish
             ? html`
+                ${this.#renderStatusPill()}
+                <button class="save" ?disabled=${!this.controller.dirty || this.saving} @click=${this.#save}>
+                  ${this.saving ? 'Saving...' : 'Save'}
+                </button>
                 <button
                   class="primary ${this.publishState === 'failed' ? 'failed' : ''}"
-                  ?disabled=${this.publishState === 'publishing'}
+                  ?disabled=${!this.#hasUnpublishedChanges() || this.publishState === 'publishing'}
                   @click=${this.#publish}
                 >
                   ${PUBLISH_LABELS[this.publishState]}
                 </button>
               `
             : html`
-                <button class="primary" ?disabled=${this.saving} @click=${this.#save}>
+                <button class="primary" ?disabled=${!this.controller?.dirty || this.saving} @click=${this.#save}>
                   ${this.saving ? 'Saving...' : 'Save'}
                 </button>
               `}
@@ -290,6 +294,20 @@ export class ArchuraToolbar extends LitElement {
     this.#resetTimer = setTimeout(() => {
       this.publishState = 'idle';
     }, 2000);
+  }
+
+  // Publish is available only when a draft exists (unpublished changes).
+  #hasUnpublishedChanges(): boolean {
+    const state = this.controller?.contentState;
+    return state === 'draft' || state === 'changed';
+  }
+
+  #renderStatusPill() {
+    const state = this.controller?.contentState;
+    if (!state || state === 'empty') return '';
+    const label =
+      state === 'published' ? 'Published' : state === 'changed' ? 'Unpublished changes' : 'Draft';
+    return html`<span class="status status-${state}">${label}</span>`;
   }
 
   static override styles = css`
@@ -478,9 +496,39 @@ export class ArchuraToolbar extends LitElement {
       padding: 10px 16px;
     }
 
+    button.primary:disabled,
+    button.save:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+
     button.failed {
       border-color: #dc2626;
       color: #dc2626;
+    }
+
+    /* Publish lifecycle at a glance (Draft / Unpublished changes / Published) */
+    .status {
+      font: 600 0.72rem/1 Helvetica, Arial, sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 5px 9px;
+      border-radius: 999px;
+    }
+
+    .status-published {
+      background: #ecfdf5;
+      color: #047857;
+    }
+
+    .status-changed {
+      background: #fffbeb;
+      color: #b45309;
+    }
+
+    .status-draft {
+      background: #f3f4f6;
+      color: #6b7280;
     }
 
     .panel {

@@ -326,13 +326,12 @@
         const persistence = createR2Adapter({ endpoint: `/api/artifacts/${site}`, token: token ?? undefined, site });
         const guardedPersistence = readOnly ? {
           ...persistence,
-          publish: async () => { throw new Error('An active subscription is required to publish.'); },
-          publishEmbed: async () => { throw new Error('An active subscription is required to publish.'); },
+          put: async () => { throw new Error('An active subscription is required to publish.'); },
         } : persistence;
         if (readOnly) {
           const notice = document.createElement('div');
           notice.className = 'billing-notice';
-          notice.innerHTML = `This organization is read-only until an owner activates the $5/month plan. <a href="/dashboard/?organization=${encodeURIComponent(organization.id)}">Manage billing</a>`;
+          notice.innerHTML = `This organization is read-only until an owner starts the Basic plan ($5/month, with a 14-day free trial). <a href="/dashboard/?organization=${encodeURIComponent(organization.id)}">Manage billing</a>`;
           document.body.appendChild(notice);
         }
         const editorEl = mountEditor(guardedPersistence);

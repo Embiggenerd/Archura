@@ -1,4 +1,4 @@
-// Verification for GAPS_AND_SOLUTIONS §5: persistence adapters + publish flow.
+// Verification for GAPS_AND_SOLUTIONS §5: the ArchuraStore (get/put) + publish flow.
 // Usage: node scripts/verify-section5.mjs (expects vite dev server on :5199)
 import { rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -32,6 +32,26 @@ try {
   await fontSize.fill('24');
   await fontSize.press('Enter');
 
+  // Save writes a DRAFT and leaves the served artifact untouched.
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  const afterSave = await page.evaluate(async () => {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    let draft = 0;
+    for (let i = 0; i < 60; i++) {
+      draft = (await fetch('/api/artifacts/sites/dev/pages/Landing.draft')).status;
+      if (draft === 200) break;
+      await wait(50);
+    }
+    const published = (await fetch('/api/artifacts/sites/dev/pages/Landing')).status;
+    return { draft, published };
+  });
+  check(
+    'save: writes a draft without publishing',
+    afterSave.draft === 200 && afterSave.published === 404,
+    JSON.stringify(afterSave)
+  );
+
+  // Publish promotes the draft to the served artifact and removes the draft.
   const publishButton = page.getByRole('button', { name: /Publish/ });
   await publishButton.click();
   await page.getByRole('button', { name: 'Published' }).waitFor({ timeout: 10000 });
@@ -39,14 +59,16 @@ try {
 
   const stored = await page.evaluate(async () => {
     const res = await fetch('/api/artifacts/sites/dev/pages/Landing');
-    return res.ok ? res.json() : null;
+    const draft = await fetch('/api/artifacts/sites/dev/pages/Landing.draft');
+    return { artifact: res.ok ? await res.json() : null, draftStatus: draft.status };
   });
   check(
-    'publish: artifact written to the filesystem store',
-    stored &&
-      /--font-size:\s*24px/.test(stored.snapshot.html) &&
-      stored.content?.components?.length === 3,
-    JSON.stringify(stored?.config)
+    'publish: promotes to served artifact and clears the draft',
+    stored.artifact &&
+      stored.draftStatus === 404 &&
+      /--font-size:\s*24px/.test(stored.artifact.snapshot.html) &&
+      stored.artifact.content?.components?.length === 3,
+    JSON.stringify({ draftStatus: stored.draftStatus, config: stored.artifact?.config })
   );
 
   // --- 2. Load-on-open: reload boots from the published artifact ---
@@ -83,13 +105,18 @@ try {
     editor.style.cssText = 'height:700px;flex:none;display:block;';
     editor.componentPath = ['cards', 'Card'];
     editor.persistence = {
-      load: async () => null,
-      publish: () => new Promise((resolve) => setTimeout(resolve, 800)),
+      get: async () => null,
+      put: () => new Promise((resolve) => setTimeout(resolve, 800)),
     };
     document.body.appendChild(editor);
   });
   const slowFrame = page.frameLocator('#slow-editor iframe.gjs-frame');
   await slowFrame.locator('archura-card').waitFor({ state: 'visible', timeout: 15000 });
+  // Publish is gated on a saved draft: dirty the buffer, then Save.
+  await page.evaluate(() =>
+    document.querySelector('#slow-editor').getController().setPageMeta({ title: 'slow' })
+  );
+  await page.locator('#slow-editor').getByRole('button', { name: 'Save', exact: true }).click();
   const slowButton = page.locator('#slow-editor').getByRole('button', { name: /Publish/ });
   await slowButton.click();
   await page.locator('#slow-editor').getByRole('button', { name: 'Publishing...' }).waitFor({ timeout: 2000 });
@@ -105,8 +132,10 @@ try {
     editor.style.cssText = 'height:700px;flex:none;display:block;';
     editor.componentPath = ['cards', 'Card'];
     editor.persistence = {
-      load: async () => null,
-      publish: async () => {
+      get: async () => null,
+      put: async (key) => {
+        // Save (the draft) succeeds; Publish (the served artifact) explodes.
+        if (key.endsWith('.draft')) return;
         throw new Error('deploy pipeline exploded');
       },
     };
@@ -117,6 +146,10 @@ try {
   });
   const failFrame = page.frameLocator('#failing-editor iframe.gjs-frame');
   await failFrame.locator('archura-card').waitFor({ state: 'visible', timeout: 15000 });
+  await page.evaluate(() =>
+    document.querySelector('#failing-editor').getController().setPageMeta({ title: 'fail' })
+  );
+  await page.locator('#failing-editor').getByRole('button', { name: 'Save', exact: true }).click();
   await page.locator('#failing-editor').getByRole('button', { name: /Publish/ }).click();
   await page.locator('#failing-editor').getByRole('button', { name: 'Publish failed' }).waitFor({ timeout: 5000 });
   const failErrors = await page.evaluate(() => window.__failErrors);
@@ -142,14 +175,16 @@ try {
       meta: { createdAt: '2026-07-09T00:00:00Z', updatedAt: '2026-07-09T00:00:00Z' },
     };
 
+    const key = artifact.config.componentPath.join('/');
     const good = createR2Adapter({ endpoint: '/mock-r2', token: 'dev-token' });
-    await good.publish(artifact);
-    const loaded = await good.load({ kind: 'component', path: ['cards', 'Card'], label: 'Card' });
+    await good.put(key, JSON.stringify(artifact));
+    const raw = await good.get(key);
+    const loaded = raw ? JSON.parse(raw) : null;
 
     const bad = createR2Adapter({ endpoint: '/mock-r2', token: 'wrong-token' });
     let authError = null;
     try {
-      await bad.publish(artifact);
+      await bad.put(key, JSON.stringify(artifact));
     } catch (e) {
       authError = String(e);
     }

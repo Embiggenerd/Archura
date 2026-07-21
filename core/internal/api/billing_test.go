@@ -14,14 +14,15 @@ import (
 )
 
 type fakeBillingProvider struct {
-	customerID   string
-	checkoutURL  string
-	portalURL    string
-	webhook      billingWebhook
-	subscription billingSubscription
-	customers    int
-	checkouts    int
-	portals      int
+	customerID    string
+	checkoutURL   string
+	portalURL     string
+	webhook       billingWebhook
+	subscription  billingSubscription
+	customers     int
+	checkouts     int
+	portals       int
+	lastTrialDays int64
 }
 
 func (f *fakeBillingProvider) CreateCustomer(_ context.Context, _ billingCustomerInput) (string, error) {
@@ -29,8 +30,9 @@ func (f *fakeBillingProvider) CreateCustomer(_ context.Context, _ billingCustome
 	return f.customerID, nil
 }
 
-func (f *fakeBillingProvider) CreateCheckout(_ context.Context, _ billingCheckoutInput) (string, error) {
+func (f *fakeBillingProvider) CreateCheckout(_ context.Context, input billingCheckoutInput) (string, error) {
 	f.checkouts++
+	f.lastTrialDays = input.TrialPeriodDays
 	return f.checkoutURL, nil
 }
 
@@ -135,6 +137,11 @@ func TestTrialCheckoutAndWebhookFlow(t *testing.T) {
 		"/v1/organizations/"+organizationID+"/billing/checkout", "", token)
 	if checkoutResponse.Code != http.StatusCreated || provider.customers != 1 || provider.checkouts != 1 {
 		t.Fatalf("checkout status=%d provider=%+v body=%s", checkoutResponse.Code, provider, checkoutResponse.Body.String())
+	}
+	// Checkout must defer the first charge with a 14-day Stripe trial, not
+	// charge immediately.
+	if provider.lastTrialDays != basicTrialDays {
+		t.Fatalf("checkout trial days = %d, want %d", provider.lastTrialDays, basicTrialDays)
 	}
 
 	periodEnd := now.Add(31 * 24 * time.Hour)

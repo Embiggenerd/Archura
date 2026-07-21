@@ -10,19 +10,23 @@ import (
 )
 
 const (
-	TrialDuration      = 30 * 24 * time.Hour
+	// The no-card taste: a short free window (ours, not Stripe's) that starts
+	// at first deploy. After it, access pauses until a card starts the Basic
+	// trial — there is no permanent free tier.
+	TrialDuration      = 2 * 24 * time.Hour
 	ServingGracePeriod = 7 * 24 * time.Hour
 )
 
 func OrganizationEntitlementFor(billing OrganizationBilling, role string, now time.Time) OrganizationEntitlement {
 	entitlement := OrganizationEntitlement{
-		Status:            "unstarted",
-		CanEdit:           true,
-		CanManageBilling:  role == "owner",
-		TrialEndsAt:       billing.TrialEndsAt,
-		ServeGraceEndsAt:  billing.ServeGraceEndsAt,
-		CurrentPeriodEnd:  billing.CurrentPeriodEnd,
-		CancelAtPeriodEnd: billing.CancelAtPeriodEnd,
+		Status:             "unstarted",
+		CanEdit:            true,
+		CanManageBilling:   role == "owner",
+		TrialEndsAt:        billing.TrialEndsAt,
+		ServeGraceEndsAt:   billing.ServeGraceEndsAt,
+		CurrentPeriodEnd:   billing.CurrentPeriodEnd,
+		CancelAtPeriodEnd:  billing.CancelAtPeriodEnd,
+		SubscriptionStatus: billing.StripeSubscriptionStatus,
 	}
 
 	switch billing.StripeSubscriptionStatus {

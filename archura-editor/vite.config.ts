@@ -73,6 +73,11 @@ function artifactStore(rootDir: string, options: { bearerToken?: string } = {}):
         res.statusCode = 204;
         return res.end();
       }
+      if (req.method === 'DELETE') {
+        await fs.rm(file, { force: true });
+        res.statusCode = 204;
+        return res.end();
+      }
       next();
     })().catch(() => {
       res.statusCode = 500;
