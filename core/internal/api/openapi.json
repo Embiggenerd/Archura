@@ -977,35 +977,6 @@
         }
       }
     },
-    "/v1/admin/mfa/enroll": {
-      "post": {
-        "tags": ["Admin"], "operationId": "enrollAdminMFA", "summary": "Issue a TOTP secret for the platform owner", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
-        "responses": {
-          "200": { "description": "Secret and provisioning URI", "content": { "application/json": { "schema": { "type": "object", "properties": { "secret": { "type": "string" }, "otpauth_uri": { "type": "string" } } } } } },
-          "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }
-        }
-      }
-    },
-    "/v1/admin/mfa/activate": {
-      "post": {
-        "tags": ["Admin"], "operationId": "activateAdminMFA", "summary": "Confirm TOTP enrollment with a code", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string" } } } } } },
-        "responses": {
-          "200": { "description": "Enrollment confirmed and session elevated", "content": { "application/json": { "schema": { "type": "object", "properties": { "elevated_until": { "type": "string", "format": "date-time" } } } } } },
-          "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }
-        }
-      }
-    },
-    "/v1/admin/mfa/verify": {
-      "post": {
-        "tags": ["Admin"], "operationId": "verifyAdminMFA", "summary": "Step-up: verify a TOTP code to elevate the session", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string" } } } } } },
-        "responses": {
-          "200": { "description": "Session elevated", "content": { "application/json": { "schema": { "type": "object", "properties": { "elevated_until": { "type": "string", "format": "date-time" } } } } } },
-          "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }
-        }
-      }
-    },
     "/v1/admin/organizations": {
       "get": {
         "tags": ["Admin"], "operationId": "listAdminOrganizations", "summary": "Search all organizations", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],

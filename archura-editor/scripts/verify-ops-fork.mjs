@@ -44,7 +44,6 @@ const FORK_DESIGN = `dsn_${'f'.repeat(32)}`;
 // Stub core: admin fork create/finalize + a design read + an org list. The
 // bearer distinguishes a staff session (allowed) from a customer one (403).
 let lastFinalize = null;
-let lastMfaVerify = null;
 const originalFetch = globalThis.fetch;
 globalThis.fetch = async (input, init) => {
   const url = input instanceof URL ? input : new URL(typeof input === 'string' ? input : input.url);
@@ -77,15 +76,6 @@ globalThis.fetch = async (input, init) => {
   if (p === '/v1/admin/organizations') {
     if (!staff) return new Response('forbidden', { status: 403 });
     return Response.json({ items: [{ id: SOURCE_ORG, name: 'Acme' }], next_cursor: '' });
-  }
-  if (p === '/v1/admin/mfa/enroll' && method === 'POST') {
-    if (!staff) return new Response('forbidden', { status: 403 });
-    return Response.json({ secret: 'ABCD', otpauth_uri: 'otpauth://totp/x' });
-  }
-  if (p === '/v1/admin/mfa/verify' && method === 'POST') {
-    if (!staff) return new Response('forbidden', { status: 403 });
-    lastMfaVerify = JSON.parse(init.body);
-    return Response.json({ elevated_until: '2026-07-21T00:15:00Z' });
   }
   throw new Error(`Unexpected core request: ${method} ${p}`);
 };
@@ -169,21 +159,8 @@ try {
   assert.equal(enriched.artifacts.published, true, 'published presence reported');
   assert.equal(enriched.artifacts.draft, false, 'no draft reported');
 
-  // --- MFA step-up proxies: enroll (no body) + verify (code body) forward ---
-  const enroll = await worker.fetch(signed('/api/ops/mfa/enroll', { method: 'POST' }), env);
-  assert.equal(enroll.status, 200, 'mfa enroll forwarded');
-  assert.equal((await enroll.json()).secret, 'ABCD', 'enroll secret returned');
-  const verify = await worker.fetch(
-    signed('/api/ops/mfa/verify', { method: 'POST', body: JSON.stringify({ code: '123456' }) }),
-    env
-  );
-  assert.equal(verify.status, 200, 'mfa verify forwarded');
-  assert.deepEqual(lastMfaVerify, { code: '123456' }, 'verify code body forwarded');
-  const mfaAnon = await worker.fetch(new Request('https://archura.test/api/ops/mfa/verify', { method: 'POST', body: '{}' }), env);
-  assert.equal(mfaAnon.status, 401, 'mfa verify needs a session');
-
   console.log(
-    'worker: /api/ops staff-gated; fork create→copy→finalize leaves source intact (correct dest+etag+kind), template + copy-failure paths, R2 enrichment, MFA step-up proxied'
+    'worker: /api/ops staff-gated; fork create→copy→finalize leaves source intact (correct dest+etag+kind), template + copy-failure paths, R2 enrichment'
   );
 } finally {
   globalThis.fetch = originalFetch;

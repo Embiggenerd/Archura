@@ -49,9 +49,6 @@ type fakeRepository struct {
 	billing             map[string]store.OrganizationBilling
 	webhookEvents       map[string]string
 	designs             map[string][]store.Design
-	mfaSecrets          map[string]string     // accountID → secret
-	mfaActivated        map[string]bool        // accountID → activated
-	sessionElevated     map[string]*time.Time  // session hash → elevated until
 }
 
 type fakeRateLimitCall struct {
@@ -262,57 +259,6 @@ func (f *fakeRepository) AccountByID(_ context.Context, id string) (store.Accoun
 		return store.Account{}, store.ErrNotFound
 	}
 	return account, nil
-}
-
-func (f *fakeRepository) AdminSessionByTokenHash(_ context.Context, hash string) (store.AdminSessionInfo, error) {
-	session, ok := f.accountSessions[hash]
-	if !ok || session.RevokedAt != nil || !session.ExpiresAt.After(time.Now()) {
-		return store.AdminSessionInfo{}, store.ErrNotFound
-	}
-	account, ok := f.accounts[session.AccountID]
-	if !ok {
-		return store.AdminSessionInfo{}, store.ErrNotFound
-	}
-	return store.AdminSessionInfo{
-		Account:       account,
-		MFASecret:     f.mfaSecrets[account.ID],
-		MFAActivated:  f.mfaActivated[account.ID],
-		ElevatedUntil: f.sessionElevated[hash],
-	}, nil
-}
-
-func (f *fakeRepository) SetAccountMFASecret(_ context.Context, accountID, secret string, _ store.AuditEvent) error {
-	if f.mfaSecrets == nil {
-		f.mfaSecrets = make(map[string]string)
-	}
-	f.mfaSecrets[accountID] = secret
-	if f.mfaActivated != nil {
-		delete(f.mfaActivated, accountID)
-	}
-	return nil
-}
-
-func (f *fakeRepository) ActivateAccountMFA(_ context.Context, accountID string, _ store.AuditEvent) error {
-	if f.mfaSecrets[accountID] == "" || f.mfaActivated[accountID] {
-		return store.ErrConflict
-	}
-	if f.mfaActivated == nil {
-		f.mfaActivated = make(map[string]bool)
-	}
-	f.mfaActivated[accountID] = true
-	return nil
-}
-
-func (f *fakeRepository) ElevateAdminSession(_ context.Context, hash string, until time.Time, _ store.AuditEvent) error {
-	if _, ok := f.accountSessions[hash]; !ok {
-		return store.ErrNotFound
-	}
-	if f.sessionElevated == nil {
-		f.sessionElevated = make(map[string]*time.Time)
-	}
-	value := until
-	f.sessionElevated[hash] = &value
-	return nil
 }
 
 func (f *fakeRepository) SitesForAccount(_ context.Context, accountID string) ([]string, error) {

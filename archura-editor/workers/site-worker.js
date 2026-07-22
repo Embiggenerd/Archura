@@ -572,10 +572,6 @@ function opsForwardAllowed(method, rest) {
   if (method === 'PATCH') {
     return rest === 'default-plan' || /^organizations\/[^/]+\/free-plan$/.test(rest);
   }
-  if (method === 'POST') {
-    // Step-up MFA: enrollment + verification for the platform-owner console.
-    return rest === 'mfa/enroll' || rest === 'mfa/activate' || rest === 'mfa/verify';
-  }
   return false;
 }
 
@@ -603,8 +599,7 @@ async function handleOpsApi(request, env, url) {
   // Everything else on the allowlist: gate-then-forward verbatim (core enforces staff).
   if (!opsForwardAllowed(request.method, rest)) return json({ error: 'Not found' }, 404);
   let body;
-  // PATCH and the code-bearing MFA POSTs carry a JSON body; mfa/enroll does not.
-  if (request.method === 'PATCH' || rest === 'mfa/activate' || rest === 'mfa/verify') {
+  if (request.method === 'PATCH') {
     try {
       body = await readBoundedJSON(request);
     } catch {
