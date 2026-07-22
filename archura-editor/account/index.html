@@ -54,7 +54,7 @@
     </style>
   </head>
   <body>
-    <nav><a href="/"><strong>Archura</strong></a><button class="ghost" id="signout" hidden>Sign out</button></nav>
+    <nav><a href="/"><strong>Archura</strong></a><button class="ghost" id="signout">Sign out</button></nav>
     <main id="main"><p class="muted">Loading your account…</p></main>
     <script type="module">
       const main = document.getElementById('main');
@@ -108,7 +108,6 @@
       }
 
       function renderAccount(me) {
-        signout.hidden = false;
         const organizations = me.organizations ?? [];
         const invitations = me.invitations ?? [];
         main.innerHTML = `
@@ -180,15 +179,16 @@
       async function init() {
         const response = await fetch('/api/me').catch(() => null);
         if (!response?.ok) {
-          signout.hidden = true;
           renderRegister();
           return;
         }
         renderAccount(await response.json());
       }
+      // Always available — logging out of a broken/stale session is exactly
+      // when it matters most; the HttpOnly cookie clears only via the worker.
       signout.addEventListener('click', async () => {
         await fetch('/api/logout', { method: 'POST' }).catch(() => {});
-        location.href = '/account/';
+        location.href = '/';
       });
       init();
     </script>

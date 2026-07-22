@@ -146,6 +146,11 @@ try {
   bucket.objects.set(sourceKey, artifactBytes);
   const before = new Uint8Array(bucket.objects.get(sourceKey));
 
+  // --- version probe: answers without auth, echoes the injected build vars ---
+  const version = await worker.fetch(new Request('https://archura.test/api/version'), { ...env, GIT_COMMIT: 'abc123', DEPLOYED_AT: '2026-07-22T00:00:00Z' });
+  assert.equal(version.status, 200, 'version probe answers');
+  assert.deepEqual(await version.json(), { commit: 'abc123', deployed_at: '2026-07-22T00:00:00Z' }, 'version probe echoes build vars');
+
   // --- access gate ---
   const anon = await worker.fetch(new Request('https://archura.test/api/ops/organizations', { method: 'GET' }), env);
   assert.equal(anon.status, 401, 'no session rejected');

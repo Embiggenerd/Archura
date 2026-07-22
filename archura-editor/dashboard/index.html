@@ -429,10 +429,25 @@
         main.appendChild(card);
       }
 
+      // Sign out must always be available, signed in or not — logging out of a
+      // broken/stale session is exactly when it matters most. The HttpOnly
+      // cookie can only be cleared through the worker.
+      const signout = document.getElementById('signout');
+      signout.style.display = 'inline-block';
+      signout.addEventListener('click', async () => {
+        await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+        location.href = '/';
+      });
+
       async function init() {
         const pathAccount = location.pathname.match(/^\/([0-9a-fA-F][0-9a-fA-F-]{7,})\/dashboard\/?$/)?.[1] ?? null;
         const me = await fetch('/api/me').then((r) => (r.ok ? r.json() : null)).catch(() => null);
         if (!me) {
+          // Any lingering session cookie is stale (e.g. minted before a key
+          // rotation). It is HttpOnly — invisible to this page — so clear it
+          // through the worker; otherwise "/" keeps redirecting here on
+          // cookie presence alone. A no-cookie visitor gets a harmless 204.
+          await fetch('/api/logout', { method: 'POST' }).catch(() => {});
           renderRegister(pathAccount ? 'This dashboard belongs to a signed-out account — enter its email to get a fresh link.' : '');
           return;
         }
@@ -445,12 +460,6 @@
           return;
         }
         document.getElementById('who').textContent = me.email;
-        const signout = document.getElementById('signout');
-        signout.style.display = 'inline-block';
-        signout.addEventListener('click', async () => {
-          await fetch('/api/logout', { method: 'POST' }).catch(() => {});
-          location.href = '/account/';
-        });
         main.innerHTML = '';
         const requestedOrganization = new URLSearchParams(location.search).get('organization');
         const preferredOrganization = requestedOrganization ?? localStorage.getItem(selectedOrganizationKey);

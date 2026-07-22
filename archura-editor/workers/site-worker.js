@@ -745,6 +745,15 @@ async function designArtifactPresence(env, record) {
 }
 
 async function serveApi(request, env, url) {
+  // Deployed-version probe, mirroring core's /healthz: answers "which build is
+  // live?" in one curl. Values are injected by the deploy script (--var);
+  // absent in dev, where the question doesn't arise.
+  if (url.pathname === '/api/version' && request.method === 'GET') {
+    return json({
+      commit: env.GIT_COMMIT ?? 'unknown',
+      deployed_at: env.DEPLOYED_AT ?? 'unknown',
+    });
+  }
   if (url.pathname.startsWith('/api/core/')) {
     return proxyCore(request, env, url);
   }

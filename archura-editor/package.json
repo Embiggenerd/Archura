@@ -9,7 +9,7 @@
     "build:app": "vite build",
     "build:components": "node scripts/build-components.mjs",
     "build": "npm run build:app && npm run build:components",
-    "deploy": "npm run build && wrangler deploy",
+    "deploy": "npm run build && wrangler deploy --var GIT_COMMIT:$(git rev-parse HEAD) --var DEPLOYED_AT:$(date -u +%Y-%m-%dT%H:%M:%SZ)",
     "practice": "node toy-client/server.mjs",
     "deploy:practice": "wrangler deploy --config toy-client/wrangler.jsonc",
     "verify:all": "node scripts/verify-all.mjs"
