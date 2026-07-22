@@ -112,6 +112,33 @@ services:
     healthcheck:
       disable: true
 
+  # One-shot: bootstrap the platform workspace and grant staff to
+  # PLATFORM_OWNER_EMAIL. Idempotent — deploy.sh runs it on every release, so the
+  # grant self-heals the first time that account signs up. (Same job the dev
+  # stack runs via `adminctl grant-staff` in scripts/dev-up.sh.)
+  adminctl:
+    image: ${CORE_IMAGE:?Set CORE_IMAGE to an immutable tag or digest in release.env}
+    profiles: ["jobs"]
+    entrypoint: ["/adminctl"]
+    environment:
+      ARCHURA_ENV: prod
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      PLATFORM_OWNER_EMAIL: ${PLATFORM_OWNER_EMAIL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - database
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      disable: true
+
 networks:
   edge:
   database:

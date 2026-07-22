@@ -140,6 +140,36 @@ the server. The workflow never copies `.env`, certificates, or editor source.
 Protect the `production` environment with required reviewers if deployments
 should wait for human approval.
 
+## 5b. Platform owner and the ops console
+
+`adminctl` is Core's server-side admin CLI (not part of the web server or the
+customer dashboard). It runs pending migrations, records audit events, and needs
+direct DB access via `DATABASE_URL`. It has three privileged operations:
+
+- `bootstrap` — create/verify Archura's internal platform workspace and, if
+  `PLATFORM_OWNER_EMAIL` is set, grant that account the `platform_owner` role.
+- `grant-staff [email-or-account-id]` — grant an existing account the role
+  (defaults to `PLATFORM_OWNER_EMAIL` when the argument is omitted).
+- `revoke-staff [email-or-account-id]` — remove it.
+
+**The account must already exist before it can be granted.** `deploy.sh` runs
+`adminctl bootstrap` on every release (the `adminctl` job under the `jobs`
+profile). It is idempotent and self-healing: on a fresh database the owner
+account doesn't exist yet, so bootstrap warns and moves on; the grant lands
+automatically on the next deploy after you sign up as `PLATFORM_OWNER_EMAIL`.
+
+So to gain access to `/ops/` on a fresh install:
+
+1. Set `PLATFORM_OWNER_EMAIL` and `ADMIN_API_ENABLED=true` in `.env` (the console
+   returns 404 while `ADMIN_API_ENABLED` is false), then deploy.
+2. Sign up as that email through the normal confirmation flow (needs email
+   delivery, configured via the `CLOUDFLARE_EMAIL_*` vars).
+3. Re-deploy — or run the grant directly:
+   ```sh
+   docker compose --env-file .env --env-file release.env \
+     --profile jobs run --rm adminctl grant-staff
+   ```
+
 ## 6. Enable maintenance
 
 Docker's `restart: unless-stopped` policy restarts the long-running containers

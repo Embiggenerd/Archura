@@ -27,6 +27,12 @@ for attempt in {1..40}; do
   if "${compose[@]}" exec -T core wget -q -O /dev/null http://127.0.0.1:8080/readyz; then
     "${compose[@]}" ps
     echo "core is ready"
+    # Bootstrap the platform workspace and (best-effort) grant the platform owner.
+    # Idempotent and self-healing: `bootstrap` exits 0 even when the owner account
+    # doesn't exist yet (it logs "sign up, then re-run"), so the grant lands on the
+    # next deploy after they sign up. Non-fatal — core is already serving.
+    "${compose[@]}" --profile jobs run --rm adminctl bootstrap \
+      || echo "note: adminctl bootstrap failed — check DB connectivity and PLATFORM_OWNER_EMAIL" >&2
     exit 0
   fi
   sleep 3

@@ -10,7 +10,8 @@ COPY . .
 RUN CGO_ENABLED=0 go build \
     -ldflags "-X github.com/archura/core/internal/buildinfo.Version=${VERSION} -X github.com/archura/core/internal/buildinfo.Commit=${COMMIT} -X github.com/archura/core/internal/buildinfo.BuildTime=${BUILD_TIME}" \
     -o /out/server ./cmd/server && \
-    CGO_ENABLED=0 go build -o /out/maintenance ./cmd/maintenance
+    CGO_ENABLED=0 go build -o /out/maintenance ./cmd/maintenance && \
+    CGO_ENABLED=0 go build -o /out/adminctl ./cmd/adminctl
 
 # Run
 FROM alpine:3.20
@@ -19,6 +20,7 @@ RUN apk add --no-cache ca-certificates && \
     adduser -S -G archura archura
 COPY --from=build /out/server /server
 COPY --from=build /out/maintenance /maintenance
+COPY --from=build /out/adminctl /adminctl
 ENV PORT=8080
 EXPOSE 8080
 EXPOSE 9091
