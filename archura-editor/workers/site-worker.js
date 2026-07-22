@@ -129,6 +129,16 @@ export default {
       return env.ASSETS.fetch(new Request(new URL('/dashboard/', request.url), request));
     }
 
+    // The ops console is a small SPA with real paths (/ops/orgs/<id>,
+    // /ops/accounts, /ops/plan) — serve the /ops/ index for all of them so
+    // deep links and reloads work. Its script assets live under /assets/.
+    if (url.pathname === '/ops') {
+      return Response.redirect(new URL('/ops/', url.origin), 302);
+    }
+    if (url.pathname.startsWith('/ops/') && url.pathname !== '/ops/' && request.method === 'GET') {
+      return env.ASSETS.fetch(new Request(new URL('/ops/', request.url), request));
+    }
+
     if (url.pathname.startsWith('/api/')) {
       return serveApi(request, env, url);
     }
@@ -151,7 +161,9 @@ export default {
   },
 
   async scheduled(_controller, env, ctx) {
-    ctx.waitUntil(cleanupExpiredSites(env));
+    // Sequential: reconciliation walks the same sites/ prefix the expiry pass
+    // lists, so running it after avoids racing deletes against entitlement reads.
+    ctx.waitUntil(cleanupExpiredSites(env).then(() => reconcileDeletedOrganizations(env)));
   },
 };
 
@@ -564,6 +576,8 @@ function opsForwardAllowed(method, rest) {
       rest === 'organizations' ||
       /^organizations\/[^/]+$/.test(rest) ||
       /^organizations\/[^/]+\/(designs|members)$/.test(rest) ||
+      rest === 'accounts' ||
+      /^accounts\/[^/]+$/.test(rest) ||
       rest === 'forks' ||
       rest === 'default-plan' ||
       rest === 'context'
@@ -583,6 +597,21 @@ async function handleOpsApi(request, env, url) {
   // POST /api/ops/forks — the one orchestrated flow (create row → copy blob → finalize).
   if (rest === 'forks' && request.method === 'POST') {
     return handleOpsFork(request, env, sessionToken);
+  }
+
+  // DELETE org/account — orchestrated: core deletes rows (auth + guards) and its
+  // response names what to purge; the Worker then removes the R2 blobs. A failed
+  // purge is reported as pending, not fatal — the nightly reconciliation sweep
+  // converges leftovers, so rows stay authoritative.
+  if (request.method === 'DELETE') {
+    const orgMatch = rest.match(/^organizations\/([^/]+)$/);
+    if (orgMatch) {
+      return handleOpsDelete(env, `/v1/admin/organizations/${encodeURIComponent(orgMatch[1])}`, sessionToken, [orgMatch[1]]);
+    }
+    const accountMatch = rest.match(/^accounts\/([^/]+)$/);
+    if (accountMatch) {
+      return handleOpsDelete(env, `/v1/admin/accounts/${encodeURIComponent(accountMatch[1])}`, sessionToken, []);
+    }
   }
 
   // GET /api/ops/designs/:id — core record enriched with R2 artifact presence.
@@ -678,6 +707,25 @@ async function handleOpsFork(request, env, sessionToken) {
     }).catch(() => {});
     return json({ error: 'Fork copy failed' }, 502);
   }
+}
+
+// Delete an org or account through core, then purge the R2 blobs its response
+// names (released_sites + deleted_organization_ids; org deletes pass their own
+// id via extraOrgIds). Purges act only on the response — computed under core's
+// transaction locks — never on preview data, which can be stale.
+async function handleOpsDelete(env, corePath, sessionToken, extraOrgIds) {
+  const response = await coreRequest(env, corePath, { method: 'DELETE', bearer: sessionToken });
+  if (!response.ok) return opsPassthrough(response);
+  const body = await response.json().catch(() => ({}));
+  const orgIds = [...new Set([...extraOrgIds, ...(body.deleted_organization_ids ?? [])])];
+  let purged = true;
+  for (const site of body.released_sites ?? []) {
+    purged = (await releaseSiteObjects(env, site).catch(() => false)) && purged;
+  }
+  for (const orgId of orgIds) {
+    purged = (await purgePrefix(env, `orgs/${orgId}/`).catch(() => false)) && purged;
+  }
+  return json({ ...body, purge: purged ? 'complete' : 'pending' }, 200);
 }
 
 // Report which R2 artifact blobs a design has, so the read can show live/draft.
@@ -1584,15 +1632,120 @@ async function cleanupExpiredSites(env) {
       { method: 'DELETE', bearer: env.CORE_INTERNAL_KEY }
     ).catch(() => null);
     if (!released?.ok) continue;
-    const siteObjects = await listAllObjects(env.ARTIFACTS, `sites/${site}/`);
-    for (const siteObject of siteObjects) await env.ARTIFACTS.delete(siteObject.key);
-    if (meta.publishableKey && meta.siteId) {
-      await env.ARTIFACTS.delete(`embed-identities/${meta.publishableKey}/${meta.siteId}.json`);
-    }
-    await env.ARTIFACTS.delete(`moderation/flags/${site}.json`);
+    await releaseSiteObjects(env, site, meta).catch(() => {});
     console.log(JSON.stringify({
       event: 'billing_recovery_expired', site, organization_id: meta.organizationId,
     }));
+  }
+}
+
+// Ordered site purge: meta.json strictly last. Two invariants depend on this —
+// serveSite treats a site with missing meta as a legacy *published* site and
+// would serve leftover artifacts, and the reconciliation sweep discovers
+// orphans through meta, so a partial purge must stay discoverable. A crash at
+// any step leaves the site un-servable but findable.
+export async function releaseSiteObjects(env, site, meta = null) {
+  const metaKey = `sites/${site}/meta.json`;
+  if (!meta) {
+    const stored = await env.ARTIFACTS.get(metaKey);
+    meta = stored ? await stored.json().catch(() => null) : null;
+  }
+  const objects = await listAllObjects(env.ARTIFACTS, `sites/${site}/`);
+  for (const object of objects) {
+    if (object.key === metaKey) continue;
+    await env.ARTIFACTS.delete(object.key);
+  }
+  if (meta?.publishableKey && meta?.siteId) {
+    await env.ARTIFACTS.delete(`embed-identities/${meta.publishableKey}/${meta.siteId}.json`);
+  }
+  await env.ARTIFACTS.delete(`moderation/flags/${site}.json`);
+  await env.ARTIFACTS.delete(metaKey);
+  return true;
+}
+
+async function purgePrefix(env, prefix) {
+  const objects = await listAllObjects(env.ARTIFACTS, prefix);
+  for (const object of objects) await env.ARTIFACTS.delete(object.key);
+  return true;
+}
+
+// An unbound claim is only released once it is unambiguously abandoned: older
+// than the email-confirmation TTL (1h in core) plus a day of slack.
+const ABANDONED_CLAIM_GRACE_MS = 25 * 60 * 60 * 1000;
+
+// Nightly R2↔core reconciliation. Purges blobs whose core rows are gone (an
+// admin deletion whose purge failed or whose response was lost), backfills
+// site metas stranded by a crash between the claim's meta write and its core
+// bind, and releases positively abandoned claims. Fails safe throughout: only
+// an explicit exists:false / bound:false from core is destructive; any error
+// or unknown answer means "leave it".
+export async function reconcileDeletedOrganizations(env) {
+  if (!coreConfigured(env) || !env.CORE_INTERNAL_KEY) return;
+
+  const existence = new Map();
+  const organizationGone = async (orgId) => {
+    if (!existence.has(orgId)) {
+      existence.set(
+        orgId,
+        coreRequest(env, `/v1/organizations/${encodeURIComponent(orgId)}/exists`, { bearer: env.CORE_INTERNAL_KEY })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)
+      );
+    }
+    const answer = await existence.get(orgId);
+    return answer?.exists === false;
+  };
+
+  const listed = await listAllObjects(env.ARTIFACTS, 'sites/');
+  const metaObjects = listed.filter((object) => /^sites\/[^/]+\/meta\.json$/.test(object.key));
+  for (const object of metaObjects) {
+    const site = object.key.split('/')[1];
+    const stored = await env.ARTIFACTS.get(object.key);
+    if (!stored) continue;
+    const meta = await stored.json().catch(() => null);
+    if (!meta) continue;
+
+    if (meta.organizationId) {
+      if (await organizationGone(meta.organizationId)) {
+        await releaseSiteObjects(env, site, meta).catch(() => {});
+        console.log(JSON.stringify({ event: 'reconcile_site_released', site, organization_id: meta.organizationId }));
+      }
+      continue;
+    }
+
+    // Unassociated meta: the claim flow writes meta before binding core, so a
+    // crash in between strands a bound site here. Resolve via core.
+    const binding = await coreRequest(env, `/v1/sites/${encodeURIComponent(site)}/binding`, { bearer: env.CORE_INTERNAL_KEY })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+    if (!binding) continue;
+    if (binding.bound) {
+      if (binding.organization_id) {
+        await env.ARTIFACTS.put(object.key, JSON.stringify({ ...meta, organizationId: binding.organization_id }));
+        console.log(JSON.stringify({ event: 'reconcile_meta_backfilled', site, organization_id: binding.organization_id }));
+      }
+      continue;
+    }
+    // Unbound: never touch a legacy published site. Release requires a modern
+    // timestamp past the grace AND positive abandonment — a drafted funnel
+    // claim (serves nothing) or zero published content (a claim that crashed
+    // before any deploy). Legacy metas lack createdAt and have published
+    // artifacts, so they fail both tests and are preserved.
+    const age = meta.createdAt ? Date.now() - Date.parse(meta.createdAt) : NaN;
+    if (!(age > ABANDONED_CLAIM_GRACE_MS)) continue;
+    const abandoned = meta.status === 'drafted' || (await publishedComponentCount(env, [site])) === 0;
+    if (!abandoned) continue;
+    await releaseSiteObjects(env, site, meta).catch(() => {});
+    console.log(JSON.stringify({ event: 'reconcile_abandoned_claim_released', site }));
+  }
+
+  const orgObjects = await listAllObjects(env.ARTIFACTS, 'orgs/');
+  const orgIds = [...new Set(orgObjects.map((object) => object.key.split('/')[1]).filter(Boolean))];
+  for (const orgId of orgIds) {
+    if (await organizationGone(orgId)) {
+      await purgePrefix(env, `orgs/${orgId}/`).catch(() => {});
+      console.log(JSON.stringify({ event: 'reconcile_org_purged', organization_id: orgId }));
+    }
   }
 }
 

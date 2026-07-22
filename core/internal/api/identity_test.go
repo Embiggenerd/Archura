@@ -443,6 +443,25 @@ func (f *fakeRepository) ReleaseOrganizationSite(_ context.Context, subdomain, o
 	return nil
 }
 
+func (f *fakeRepository) OrganizationExists(_ context.Context, organizationID string) (bool, error) {
+	if f.organization.ID == organizationID {
+		return true, nil
+	}
+	for _, organizations := range f.organizations {
+		for _, organization := range organizations {
+			if organization.ID == organizationID {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func (f *fakeRepository) SiteBinding(_ context.Context, subdomain string) (string, bool, error) {
+	organizationID, ok := f.sites[subdomain]
+	return organizationID, ok, nil
+}
+
 func (f *fakeRepository) ensureFakeDefaultOrganization(account store.Account, publishableKey string) store.AccountOrganization {
 	if f.organizations == nil {
 		f.organizations = make(map[string][]store.AccountOrganization)

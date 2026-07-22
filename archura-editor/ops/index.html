@@ -61,8 +61,9 @@
       <h1>Archura Ops</h1>
       <span class="badge" id="ops-env">Production</span>
       <nav>
-        <a data-nav="orgs">Organizations</a>
-        <a data-nav="plan">Default plan</a>
+        <a data-nav href="/ops/">Organizations</a>
+        <a data-nav href="/ops/accounts">Accounts</a>
+        <a data-nav href="/ops/plan">Default plan</a>
       </nav>
     </header>
     <main id="main"><div class="card">Loading…</div></main>
@@ -101,6 +102,71 @@
         main.innerHTML = `<div class="denied"><h2>Not authorized</h2><p class="hint">This console is for Archura platform owners. Sign in with a staff account.</p></div>`;
       }
 
+      // --- Routing: real paths so deep links, reloads and the back button work.
+      // The Worker serves this page for every /ops/* path.
+      function route() {
+        const path = location.pathname.replace(/\/$/, '') || '/ops';
+        const orgMatch = path.match(/^\/ops\/orgs\/([^/]+)$/);
+        if (orgMatch) return renderOrg(decodeURIComponent(orgMatch[1]));
+        if (path === '/ops/accounts') return renderAccounts();
+        if (path === '/ops/plan') return renderDefaultPlan();
+        return renderOrgs();
+      }
+      function navigate(path) {
+        history.pushState(null, '', path);
+        route();
+      }
+      window.addEventListener('popstate', route);
+
+      // One-shot banner shown at the top of the next rendered list (e.g. the
+      // result of a deletion, which navigates away from the deleted thing).
+      let noticeText = '';
+      function takeNotice() {
+        const text = noticeText;
+        noticeText = '';
+        return text ? `<div class="card ok" data-notice>${esc(text)}</div>` : '';
+      }
+
+      // Typed-confirmation modal for destructive actions: the confirm button
+      // stays disabled until the exact phrase is typed. `body` is trusted
+      // pre-escaped HTML from the caller. onConfirm returns an error message to
+      // show, or nothing on success (the caller navigates away).
+      function showDeleteModal({ title, body, phrase, confirmLabel, onConfirm }) {
+        document.querySelector('[data-delete-modal]')?.remove();
+        const overlay = document.createElement('div');
+        overlay.dataset.deleteModal = '';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,.6);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+        overlay.innerHTML = `
+          <div style="background:#fff;border-radius:14px;padding:24px;width:min(460px,94vw);box-shadow:0 20px 40px rgba(0,0,0,.3)">
+            <h2 style="margin:0 0 6px;font-size:1.1rem">${esc(title)}</h2>
+            <div style="margin:0 0 14px;color:#374151;font-size:.9rem">${body}</div>
+            <label>Type <code>${esc(phrase)}</code> to confirm</label>
+            <input data-phrase autocomplete="off" style="width:100%;box-sizing:border-box">
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+              <button class="ghost" data-close>Cancel</button>
+              <button data-confirm disabled style="background:#b91c1c">${esc(confirmLabel)}</button>
+            </div>
+            <p data-err class="error"></p>
+          </div>`;
+        const input = overlay.querySelector('[data-phrase]');
+        const confirm = overlay.querySelector('[data-confirm]');
+        const err = overlay.querySelector('[data-err]');
+        input.addEventListener('input', () => { confirm.disabled = input.value.trim() !== phrase; });
+        overlay.querySelector('[data-close]').addEventListener('click', () => overlay.remove());
+        confirm.addEventListener('click', async () => {
+          confirm.disabled = true;
+          err.textContent = '';
+          const message = await onConfirm();
+          if (message) {
+            err.textContent = message;
+            confirm.disabled = input.value.trim() !== phrase;
+            return;
+          }
+          overlay.remove();
+        });
+        document.body.appendChild(overlay);
+      }
+
       // --- Organizations list ---
       async function renderOrgs(query = '') {
         main.innerHTML = `<div class="card">Loading…</div>`;
@@ -115,6 +181,7 @@
             <td>${esc(o.status || '')}</td>
           </tr>`).join('') || `<tr><td colspan="2" class="hint">No organizations.</td></tr>`;
         main.innerHTML = `
+          ${takeNotice()}
           <div class="card">
             <h2>Organizations</h2>
             <p class="hint">Browse any organization read-only, then fork a design to work on it — or edit its free-plan terms.</p>
@@ -122,7 +189,7 @@
             <table><thead><tr><th>Organization</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>
           </div>`;
         main.querySelector('.search').addEventListener('submit', (e) => { e.preventDefault(); renderOrgs(main.querySelector('#q').value.trim()); });
-        main.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => renderOrg(b.dataset.open)));
+        main.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => navigate(`/ops/orgs/${encodeURIComponent(b.dataset.open)}`)));
       }
 
       // --- Organization detail: designs (read-only) + fork + free-plan terms ---
@@ -173,11 +240,31 @@
             <div class="switch" style="margin-bottom:12px"><input id="fp-forever" type="checkbox" ${b.free_no_expiry ? 'checked' : ''}><label for="fp-forever" style="margin:0">No expiry (forever)</label></div>
             <div><label>Reason (required)</label><input id="fp-reason" placeholder="e.g. pilot customer"></div>
             <div style="margin-top:12px"><button id="fp-save">Save terms</button> <span id="fp-msg" class="error"></span></div>
+          </div>
+          <div class="card">
+            <h2>Danger zone</h2>
+            <p class="hint">Deleting removes the organization, its designs, sites and billing rows, and purges its published blobs. Slug: <code>${esc(org.slug || '')}</code></p>
+            <button data-delete-org style="background:#b91c1c">Delete organization</button>
           </div>`;
 
-        main.querySelector('[data-back]').addEventListener('click', () => renderOrgs());
+        main.querySelector('[data-back]').addEventListener('click', () => navigate('/ops/'));
         main.querySelectorAll('[data-fork]').forEach((btn) => btn.addEventListener('click', () => forkDesign(btn)));
         main.querySelector('#fp-save').addEventListener('click', () => saveTerms(id));
+        main.querySelector('[data-delete-org]').addEventListener('click', () => showDeleteModal({
+          title: `Delete ${org.name || org.slug || org.id}`,
+          body: `<p style="margin:0">Removes every row and published blob for this organization. Sites it serves stop resolving. This cannot be undone.</p>`,
+          phrase: org.slug || org.id,
+          confirmLabel: 'Delete organization',
+          onConfirm: async () => {
+            const res = await api(`organizations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            const body = res ? await res.json().catch(() => null) : null;
+            if (!res || !res.ok) return body?.error?.message ?? `Could not delete (${res?.status ?? '?'}).`;
+            noticeText = body.purge === 'pending'
+              ? `Deleted ${org.slug || id}. Some published files could not be removed yet — the nightly cleanup will finish them.`
+              : `Deleted ${org.slug || id}.`;
+            navigate('/ops/');
+          },
+        }));
       }
 
       async function forkDesign(btn) {
@@ -213,6 +300,70 @@
         const body = res ? await res.json().catch(() => null) : null;
         if (res && res.ok) { msg.className = 'ok'; msg.textContent = 'Saved.'; return; }
         msg.textContent = body?.error?.message ?? body?.error ?? `Could not save (${res?.status ?? '?'}).`;
+      }
+
+      // --- Accounts: list, search, delete (test-account cleanup) ---
+      async function renderAccounts(query = '') {
+        main.innerHTML = `<div class="card">Loading…</div>`;
+        const res = await api(`accounts?q=${encodeURIComponent(query)}&limit=25`);
+        if (res && (res.status === 401 || res.status === 403)) return renderDenied();
+        if (!res || !res.ok) { main.innerHTML = `<div class="card">Could not load accounts.</div>`; return; }
+        const { accounts = [] } = await res.json();
+        const rows = accounts.map((a) => `
+          <tr>
+            <td><code>${esc(a.email)}</code>${a.staff_role ? ` <span class="badge-pill">${esc(a.staff_role)}</span>` : ''}</td>
+            <td>${esc(a.membership_count ?? '–')}</td>
+            <td>${esc((a.created_at || '').slice(0, 10))}</td>
+            <td>${a.staff_role ? '' : `<button class="ghost" data-delete-account="${esc(a.id)}" data-email="${esc(a.email)}">Delete</button>`}</td>
+          </tr>`).join('') || `<tr><td colspan="4" class="hint">No accounts.</td></tr>`;
+        main.innerHTML = `
+          ${takeNotice()}
+          <div class="card">
+            <h2>Accounts</h2>
+            <p class="hint">Every registered account. Deleting an account also deletes organizations where it is the only member — use the confirmation preview to see what goes with it.</p>
+            <form class="search"><input id="q" placeholder="Search email…" value="${esc(query)}"><button type="submit">Search</button></form>
+            <table><thead><tr><th>Email</th><th>Memberships</th><th>Created</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+          </div>`;
+        main.querySelector('.search').addEventListener('submit', (e) => { e.preventDefault(); renderAccounts(main.querySelector('#q').value.trim()); });
+        main.querySelectorAll('[data-delete-account]').forEach((btn) =>
+          btn.addEventListener('click', () => confirmAccountDelete(btn.dataset.deleteAccount, btn.dataset.email))
+        );
+      }
+
+      // The preview names what cascades (sole-member orgs and their sites) and
+      // what will block (orgs this account is the last owner of), so the
+      // operator sees the blast radius before typing the email.
+      async function confirmAccountDelete(id, email) {
+        const res = await api(`accounts/${encodeURIComponent(id)}`);
+        const detail = res && res.ok ? await res.json().catch(() => null) : null;
+        const memberships = detail?.memberships ?? [];
+        const cascades = memberships.filter((m) => m.sole_member);
+        const blockers = memberships.filter((m) => m.last_owner && !m.sole_member);
+        const detaches = memberships.filter((m) => !m.sole_member && !m.last_owner);
+        const list = (items, label) => items.length
+          ? `<p style="margin:8px 0 2px"><strong>${label}</strong></p><ul style="margin:0;padding-left:18px">${items.map((m) =>
+              `<li><code>${esc(m.slug || m.organization_id)}</code>${(m.sites ?? []).length ? ` — sites: ${m.sites.map((s) => esc(s)).join(', ')}` : ''}</li>`).join('')}</ul>`
+          : '';
+        showDeleteModal({
+          title: `Delete ${email}`,
+          body: `
+            <p style="margin:0">Removes the account, its sessions and pending invitations.</p>
+            ${list(cascades, 'Also deletes these organizations (sole member):')}
+            ${list(blockers, 'Will BLOCK — this account is the last owner of:')}
+            ${list(detaches, 'Membership removed, organization kept:')}
+            ${detail ? '' : '<p class="error" style="margin:8px 0 0">Could not load the deletion preview.</p>'}`,
+          phrase: email,
+          confirmLabel: 'Delete account',
+          onConfirm: async () => {
+            const del = await api(`accounts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            const body = del ? await del.json().catch(() => null) : null;
+            if (!del || !del.ok) return body?.error?.message ?? `Could not delete (${del?.status ?? '?'}).`;
+            noticeText = body.purge === 'pending'
+              ? `Deleted ${email}. Some published files could not be removed yet — the nightly cleanup will finish them.`
+              : `Deleted ${email}.`;
+            renderAccounts();
+          },
+        });
       }
 
       // --- Default free plan (what new orgs get) ---
@@ -251,10 +402,10 @@
       }
 
       document.querySelectorAll('[data-nav]').forEach((a) =>
-        a.addEventListener('click', () => (a.dataset.nav === 'plan' ? renderDefaultPlan() : renderOrgs()))
+        a.addEventListener('click', (e) => { e.preventDefault(); navigate(a.getAttribute('href')); })
       );
 
-      renderOrgs();
+      route();
     </script>
   </body>
 </html>

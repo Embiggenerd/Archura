@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# pre-push: when pushing master to origin, detach a watcher that tails the CI/CD
+# run the push triggers. Never blocks or fails the push.
+#
+#   - Only fires for `origin` + refs/heads/master (not other remotes/branches).
+#   - Skips silently if gh isn't installed, or if you set NO_WATCH=1.
+#   - git has no post-push hook, so we background the watcher here (it waits for
+#     the run to appear, which happens right after this hook lets the push go).
+#
+# Args: $1 = remote name, $2 = remote URL. Stdin: one line per pushed ref,
+#       "<local ref> <local sha> <remote ref> <remote sha>".
+set -euo pipefail
+
+[ "${NO_WATCH:-}" = "1" ] && exit 0
+[ "${1:-}" = "origin" ] || exit 0
+
+zero=0000000000000000000000000000000000000000
+sha=""
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  if [ "$remote_ref" = "refs/heads/master" ] && [ "$local_sha" != "$zero" ]; then
+    sha=$local_sha
+  fi
+done
+[ -n "$sha" ] || exit 0   # not pushing master (or deleting it)
+
+command -v gh >/dev/null 2>&1 || {
+  echo "pre-push: install gh to auto-watch deploys (brew install gh && gh auth login)" >&2
+  exit 0
+}
+
+root=$(git rev-parse --show-toplevel)
+# Where the detached watcher writes: the terminal if we have one, else a log.
+if [ -w /dev/tty ]; then out=/dev/tty; else out=/tmp/archura-deploy-watch.log; fi
+
+# Detach: the subshell backgrounds the watcher and exits, orphaning it so it
+# outlives this hook and the push.
+( "$root/scripts/deploy-watch.sh" --sha "$sha" >"$out" 2>&1 & ) >/dev/null 2>&1 </dev/null
+
+if [ "$out" = /dev/tty ]; then
+  echo "pre-push: watching this deploy in the background (NO_WATCH=1 git push to skip)…" >&2
+else
+  echo "pre-push: watching this deploy → tail -f $out (NO_WATCH=1 git push to skip)" >&2
+fi
+exit 0

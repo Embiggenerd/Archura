@@ -56,6 +56,10 @@ func auditMetadata(event AuditEvent) ([]byte, error) {
 		if _, ok := event.Metadata.(FreePlanAuditMetadata); !ok {
 			return nil, fmt.Errorf("%s requires FreePlanAuditMetadata", event.Action)
 		}
+	case "admin.organization_deleted", "admin.account_deleted":
+		if _, ok := event.Metadata.(DeletionAuditMetadata); !ok {
+			return nil, fmt.Errorf("%s requires DeletionAuditMetadata", event.Action)
+		}
 	case "confirmation.created", "confirmation.verified", "confirmation.verify_rejected",
 		"account.created", "session.created", "site_ownership.bound", "site_ownership.rejected",
 		"site_ownership.released", "billing.trial_started", "billing.checkout_created",

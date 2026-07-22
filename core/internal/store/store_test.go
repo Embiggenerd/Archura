@@ -62,6 +62,14 @@ func TestMigrateIdempotent(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("schema_migrations rows for 0012 = %d, want 1", count)
 	}
+	if err := st.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM schema_migrations WHERE version = '0016_admin_deletions'`,
+	).Scan(&count); err != nil {
+		t.Fatalf("query admin-deletions migration: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("schema_migrations rows for 0016 = %d, want 1", count)
+	}
 	if err := st.Pool.QueryRow(ctx, `
 		SELECT count(*)
 		FROM organizations o

@@ -219,7 +219,53 @@ type AdminOrganization struct {
 	MemberCount int
 	DesignCount int
 	SiteCount   int
+	Sites       []string
 	Billing     OrganizationBilling
+}
+
+type AdminAccount struct {
+	ID              string
+	Email           string
+	StaffRole       string
+	CreatedAt       time.Time
+	MembershipCount int
+}
+
+type AdminAccountMembership struct {
+	OrganizationID string
+	Slug           string
+	Role           string
+	MemberCount    int
+	SoleMember     bool
+	LastOwner      bool
+	Sites          []string
+}
+
+type AdminAccountDetail struct {
+	AdminAccount
+	Memberships []AdminAccountMembership
+}
+
+type AdminOrganizationDeleteResult struct {
+	ReleasedSites []string
+}
+
+type AdminAccountDeleteResult struct {
+	DeletedOrganizationIDs []string
+	ReleasedSites          []string
+}
+
+type AdminDeleteBlocked struct {
+	Code             string
+	OrganizationID   string
+	OrganizationSlug string
+}
+
+func (e *AdminDeleteBlocked) Error() string {
+	if e.OrganizationSlug != "" {
+		return e.Code + ": " + e.OrganizationSlug
+	}
+	return e.Code
 }
 
 type AdminOrganizationMember struct {
@@ -254,6 +300,12 @@ type ForkAuditMetadata struct {
 	SourceArtifactKind   string `json:"source_artifact_kind,omitempty"`
 	SourceETag           string `json:"source_etag,omitempty"`
 	TemplateRef          string `json:"template_ref,omitempty"`
+}
+
+type DeletionAuditMetadata struct {
+	Email                  string   `json:"email,omitempty"`
+	Slug                   string   `json:"slug,omitempty"`
+	DeletedOrganizationIDs []string `json:"deleted_organization_ids,omitempty"`
 }
 
 type OrganizationInvitation struct {

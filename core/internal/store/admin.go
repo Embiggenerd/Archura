@@ -225,6 +225,7 @@ func (s *Store) AdminOrganizations(ctx context.Context, query string, limit, off
 			(SELECT count(*) FROM organization_memberships m WHERE m.organization_id = o.id),
 			(SELECT count(*) FROM designs d WHERE d.organization_id = o.id AND d.deleted_at IS NULL),
 			(SELECT count(*) FROM organization_sites s WHERE s.organization_id = o.id),
+			ARRAY(SELECT s.subdomain FROM organization_sites s WHERE s.organization_id = o.id ORDER BY s.subdomain),
 			b.organization_id::text, b.trial_started_at, b.trial_ends_at, b.serve_grace_ends_at,
 			b.free_trial_days, b.free_design_limit, b.free_site_limit, b.free_no_expiry,
 			COALESCE(b.stripe_customer_id, ''), COALESCE(b.stripe_subscription_id, ''),
@@ -250,7 +251,7 @@ func (s *Store) AdminOrganizations(ctx context.Context, query string, limit, off
 		if err := rows.Scan(
 			&item.ID, &item.Name, &item.Slug, &item.AllowedOrigins, &item.Status,
 			&item.CapsExempt, &item.IsPlatformWorkspace, &item.CreatedAt,
-			&item.MemberCount, &item.DesignCount, &item.SiteCount,
+			&item.MemberCount, &item.DesignCount, &item.SiteCount, &item.Sites,
 			&item.Billing.OrganizationID, &item.Billing.TrialStartedAt, &item.Billing.TrialEndsAt,
 			&item.Billing.ServeGraceEndsAt, &item.Billing.FreeTrialDays, &item.Billing.FreeDesignLimit,
 			&item.Billing.FreeSiteLimit, &item.Billing.FreeNoExpiry, &item.Billing.StripeCustomerID,

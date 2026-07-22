@@ -16,6 +16,8 @@ import (
 )
 
 type adminRepository interface {
+	AdminAccounts(context.Context, string, int, int) (store.AdminPage[store.AdminAccount], error)
+	AdminAccountByID(context.Context, string) (store.AdminAccountDetail, error)
 	AdminOrganizations(context.Context, string, int, int) (store.AdminPage[store.AdminOrganization], error)
 	AdminOrganizationByID(context.Context, string) (store.AdminOrganization, error)
 	AdminOrganizationMembers(context.Context, string, int, int) (store.AdminPage[store.AdminOrganizationMember], error)
@@ -27,6 +29,8 @@ type adminRepository interface {
 	DefaultFreePlan(context.Context) (store.DefaultFreePlan, error)
 	UpdateDefaultFreePlan(context.Context, store.FreePlanPatch, store.AuditEvent) (store.DefaultFreePlan, error)
 	UpdateOrganizationFreePlan(context.Context, string, store.OrganizationFreePlanPatch, store.AuditEvent) (store.OrganizationBilling, error)
+	DeleteOrganization(context.Context, string, store.AuditEvent) (store.AdminOrganizationDeleteResult, error)
+	DeleteAccount(context.Context, string, store.AuditEvent) (store.AdminAccountDeleteResult, error)
 }
 
 type adminAccountContextKey struct{}
@@ -116,6 +120,126 @@ func (s *Server) handleAdminOrganizations(w http.ResponseWriter, r *http.Request
 		items = append(items, adminOrganizationResponse(organization))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"organizations": items, "next_cursor": nullableCursor(page.NextCursor)})
+}
+
+func (s *Server) handleAdminAccounts(w http.ResponseWriter, r *http.Request) {
+	repository, ok := s.adminRepository(w, r)
+	if !ok {
+		return
+	}
+	limit, offset, ok := adminPagination(w, r)
+	if !ok {
+		return
+	}
+	page, err := repository.AdminAccounts(r.Context(), r.URL.Query().Get("q"), limit, offset)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	items := make([]map[string]any, 0, len(page.Items))
+	for _, account := range page.Items {
+		items = append(items, adminAccountResponse(account))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"accounts": items, "next_cursor": nullableCursor(page.NextCursor)})
+}
+
+func (s *Server) handleAdminAccount(w http.ResponseWriter, r *http.Request) {
+	repository, ok := s.adminRepository(w, r)
+	if !ok {
+		return
+	}
+	account, err := repository.AdminAccountByID(r.Context(), chi.URLParam(r, "accountID"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, r, http.StatusNotFound, "account_not_found", "The account was not found.")
+		return
+	}
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	response := adminAccountResponse(account.AdminAccount)
+	memberships := make([]map[string]any, 0, len(account.Memberships))
+	for _, membership := range account.Memberships {
+		memberships = append(memberships, map[string]any{
+			"organization_id": membership.OrganizationID,
+			"slug":            membership.Slug,
+			"role":            membership.Role,
+			"member_count":    membership.MemberCount,
+			"sole_member":     membership.SoleMember,
+			"last_owner":      membership.LastOwner,
+			"sites":           membership.Sites,
+		})
+	}
+	response["memberships"] = memberships
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleAdminDeleteOrganization(w http.ResponseWriter, r *http.Request) {
+	repository, ok := s.adminRepository(w, r)
+	if !ok {
+		return
+	}
+	account := adminAccount(r)
+	result, err := repository.DeleteOrganization(
+		r.Context(), chi.URLParam(r, "organizationID"), adminDeleteAudit(r, account),
+	)
+	if s.writeAdminDeleteError(w, r, err, "organization") {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"released_sites": result.ReleasedSites})
+}
+
+func (s *Server) handleAdminDeleteAccount(w http.ResponseWriter, r *http.Request) {
+	repository, ok := s.adminRepository(w, r)
+	if !ok {
+		return
+	}
+	account := adminAccount(r)
+	result, err := repository.DeleteAccount(
+		r.Context(), chi.URLParam(r, "accountID"), adminDeleteAudit(r, account),
+	)
+	if s.writeAdminDeleteError(w, r, err, "account") {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"deleted_organization_ids": result.DeletedOrganizationIDs,
+		"released_sites":           result.ReleasedSites,
+	})
+}
+
+func adminDeleteAudit(r *http.Request, account store.Account) store.AuditEvent {
+	return store.AuditEvent{
+		ActorType: "account", ActorID: account.ID,
+		RequestID: middleware.GetReqID(r.Context()),
+	}
+}
+
+func (s *Server) writeAdminDeleteError(w http.ResponseWriter, r *http.Request, err error, resource string) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, r, http.StatusNotFound, resource+"_not_found", "The "+resource+" was not found.")
+		return true
+	}
+	var blocked *store.AdminDeleteBlocked
+	if errors.As(err, &blocked) {
+		message := "The delete is blocked."
+		switch blocked.Code {
+		case "platform_workspace":
+			message = "The platform workspace cannot be deleted."
+		case "subscription_active":
+			message = "Organization " + blocked.OrganizationSlug + " has an active Stripe subscription; cancel it first."
+		case "staff_account":
+			message = "Staff accounts must be demoted before deletion."
+		case "last_owner":
+			message = "Organization " + blocked.OrganizationSlug + " needs another owner before this account can be deleted."
+		}
+		writeError(w, r, http.StatusConflict, blocked.Code, message)
+		return true
+	}
+	s.internalError(w, r, err)
+	return true
 }
 
 func (s *Server) handleAdminOrganization(w http.ResponseWriter, r *http.Request) {
@@ -532,8 +656,17 @@ func adminOrganizationResponse(organization store.AdminOrganization) map[string]
 		"status": organization.Status, "allowed_origins": organization.AllowedOrigins,
 		"caps_exempt": organization.CapsExempt, "is_platform_workspace": organization.IsPlatformWorkspace,
 		"member_count": organization.MemberCount, "design_count": organization.DesignCount,
-		"site_count": organization.SiteCount, "billing": adminBillingResponse(organization.Billing),
+		"site_count": organization.SiteCount, "sites": organization.Sites,
+		"billing":    adminBillingResponse(organization.Billing),
 		"created_at": organization.CreatedAt,
+	}
+}
+
+func adminAccountResponse(account store.AdminAccount) map[string]any {
+	return map[string]any{
+		"id": account.ID, "email": account.Email,
+		"staff_role": emptyAsNil(account.StaffRole), "created_at": account.CreatedAt,
+		"membership_count": account.MembershipCount,
 	}
 }
 

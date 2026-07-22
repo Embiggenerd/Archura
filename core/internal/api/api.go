@@ -44,6 +44,8 @@ type repository interface {
 	ReleaseOrganizationSite(context.Context, string, string, store.AuditEvent) error
 	SitesForAccount(context.Context, string) ([]string, error)
 	BindSiteOwnership(context.Context, string, string, store.AuditEvent) error
+	OrganizationExists(context.Context, string) (bool, error)
+	SiteBinding(context.Context, string) (string, bool, error)
 	RecordAudit(context.Context, store.AuditEvent) error
 	ConsumeRateLimit(context.Context, string, string, int, time.Duration) (store.RateLimitResult, error)
 	BillingForOrganization(context.Context, string) (store.OrganizationBilling, error)
@@ -117,6 +119,10 @@ func (s *Server) Router() http.Handler {
 		r.Get("/context", s.handleAdminContext)
 		r.Get("/organizations", s.handleAdminOrganizations)
 		r.Get("/organizations/{organizationID}", s.handleAdminOrganization)
+		r.Delete("/organizations/{organizationID}", s.handleAdminDeleteOrganization)
+		r.Get("/accounts", s.handleAdminAccounts)
+		r.Get("/accounts/{accountID}", s.handleAdminAccount)
+		r.Delete("/accounts/{accountID}", s.handleAdminDeleteAccount)
 		r.Get("/organizations/{organizationID}/designs", s.handleAdminOrganizationDesigns)
 		r.Get("/organizations/{organizationID}/members", s.handleAdminOrganizationMembers)
 		r.Patch("/organizations/{organizationID}/free-plan", s.handleAdminPatchOrganizationPlan)
@@ -142,6 +148,8 @@ func (s *Server) Router() http.Handler {
 		r.Post("/organizations/{organizationID}/invitations", s.handleCreateInvitation)
 		r.Post("/organizations/{organizationID}/billing/start-trial", s.handleStartTrial)
 		r.Get("/organizations/{organizationID}/entitlement", s.handleOrganizationEntitlement)
+		r.Get("/organizations/{organizationID}/exists", s.handleOrganizationExists)
+		r.Get("/sites/{subdomain}/binding", s.handleSiteBinding)
 		r.Post("/organizations/{organizationID}/deploy-check", s.handleDeployCheck)
 		r.Post("/organizations/{organizationID}/billing/checkout", s.handleBillingCheckout)
 		r.Post("/organizations/{organizationID}/billing/portal", s.handleBillingPortal)

@@ -375,7 +375,7 @@
       },
       "AdminOrganization": {
         "type": "object",
-        "required": ["id", "name", "slug", "status", "allowed_origins", "caps_exempt", "is_platform_workspace", "member_count", "design_count", "site_count", "billing", "created_at"],
+        "required": ["id", "name", "slug", "status", "allowed_origins", "caps_exempt", "is_platform_workspace", "member_count", "design_count", "site_count", "sites", "billing", "created_at"],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "name": { "type": "string" },
@@ -387,10 +387,77 @@
           "member_count": { "type": "integer", "minimum": 0 },
           "design_count": { "type": "integer", "minimum": 0 },
           "site_count": { "type": "integer", "minimum": 0 },
+          "sites": { "type": "array", "items": { "type": "string" } },
           "billing": { "$ref": "#/components/schemas/AdminBilling" },
           "member_summary": { "type": "array", "maxItems": 5, "items": { "$ref": "#/components/schemas/AdminMember" } },
           "design_summary": { "type": "array", "maxItems": 5, "items": { "$ref": "#/components/schemas/AdminDesign" } },
           "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AdminAccount": {
+        "type": "object",
+        "required": ["id", "email", "staff_role", "created_at", "membership_count"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "staff_role": { "type": ["string", "null"], "enum": ["platform_owner", null] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "membership_count": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "AdminAccountMembership": {
+        "type": "object",
+        "required": ["organization_id", "slug", "role", "member_count", "sole_member", "last_owner", "sites"],
+        "properties": {
+          "organization_id": { "type": "string", "format": "uuid" },
+          "slug": { "type": "string" },
+          "role": { "type": "string", "enum": ["owner", "member"] },
+          "member_count": { "type": "integer", "minimum": 1 },
+          "sole_member": { "type": "boolean" },
+          "last_owner": { "type": "boolean" },
+          "sites": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "AdminAccountDetail": {
+        "type": "object",
+        "required": ["id", "email", "staff_role", "created_at", "membership_count", "memberships"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "format": "email" },
+          "staff_role": { "type": ["string", "null"], "enum": ["platform_owner", null] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "membership_count": { "type": "integer", "minimum": 0 },
+          "memberships": { "type": "array", "items": { "$ref": "#/components/schemas/AdminAccountMembership" } }
+        }
+      },
+      "AdminOrganizationDeleteResult": {
+        "type": "object",
+        "required": ["released_sites"],
+        "properties": {
+          "released_sites": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "AdminAccountDeleteResult": {
+        "type": "object",
+        "required": ["deleted_organization_ids", "released_sites"],
+        "properties": {
+          "deleted_organization_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+          "released_sites": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "OrganizationExists": {
+        "type": "object",
+        "required": ["exists"],
+        "properties": {
+          "exists": { "type": "boolean" }
+        }
+      },
+      "SiteBinding": {
+        "type": "object",
+        "required": ["bound"],
+        "properties": {
+          "bound": { "type": "boolean" },
+          "organization_id": { "type": "string", "format": "uuid" }
         }
       },
       "AdminMember": {
@@ -963,6 +1030,34 @@
         }
       }
     },
+    "/v1/organizations/{organizationID}/exists": {
+      "get": {
+        "tags": ["Organizations"],
+        "operationId": "getOrganizationExistence",
+        "summary": "Check whether an organization row exists",
+        "security": [{ "ServiceAuth": [], "InternalAuth": [] }],
+        "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": {
+          "200": { "description": "Organization existence", "headers": { "Cache-Control": { "schema": { "type": "string", "example": "no-store" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrganizationExists" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
+    "/v1/sites/{subdomain}/binding": {
+      "get": {
+        "tags": ["Organizations"],
+        "operationId": "getSiteBinding",
+        "summary": "Look up the organization bound to a subdomain",
+        "security": [{ "ServiceAuth": [], "InternalAuth": [] }],
+        "parameters": [{ "name": "subdomain", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Site binding", "headers": { "Cache-Control": { "schema": { "type": "string", "example": "no-store" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SiteBinding" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/InternalError" }
+        }
+      }
+    },
     "/v1/admin/context": {
       "get": {
         "tags": ["Admin"],
@@ -993,6 +1088,34 @@
         "tags": ["Admin"], "operationId": "getAdminOrganization", "summary": "Inspect an organization", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
         "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
         "responses": { "200": { "description": "Organization", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminOrganization" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      },
+      "delete": {
+        "tags": ["Admin"], "operationId": "deleteAdminOrganization", "summary": "Delete an organization", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Organization deleted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminOrganizationDeleteResult" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "500": { "$ref": "#/components/responses/InternalError" } }
+      }
+    },
+    "/v1/admin/accounts": {
+      "get": {
+        "tags": ["Admin"], "operationId": "listAdminAccounts", "summary": "Search all accounts", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [
+          { "name": "q", "in": "query", "schema": { "type": "string" } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 25 } }
+        ],
+        "responses": { "200": { "description": "Accounts", "content": { "application/json": { "schema": { "type": "object", "required": ["accounts", "next_cursor"], "properties": { "accounts": { "type": "array", "items": { "$ref": "#/components/schemas/AdminAccount" } }, "next_cursor": { "type": ["string", "null"] } } } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }, "500": { "$ref": "#/components/responses/InternalError" } }
+      }
+    },
+    "/v1/admin/accounts/{accountID}": {
+      "get": {
+        "tags": ["Admin"], "operationId": "getAdminAccount", "summary": "Inspect an account and its deletion impact", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "accountID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Account", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminAccountDetail" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }, "500": { "$ref": "#/components/responses/InternalError" } }
+      },
+      "delete": {
+        "tags": ["Admin"], "operationId": "deleteAdminAccount", "summary": "Delete an account and its sole-member organizations", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "accountID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Account deleted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminAccountDeleteResult" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "500": { "$ref": "#/components/responses/InternalError" } }
       }
     },
     "/v1/admin/organizations/{organizationID}/designs": {

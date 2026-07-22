@@ -81,12 +81,16 @@ export function showRegisterModal() {
     e.preventDefault();
     const email = overlay.querySelector('input').value.trim();
     const errorEl = overlay.querySelector('.error');
+    const button = overlay.querySelector('button[type="submit"]');
+    if (button.disabled) return;
+    button.disabled = true;
     const res = await fetch('/api/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     }).catch(() => null);
     if (!res || !res.ok) {
+      button.disabled = false;
       errorEl.textContent =
         res?.status === 429 ? 'Too many attempts — wait a bit and try again.' :
         res?.status === 503 ? 'Registration is unavailable (core not running).' :
@@ -116,8 +120,11 @@ export function showDeployModal(editorEl, components) {
     const site = overlay.querySelector('input[name="site"]').value.trim().toLowerCase();
     const email = overlay.querySelector('input[name="email"]').value.trim();
     const errorEl = overlay.querySelector('.error');
+    const button = overlay.querySelector('button[type="submit"]');
+    if (button.disabled) return;
+    button.disabled = true;
     const controller = editorEl.getController();
-    if (!controller) return;
+    if (!controller) { button.disabled = false; return; }
     const [artifact] = await controller.save();
     const modules = buildEmbedModules(artifact, components ?? defaultComponents, location.href);
     const targetName = `${componentPath.at(-1)}.js`;
@@ -134,8 +141,9 @@ export function showDeployModal(editorEl, components) {
       }),
     }).catch(() => null);
     if (!res || !res.ok) {
+      button.disabled = false;
       errorEl.textContent =
-        res?.status === 409 ? 'That name is taken (or the email already has a site).' :
+        res?.status === 409 ? 'That site name is already claimed — pick another.' :
         res?.status === 403 ? 'Deploys are currently restricted.' :
         res?.status === 429 ? 'Too many attempts — wait a bit and try again.' :
         res?.status === 503 ? 'Deploys are unavailable (core not running).' :

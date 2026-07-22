@@ -60,6 +60,26 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## 5. No deployment or merging
+
+**Be careful about doing things with serious consequences to prod or the development environment**
+
+ Things like deployment, creation or merging of git branches, is on the developer to execute. 
+
+
+## 6. Be careful of over engineering
+
+**Don't over engineer solutions in code or in plans**
+
+Lots of times both humans and agents try to signal proof of smart, but really we are here to signal proof of usefulness. Everything comes down to reducing complexity for our clients, and this also includes reducing complexity in our code. So, signal proof of usefulness is both and code and the planning stage.
+
+Proof of smart — the plan shows how clever / thorough / architecturally impressive we are: deep digressions, edge cases nobody asked for, elegant abstractions, long taxonomies. It impresses a reader. It may never change what ships next.
+
+Proof of useful — the plan makes the next real action cheaper and safer: clear scope, ordered work, verify steps, explicit outs, something Igor can say “go” on and then check. It earns its keep by reducing risk or time to a working outcome.
+
+For instance, before implementing concurrency solutions, ask if data can't simply be forked. Reduce the choices you have to make by removing the most complex possibilities.
+
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.

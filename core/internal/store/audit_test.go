@@ -48,3 +48,23 @@ func TestAuditMetadataRejectsUnknownShapesAndActions(t *testing.T) {
 		t.Fatal("arbitrary client audit metadata must be rejected")
 	}
 }
+
+func TestAuditMetadataAcceptsDeletionActions(t *testing.T) {
+	organization, err := auditMetadata(AuditEvent{
+		Action: "admin.organization_deleted", Metadata: DeletionAuditMetadata{Slug: "test-workspace"},
+	})
+	if err != nil || string(organization) != `{"slug":"test-workspace"}` {
+		t.Fatalf("organization deletion metadata = %s, err = %v", organization, err)
+	}
+	account, err := auditMetadata(AuditEvent{
+		Action: "admin.account_deleted", Metadata: DeletionAuditMetadata{
+			Email: "test+ops@example.com", DeletedOrganizationIDs: []string{"org-1"},
+		},
+	})
+	if err != nil || string(account) != `{"email":"test+ops@example.com","deleted_organization_ids":["org-1"]}` {
+		t.Fatalf("account deletion metadata = %s, err = %v", account, err)
+	}
+	if _, err := auditMetadata(AuditEvent{Action: "admin.account_deleted", Metadata: EmptyAuditMetadata{}}); err == nil {
+		t.Fatal("account deletion accepted untyped metadata")
+	}
+}
