@@ -81,8 +81,9 @@
       }
 
       // Environment badge — authoritative from core's ARCHURA_ENV (GET
-      // /v1/admin/context), so dev and prod are never confused. Falls back to a
-      // host heuristic only if the context call is unavailable.
+      // /v1/admin/context), so dev, staging and prod are never confused. Falls
+      // back to a host heuristic only if the context call is unavailable; the
+      // non-local fallback is Staging while no prod environment exists.
       async function setEnvBadge() {
         const badge = document.getElementById('ops-env');
         const context = await api('context').then((r) => (r?.ok ? r.json() : null)).catch(() => null);
@@ -90,11 +91,11 @@
         if (!env) {
           const h = location.hostname;
           const isLocal = h === 'localhost' || h.startsWith('127.') || h === '0.0.0.0' || h.endsWith('.local');
-          env = isLocal ? 'dev' : 'prod';
+          env = isLocal ? 'dev' : 'staging';
         }
-        const isDev = env === 'dev';
-        badge.textContent = isDev ? 'Dev' : 'Production';
-        if (isDev) badge.style.background = '#334155';
+        badge.textContent = env === 'dev' ? 'Dev' : env === 'staging' ? 'Staging' : 'Production';
+        if (env === 'dev') badge.style.background = '#334155';
+        if (env === 'staging') badge.style.background = '#b45309';
       }
       setEnvBadge();
 

@@ -25,7 +25,7 @@ services:
     image: ${CORE_IMAGE:?Set CORE_IMAGE to an immutable tag or digest in release.env}
     restart: unless-stopped
     environment:
-      ARCHURA_ENV: prod
+      ARCHURA_ENV: ${ARCHURA_ENV:?Set ARCHURA_ENV in .env}
       PORT: "8080"
       METRICS_PORT: "9091"
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
@@ -121,7 +121,7 @@ services:
     profiles: ["jobs"]
     entrypoint: ["/adminctl"]
     environment:
-      ARCHURA_ENV: prod
+      ARCHURA_ENV: ${ARCHURA_ENV:?Set ARCHURA_ENV in .env}
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
       PLATFORM_OWNER_EMAIL: ${PLATFORM_OWNER_EMAIL:-}
     depends_on:

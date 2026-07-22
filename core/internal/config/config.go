@@ -13,23 +13,23 @@ import (
 
 // Config is the typed 12-factor configuration for the core server.
 type Config struct {
-	Env                 string // "dev" | "prod"
+	Env                 string // "dev" | "staging" | "prod"
 	Port                string
 	MetricsPort         string
 	DatabaseURL         string // empty in local scaffold runs => DB features disabled
 	PlatformAdminKey    string // gates platform-admin endpoints (client onboarding)
 	CoreServiceKey      string // authenticates the Cloudflare Worker to the core (transport)
 	CoreInternalKey     string // per-request auth for machine-invoked endpoints (Worker cron/serving)
-	ConfirmURLBase      string // Public Worker confirmation URL; required in production and for local email links
-	EmailAccountID      string // Cloudflare account used by Email Service in production
+	ConfirmURLBase      string // Public Worker confirmation URL; required in hosted environments and for local email links
+	EmailAccountID      string // Cloudflare account used by Email Service outside development
 	EmailAPIToken       string // Cloudflare Email Service API token
 	EmailFrom           string // verified sender address
 	StripeSecretKey     string // Stripe test/live secret, stored only in the core environment
 	StripeWebhookSecret string // signing secret for the public Stripe webhook endpoint
 	StripeBasicPriceID  string // recurring $5 Basic price
 	BillingPublicOrigin string // Worker origin used for Checkout and portal returns
-	RequireEdgeAuth     bool   // optional in dev; always true in prod
-	AdminAPIEnabled     bool   // defaults on in dev and off in production
+	RequireEdgeAuth     bool   // optional in dev; always true in staging and prod
+	AdminAPIEnabled     bool   // defaults on only in dev
 }
 
 func Load() (Config, error) {
@@ -38,7 +38,7 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	adminAPIEnabled := env != "prod"
+	adminAPIEnabled := env == "dev"
 	if os.Getenv("ADMIN_API_ENABLED") != "" {
 		adminAPIEnabled, err = optionalBool("ADMIN_API_ENABLED")
 		if err != nil {
@@ -64,7 +64,7 @@ func Load() (Config, error) {
 		RequireEdgeAuth:     requireEdgeAuth,
 		AdminAPIEnabled:     adminAPIEnabled,
 	}
-	if cfg.Env == "prod" {
+	if isHostedEnvironment(cfg.Env) {
 		cfg.RequireEdgeAuth = true
 	}
 	if err := cfg.Validate(); err != nil {
@@ -74,10 +74,10 @@ func Load() (Config, error) {
 }
 
 func (c Config) Validate() error {
-	if c.Env != "dev" && c.Env != "prod" {
-		return fmt.Errorf("ARCHURA_ENV must be dev or prod")
+	if c.Env != "dev" && c.Env != "staging" && c.Env != "prod" {
+		return fmt.Errorf("ARCHURA_ENV must be dev, staging, or prod")
 	}
-	if c.Env == "prod" {
+	if isHostedEnvironment(c.Env) {
 		missing := make([]string, 0, 7)
 		if c.DatabaseURL == "" {
 			missing = append(missing, "DATABASE_URL")
@@ -104,7 +104,7 @@ func (c Config) Validate() error {
 			missing = append(missing, "EMAIL_FROM")
 		}
 		if len(missing) > 0 {
-			return fmt.Errorf("production configuration missing %s", strings.Join(missing, ", "))
+			return fmt.Errorf("%s configuration missing %s", c.Env, strings.Join(missing, ", "))
 		}
 	}
 	if c.RequireEdgeAuth && c.DatabaseURL == "" {
@@ -112,6 +112,9 @@ func (c Config) Validate() error {
 	}
 	if c.RequireEdgeAuth && c.CoreServiceKey == "" {
 		return errors.New("REQUIRE_EDGE_AUTH requires CORE_SERVICE_KEY")
+	}
+	if c.PlatformAdminKey != "" && !archauth.HasKindForEnv(c.PlatformAdminKey, "adm", c.Env) {
+		return errors.New("PLATFORM_ADMIN_KEY does not match ARCHURA_ENV")
 	}
 	if c.CoreServiceKey != "" && !archauth.HasKindForEnv(c.CoreServiceKey, "svc", c.Env) {
 		return errors.New("CORE_SERVICE_KEY does not match ARCHURA_ENV")
@@ -130,8 +133,13 @@ func (c Config) Validate() error {
 		return errors.New("Stripe billing requires STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_BASIC_PRICE_ID, and BILLING_PUBLIC_ORIGIN together")
 	}
 	if billingSet == len(billingValues) {
-		if !strings.HasPrefix(c.StripeSecretKey, "sk_test_") && !strings.HasPrefix(c.StripeSecretKey, "sk_live_") {
+		usesTestKey := strings.HasPrefix(c.StripeSecretKey, "sk_test_")
+		usesLiveKey := strings.HasPrefix(c.StripeSecretKey, "sk_live_")
+		if !usesTestKey && !usesLiveKey {
 			return errors.New("STRIPE_SECRET_KEY is invalid")
+		}
+		if c.Env != "prod" && !usesTestKey {
+			return errors.New("STRIPE_SECRET_KEY must use test mode outside production")
 		}
 		if !strings.HasPrefix(c.StripeWebhookSecret, "whsec_") {
 			return errors.New("STRIPE_WEBHOOK_SECRET is invalid")
@@ -145,11 +153,15 @@ func (c Config) Validate() error {
 			billingOrigin.RawQuery != "" || billingOrigin.Fragment != "" || billingOrigin.User != nil {
 			return errors.New("BILLING_PUBLIC_ORIGIN must be an HTTP(S) origin")
 		}
-		if c.Env == "prod" && !strings.HasPrefix(c.BillingPublicOrigin, "https://") {
-			return errors.New("BILLING_PUBLIC_ORIGIN must use HTTPS in production")
+		if isHostedEnvironment(c.Env) && !strings.HasPrefix(c.BillingPublicOrigin, "https://") {
+			return errors.New("BILLING_PUBLIC_ORIGIN must use HTTPS in staging and production")
 		}
 	}
 	return nil
+}
+
+func isHostedEnvironment(env string) bool {
+	return env == "staging" || env == "prod"
 }
 
 func getenv(key, fallback string) string {

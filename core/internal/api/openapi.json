@@ -545,7 +545,7 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["env"],
-        "properties": { "env": { "type": "string", "enum": ["dev", "prod"] } }
+        "properties": { "env": { "type": "string", "enum": ["dev", "staging", "prod"] } }
       },
       "DevConfirmations": {
         "type": "object",

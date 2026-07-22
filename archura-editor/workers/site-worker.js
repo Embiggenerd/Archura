@@ -14,7 +14,10 @@
  * - sites/<name>/embed/<Component>.js    → generated per-client embed module
  */
 
-const RESERVED = new Set(['www', 'api', 'app', 'editor', 'assets', 'components', 'embed', 's']);
+// Includes infrastructure hostnames (core, staging-core, staging) — a customer
+// claiming one of those subdomains would shadow proxied infrastructure under
+// the *.archura.ai wildcard.
+const RESERVED = new Set(['www', 'api', 'app', 'editor', 'assets', 'components', 'embed', 's', 'core', 'staging', 'staging-core']);
 const SITE_NAME = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
 // A design: a top-level embeddable artifact owned by an organization, stored
 // under orgs/<orgId>/designs/<designId>/ independent of any subdomain.

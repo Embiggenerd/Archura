@@ -101,7 +101,9 @@
             message.textContent = response?.status === 429 ? 'Too many attempts. Please wait and try again.' : 'Could not send the link.';
             return;
           }
-          main.innerHTML = `<section class="card"><h1>Check your email</h1><p class="muted">Open the link we sent to finish signing in.</p><p class="small" style="margin-top:14px"><a href="/dev-mail/">Running locally? Open the development mailbox.</a></p></section>`;
+          // The dev mailbox only exists locally — never advertise it in prod.
+          const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+          main.innerHTML = `<section class="card"><h1>Check your email</h1><p class="muted">Open the link we sent to finish signing in.</p>${isLocal ? '<p class="small" style="margin-top:14px"><a href="/dev-mail/">Running locally? Open the development mailbox.</a></p>' : ''}</section>`;
         });
       }
 

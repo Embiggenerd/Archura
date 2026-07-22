@@ -44,6 +44,16 @@ try {
   check('access: non-staff sees "Not authorized"', true);
   await denied.close();
 
+  // --- 1b. Environment badge: staging is its own state, not "Production" ---
+  const badgePage = await opsPage({
+    context: { body: { env: 'staging' } },
+    organizations: { body: { organizations: [], next_cursor: null } },
+  });
+  await badgePage.goto(`${BASE}/ops/`, { waitUntil: 'domcontentloaded' });
+  await badgePage.locator('#ops-env', { hasText: 'Staging' }).waitFor({ timeout: 8000 });
+  check('badge: core env "staging" renders the Staging badge', true);
+  await badgePage.close();
+
   // --- 2. Staff → org list → detail → fork redirect (core's response envelopes) ---
   const orgRoutes = {
     organizations: { body: { organizations: [{ id: ORG, name: 'Acme Plumbing', slug: 'acme', status: 'active' }], next_cursor: null } },

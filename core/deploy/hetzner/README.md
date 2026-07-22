@@ -48,6 +48,12 @@ Copy `.env.example` to `.env` and replace every placeholder. `.env` is ignored
 by the repository. Keep it owned by the deploy user with mode `0600`. Runtime
 secrets live only in this file.
 
+Set `ARCHURA_ENV` explicitly. `staging` and `prod` require the database, edge
+authentication, email delivery configuration, and HTTPS billing origin;
+staging uses test-prefixed Archura credentials and Stripe test mode. The
+current Hetzner deployment is staging, so its box `.env` uses
+`ARCHURA_ENV=staging`.
+
 Copy `release.env.example` to `release.env` for the initial manual deployment.
 `release.env` contains only `CORE_IMAGE` and is managed by `release.sh` after
 automation is enabled. Use an immutable commit tag or digest for `CORE_IMAGE`;
@@ -111,9 +117,10 @@ its trusted values.
 
 The workflow `.github/workflows/core-image.yml` tests pull requests. A
 successful push to `master` builds an immutable GHCR image and deploys that exact
-image to Hetzner through the GitHub `production` environment. A manual workflow
-run publishes the selected ref and deploys it only when the `deploy` input is
-enabled.
+image to the current Hetzner staging box through the existing GitHub
+`production` environment. The GitHub environment retains that name until a
+separate production workflow is created. A manual workflow run publishes the
+selected ref and deploys it only when the `deploy` input is enabled.
 
 Create a GitHub Environment named `production` and add these environment
 secrets:

@@ -26,8 +26,8 @@ func main() {
 	if env == "" {
 		env = "dev"
 	}
-	if env != "dev" && env != "prod" {
-		log.Error("ARCHURA_ENV must be dev or prod")
+	if !validEnvironment(env) {
+		log.Error("ARCHURA_ENV must be dev, staging, or prod")
 		os.Exit(1)
 	}
 	// The platform owner is configured in .env, not passed on the command line.
@@ -118,6 +118,10 @@ func main() {
 	default:
 		usage()
 	}
+}
+
+func validEnvironment(env string) bool {
+	return env == "dev" || env == "staging" || env == "prod"
 }
 
 func usage() {

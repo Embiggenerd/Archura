@@ -943,23 +943,27 @@ func TestProductionOrganizationRateLimitReturnsRetryAfter(t *testing.T) {
 	}
 }
 
-func TestDevelopmentBypassesRateLimitsWithEdgeAuthEnabled(t *testing.T) {
-	serviceKey := "svc_test_0123456789012345678901234567890123456789012"
-	organizationKey := "sk_test_0123456789012345678901234567890123456789012"
-	repo := &fakeRepository{
-		organization: store.Organization{ID: "organization-a", Status: "active", AllowedOrigins: []string{"http://localhost:5173"}},
-		secretHash:   archauth.Hash(organizationKey), rateLimitDenied: true,
-	}
-	server := NewServer(config.Config{
-		Env: "dev", RequireEdgeAuth: true, CoreServiceKey: serviceKey,
-	}, repo, slog.Default())
-	request := httptest.NewRequest(http.MethodPost, "/v1/components", strings.NewReader(`{}`))
-	request.Header.Set(serviceAuthorizationHeader, "Bearer "+serviceKey)
-	request.Header.Set("Authorization", "Bearer "+organizationKey)
-	recorder := httptest.NewRecorder()
-	server.Router().ServeHTTP(recorder, request)
-	if recorder.Code == http.StatusTooManyRequests || len(repo.rateLimitCalls) != 0 {
-		t.Fatalf("development request was rate limited: status=%d calls=%+v body=%s", recorder.Code, repo.rateLimitCalls, recorder.Body.String())
+func TestNonProductionEnvironmentsBypassRateLimitsWithEdgeAuthEnabled(t *testing.T) {
+	for _, env := range []string{"dev", "staging"} {
+		t.Run(env, func(t *testing.T) {
+			serviceKey := "svc_test_0123456789012345678901234567890123456789012"
+			organizationKey := "sk_test_0123456789012345678901234567890123456789012"
+			repo := &fakeRepository{
+				organization: store.Organization{ID: "organization-a", Status: "active", AllowedOrigins: []string{"http://localhost:5173"}},
+				secretHash:   archauth.Hash(organizationKey), rateLimitDenied: true,
+			}
+			server := NewServer(config.Config{
+				Env: env, RequireEdgeAuth: true, CoreServiceKey: serviceKey,
+			}, repo, slog.Default())
+			request := httptest.NewRequest(http.MethodPost, "/v1/components", strings.NewReader(`{}`))
+			request.Header.Set(serviceAuthorizationHeader, "Bearer "+serviceKey)
+			request.Header.Set("Authorization", "Bearer "+organizationKey)
+			recorder := httptest.NewRecorder()
+			server.Router().ServeHTTP(recorder, request)
+			if recorder.Code == http.StatusTooManyRequests || len(repo.rateLimitCalls) != 0 {
+				t.Fatalf("%s request was rate limited: status=%d calls=%+v body=%s", env, recorder.Code, repo.rateLimitCalls, recorder.Body.String())
+			}
+		})
 	}
 }
 

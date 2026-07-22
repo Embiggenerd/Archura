@@ -122,6 +122,28 @@ func TestAdminGateMatrixAndForeignOrganizationRead(t *testing.T) {
 	}
 }
 
+func TestStagingAdminContextUsesTestSessionNamespace(t *testing.T) {
+	repository, testToken := newAdminTestRepository(t, "platform_owner")
+	server := NewServer(config.Config{Env: "staging", AdminAPIEnabled: true}, repository, slog.Default())
+
+	contextResponse := performRequest(server.Router(), http.MethodGet, "/v1/admin/context", "", testToken)
+	if contextResponse.Code != http.StatusOK || !containsJSON(contextResponse.Body.String(), `"env":"staging"`) {
+		t.Fatalf("staging context status=%d body=%s", contextResponse.Code, contextResponse.Body.String())
+	}
+
+	liveToken, err := archauth.Generate("sess", "prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository.accountSessions[archauth.Hash(liveToken)] = store.AccountSession{
+		ID: "live-session", AccountID: "staff-account", ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}
+	liveResponse := performRequest(server.Router(), http.MethodGet, "/v1/admin/context", "", liveToken)
+	if liveResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("live session in staging status=%d body=%s", liveResponse.Code, liveResponse.Body.String())
+	}
+}
+
 func TestAdminAccountPreviewAndDeleteResponses(t *testing.T) {
 	repository, token := newAdminTestRepository(t, "platform_owner")
 	server := NewServer(config.Config{Env: "dev", AdminAPIEnabled: true}, repository, slog.Default())

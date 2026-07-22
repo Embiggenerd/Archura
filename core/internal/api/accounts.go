@@ -21,9 +21,13 @@ const (
 	confirmationTTL       = time.Hour
 	accountSessionTTL     = 7 * 24 * time.Hour
 	confirmationRateLimit = 5
-	invitationRateLimit   = 20
-	invitationTTL         = 7 * 24 * time.Hour
-	devMailboxLimit       = 50
+	// Per-IP is looser than per-email: one IP legitimately serves many people
+	// (offices, CGNAT) — and the platform owner testing sign-up flows. The
+	// per-email limit stays the abuse brake.
+	confirmationIPRateLimit = 30
+	invitationRateLimit     = 20
+	invitationTTL           = 7 * 24 * time.Hour
+	devMailboxLimit         = 50
 )
 
 type createConfirmationRequest struct {
@@ -172,7 +176,7 @@ func (s *Server) handleCreateConfirmation(w http.ResponseWriter, r *http.Request
 	}
 	if !s.enforceRateLimits(w, r, []rateLimitRequest{
 		{subject: "email:" + archauth.Hash(email), operation: "confirmation.create.email", limit: confirmationRateLimit, window: time.Hour},
-		{subject: "ip:" + clientIP, operation: "confirmation.create.ip", limit: confirmationRateLimit, window: time.Hour},
+		{subject: "ip:" + clientIP, operation: "confirmation.create.ip", limit: confirmationIPRateLimit, window: time.Hour},
 	}) {
 		return
 	}

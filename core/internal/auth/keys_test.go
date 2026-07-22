@@ -28,6 +28,13 @@ func TestGenerateUsesEnvironmentPrefixAndRandomValues(t *testing.T) {
 	if HasKindForEnv(first, "sk", "prod") {
 		t.Fatal("test key must not be accepted as a production key")
 	}
+	staging, err := Generate("sk", "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !HasKindForEnv(staging, "sk", "staging") || HasKindForEnv(staging, "sk", "prod") {
+		t.Fatalf("staging secret has incorrect environment binding: %q", staging)
+	}
 }
 
 func TestHashAndEqual(t *testing.T) {

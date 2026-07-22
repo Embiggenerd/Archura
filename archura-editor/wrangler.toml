@@ -37,7 +37,7 @@ ROOT_DOMAIN = "archura.ai"
 # MODERATION_ADMIN_KEY is also a Worker secret; it protects the manual
 # moderation list and suspend/restore endpoints.
 # ALLOW_CORE_DEV_PROXY is dev-only and must never be set in production.
-CORE_URL = "https://core.archura.ai"
+CORE_URL = "https://staging-core.archura.ai"
 # ALLOW_ANONYMOUS_SITE_CLAIMS is intentionally omitted. dev-up.sh sets it
 # explicitly for local claim-token compatibility; production requires sessions.
 

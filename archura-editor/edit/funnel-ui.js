@@ -84,6 +84,7 @@ export function showRegisterModal() {
     const button = overlay.querySelector('button[type="submit"]');
     if (button.disabled) return;
     button.disabled = true;
+    button.textContent = 'Sending…';
     const res = await fetch('/api/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -91,6 +92,7 @@ export function showRegisterModal() {
     }).catch(() => null);
     if (!res || !res.ok) {
       button.disabled = false;
+      button.textContent = 'Send link';
       errorEl.textContent =
         res?.status === 429 ? 'Too many attempts — wait a bit and try again.' :
         res?.status === 503 ? 'Registration is unavailable (core not running).' :
@@ -122,9 +124,13 @@ export function showDeployModal(editorEl, components) {
     const errorEl = overlay.querySelector('.error');
     const button = overlay.querySelector('button[type="submit"]');
     if (button.disabled) return;
+    // Immediate feedback: the save + module build + upload below take a
+    // moment, and a silent dead modal reads as a hang.
     button.disabled = true;
+    button.textContent = 'Publishing…';
+    errorEl.textContent = '';
     const controller = editorEl.getController();
-    if (!controller) { button.disabled = false; return; }
+    if (!controller) { button.disabled = false; button.textContent = 'Publish component'; return; }
     const [artifact] = await controller.save();
     const modules = buildEmbedModules(artifact, components ?? defaultComponents, location.href);
     const targetName = `${componentPath.at(-1)}.js`;
@@ -142,6 +148,7 @@ export function showDeployModal(editorEl, components) {
     }).catch(() => null);
     if (!res || !res.ok) {
       button.disabled = false;
+      button.textContent = 'Publish component';
       errorEl.textContent =
         res?.status === 409 ? 'That site name is already claimed — pick another.' :
         res?.status === 403 ? 'Deploys are currently restricted.' :
