@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -12,8 +13,8 @@ import (
 )
 
 type createDesignRequest struct {
-	Name          string `json:"name"`
-	ComponentPath string `json:"component_path"`
+	Name          string          `json:"name"`
+	ComponentPath json.RawMessage `json:"component_path"`
 }
 
 func (s *Server) handleCreateDesign(w http.ResponseWriter, r *http.Request) {
@@ -33,9 +34,24 @@ func (s *Server) handleCreateDesign(w http.ResponseWriter, r *http.Request) {
 	if len(name) > 80 {
 		name = name[:80]
 	}
-	componentPath := strings.TrimSpace(input.ComponentPath)
-	if !validComponentPath(componentPath) {
-		componentPath = "pages/Landing"
+	componentPath := "pages/Landing"
+	if len(input.ComponentPath) > 0 {
+		var explicitPath string
+		if err := json.Unmarshal(input.ComponentPath, &explicitPath); err != nil ||
+			!componentPathIsWellFormed(explicitPath, maxComponentPathSize) {
+			writeError(w, r, http.StatusUnprocessableEntity, "invalid_component_path", "The component path is invalid.")
+			return
+		}
+		componentPath = explicitPath
+	}
+	policy, known := classifyComponentPath(componentPath)
+	if !known {
+		writeError(w, r, http.StatusUnprocessableEntity, "invalid_component_path", "The component path is invalid.")
+		return
+	}
+	if (policy.Kind == componentKindComponent || policy.Capability == componentCapabilityBackend) &&
+		!s.requirePaidComponentAccess(w, r, organization.Organization) {
+		return
 	}
 
 	design, err := s.store.CreateDesign(r.Context(), organization.ID, name, componentPath, store.AuditEvent{
@@ -90,18 +106,6 @@ func (s *Server) handleGetDesign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, designResponse(design))
-}
-
-func validComponentPath(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, segment := range strings.Split(value, "/") {
-		if segment == "" || segment == ".." {
-			return false
-		}
-	}
-	return true
 }
 
 func designResponse(design store.Design) map[string]any {

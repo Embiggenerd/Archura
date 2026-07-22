@@ -61,7 +61,7 @@ try {
   await fontSize.press('Enter');
   await page.waitForTimeout(300);
 
-  await page.getByRole('button', { name: /Publish|Save/ }).click();
+  await page.evaluate(() => document.getElementById('editor').getController().save());
   await page.waitForFunction(() => window.__artifacts !== null, null, { timeout: 10000 });
   const artifact = (await page.evaluate(() => window.__artifacts))[0];
   check(

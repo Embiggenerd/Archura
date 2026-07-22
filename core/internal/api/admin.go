@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	archauth "github.com/archura/core/internal/auth"
 	"github.com/archura/core/internal/store"
 )
 
@@ -27,9 +28,18 @@ type adminRepository interface {
 	DefaultFreePlan(context.Context) (store.DefaultFreePlan, error)
 	UpdateDefaultFreePlan(context.Context, store.FreePlanPatch, store.AuditEvent) (store.DefaultFreePlan, error)
 	UpdateOrganizationFreePlan(context.Context, string, store.OrganizationFreePlanPatch, store.AuditEvent) (store.OrganizationBilling, error)
+	AdminSessionByTokenHash(context.Context, string) (store.AdminSessionInfo, error)
+	SetAccountMFASecret(context.Context, string, string, store.AuditEvent) error
+	ActivateAccountMFA(context.Context, string, store.AuditEvent) error
+	ElevateAdminSession(context.Context, string, time.Time, store.AuditEvent) error
 }
 
 type adminAccountContextKey struct{}
+type adminSessionContextKey struct{}
+type adminSessionHashContextKey struct{}
+
+// How long a step-up MFA verification keeps an admin session elevated.
+const adminElevationWindow = 15 * time.Minute
 
 func (s *Server) requireAdminAPIEnabled(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -41,24 +51,89 @@ func (s *Server) requireAdminAPIEnabled(next http.Handler) http.Handler {
 	})
 }
 
+// requirePlatformOwner authenticates the session, requires the platform_owner
+// staff role, and loads MFA/elevation state onto the context. It does NOT
+// enforce step-up — that is requireAdminElevation, layered on the sensitive
+// routes so enrollment/verification stay reachable.
 func (s *Server) requirePlatformOwner(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		account, ok := s.authenticateAccountSession(w, r)
+		info, hash, ok := s.adminSessionInfo(w, r)
 		if !ok {
 			return
 		}
-		if account.StaffRole != "platform_owner" {
+		if info.Account.StaffRole != "platform_owner" {
 			writeError(w, r, http.StatusForbidden, "platform_owner_required", "A platform owner account is required.")
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), adminAccountContextKey{}, account)))
+		ctx := context.WithValue(r.Context(), adminAccountContextKey{}, info.Account)
+		ctx = context.WithValue(ctx, adminSessionContextKey{}, info)
+		ctx = context.WithValue(ctx, adminSessionHashContextKey{}, hash)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// requireAdminElevation gates sensitive admin actions on step-up MFA in prod: the
+// owner must be enrolled and have verified a TOTP code within the elevation
+// window. In dev it is a pass-through so the console stays frictionless locally.
+func (s *Server) requireAdminElevation(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg.Env != "prod" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		info := adminSession(r)
+		if !info.MFAActivated {
+			writeError(w, r, http.StatusForbidden, "mfa_enrollment_required", "Enroll in two-factor authentication to use the platform console.")
+			return
+		}
+		if info.ElevatedUntil == nil || !info.ElevatedUntil.After(time.Now()) {
+			writeError(w, r, http.StatusForbidden, "mfa_required", "Verify your two-factor code to continue.")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// adminSessionInfo resolves the bearer session to its account + MFA state.
+func (s *Server) adminSessionInfo(w http.ResponseWriter, r *http.Request) (store.AdminSessionInfo, string, bool) {
+	repository, ok := s.adminRepository(w, r)
+	if !ok {
+		return store.AdminSessionInfo{}, "", false
+	}
+	token, ok := bearerToken(r)
+	if !ok || !archauth.HasKindForEnv(token, "sess", s.cfg.Env) {
+		s.securityEvent(r, "invalid_account_session")
+		writeError(w, r, http.StatusUnauthorized, "invalid_token", "The account session is invalid.")
+		return store.AdminSessionInfo{}, "", false
+	}
+	hash := archauth.Hash(token)
+	info, err := repository.AdminSessionByTokenHash(r.Context(), hash)
+	if errors.Is(err, store.ErrNotFound) {
+		s.securityEvent(r, "invalid_account_session")
+		writeError(w, r, http.StatusUnauthorized, "invalid_token", "The account session is invalid.")
+		return store.AdminSessionInfo{}, "", false
+	}
+	if err != nil {
+		s.internalError(w, r, err)
+		return store.AdminSessionInfo{}, "", false
+	}
+	return info, hash, true
 }
 
 func adminAccount(r *http.Request) store.Account {
 	account, _ := r.Context().Value(adminAccountContextKey{}).(store.Account)
 	return account
+}
+
+func adminSession(r *http.Request) store.AdminSessionInfo {
+	info, _ := r.Context().Value(adminSessionContextKey{}).(store.AdminSessionInfo)
+	return info
+}
+
+func adminSessionHash(r *http.Request) string {
+	hash, _ := r.Context().Value(adminSessionHashContextKey{}).(string)
+	return hash
 }
 
 func (s *Server) adminRepository(w http.ResponseWriter, r *http.Request) (adminRepository, bool) {
@@ -68,6 +143,19 @@ func (s *Server) adminRepository(w http.ResponseWriter, r *http.Request) (adminR
 		return nil, false
 	}
 	return repository, true
+}
+
+func (s *Server) handleAdminContext(w http.ResponseWriter, r *http.Request) {
+	info := adminSession(r)
+	elevated := info.ElevatedUntil != nil && info.ElevatedUntil.After(time.Now())
+	writeJSON(w, http.StatusOK, map[string]any{
+		"env": s.cfg.Env,
+		// The console uses these to know whether to prompt for enrollment or a
+		// step-up code. In dev, step-up is not enforced so it reads as satisfied.
+		"mfa_required": s.cfg.Env == "prod",
+		"mfa_enrolled": info.MFAActivated,
+		"mfa_elevated": elevated || s.cfg.Env != "prod",
+	})
 }
 
 func adminPagination(w http.ResponseWriter, r *http.Request) (int, int, bool) {

@@ -118,6 +118,9 @@ func (s *Server) handleCreateComponent(w http.ResponseWriter, r *http.Request) {
 	if !s.enforceRateLimit(w, r, organization.ID, "component.write", componentWriteLimit, time.Minute) {
 		return
 	}
+	if !s.requirePaidComponentAccess(w, r, organization) {
+		return
+	}
 	componentID, err := archauth.Generate("cmp", s.cfg.Env)
 	if err != nil {
 		s.internalError(w, r, err)
@@ -132,6 +135,9 @@ func (s *Server) handlePutComponent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.enforceRateLimit(w, r, organization.ID, "component.write", componentWriteLimit, time.Minute) {
+		return
+	}
+	if !s.requirePaidComponentAccess(w, r, organization) {
 		return
 	}
 	componentID := chi.URLParam(r, "componentID")
@@ -206,6 +212,9 @@ func (s *Server) handleCreateComponentSession(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if !s.enforceRateLimit(w, r, organization.ID, "component_session.create", componentSessionCreateLimit, time.Minute) {
+		return
+	}
+	if !s.requirePaidComponentAccess(w, r, organization) {
 		return
 	}
 	var input createComponentSessionRequest

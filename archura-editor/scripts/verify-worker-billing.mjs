@@ -72,6 +72,7 @@ globalThis.fetch = async (input) => {
   const url = input instanceof URL ? input : new URL(typeof input === 'string' ? input : input.url);
   if (!coreAvailable) throw new Error('core unavailable');
   if (url.pathname.endsWith('/entitlement')) return Response.json(entitlement);
+  if (url.pathname.endsWith('/deploy-check')) return Response.json({ allowed: true });
   if (url.pathname.endsWith(`/sites/${site}`)) {
     releasedSite = true;
     return new Response(null, { status: 204 });

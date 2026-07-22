@@ -36,7 +36,7 @@ const hookArtifacts = () =>
   });
 const publish = async () => {
   await page.evaluate(() => (window.__artifacts = null));
-  await page.getByRole('button', { name: /Publish|Save/ }).click();
+  await page.evaluate(() => document.getElementById('editor').getController().save());
   await page.waitForFunction(() => window.__artifacts !== null, null, { timeout: 10000 });
   return (await page.evaluate(() => window.__artifacts))[0];
 };

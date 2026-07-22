@@ -270,6 +270,47 @@ func TestSiteCapUsesFreeAndPaidLimits(t *testing.T) {
 	}
 }
 
+func TestAdminOrganizationsSearchByOwnerEmail(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	requestPrefix := "admin-search-" + suffix
+	organization := createAdminTestOrganization(t, ctx, st, suffix, requestPrefix)
+
+	// A member whose email is the only searchable handle for this org.
+	email := "search-owner-" + suffix + "@example.com"
+	var accountID string
+	if err := st.Pool.QueryRow(ctx, `
+		INSERT INTO accounts (email, email_verified_at)
+		VALUES ($1, now()) RETURNING id::text`, email).Scan(&accountID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Pool.Exec(ctx, `
+		INSERT INTO organization_memberships (organization_id, account_id, role)
+		VALUES ($1::uuid, $2::uuid, 'owner')`, organization.ID, accountID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = st.Pool.Exec(ctx, `DELETE FROM organization_memberships WHERE account_id = $1::uuid`, accountID)
+		_, _ = st.Pool.Exec(ctx, `DELETE FROM accounts WHERE id = $1::uuid`, accountID)
+		_, _ = st.Pool.Exec(ctx, `DELETE FROM organizations WHERE id = $1::uuid`, organization.ID)
+	})
+
+	page, err := st.AdminOrganizations(ctx, "search-owner-"+suffix, 25, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range page.Items {
+		if item.ID == organization.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected org %s to be found by owner email fragment", organization.ID)
+	}
+}
+
 func createAdminTestOrganization(t *testing.T, ctx context.Context, st *Store, suffix, requestID string) Organization {
 	t.Helper()
 	organization, err := st.CreateOrganization(ctx, CreateOrganizationParams{

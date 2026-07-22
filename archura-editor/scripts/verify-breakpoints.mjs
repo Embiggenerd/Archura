@@ -23,7 +23,7 @@ page.on('pageerror', (e) => console.log('pageerror:', e.message));
 
 const publish = async () => {
   await page.evaluate(() => (window.__a = null));
-  await page.getByRole('button', { name: /Publish|Save/ }).click();
+  await page.evaluate(() => document.getElementById('editor').getController().save());
   await page.waitForFunction(() => window.__a !== null, null, { timeout: 10000 });
   return (await page.evaluate(() => window.__a))[0];
 };

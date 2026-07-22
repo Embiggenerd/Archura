@@ -27,6 +27,7 @@ const SUITES = [
   'verify-funnel',
   'verify-ops-fork',
   'verify-ops-panel',
+  'verify-design-mode',
 ];
 
 const startServer = (args) =>

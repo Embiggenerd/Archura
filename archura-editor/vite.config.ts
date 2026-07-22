@@ -34,6 +34,7 @@ const buildInputs = {
   edit: path.join(here, 'edit/index.html'),
   demo: path.join(here, 'demo/index.html'),
   dashboard: path.join(here, 'dashboard/index.html'),
+  pricing: path.join(here, 'pricing/index.html'),
   account: path.join(here, 'account/index.html'),
   ops: path.join(here, 'ops/index.html'),
   devmail: path.join(here, 'dev-mail/index.html'),
@@ -240,7 +241,7 @@ export default defineConfig({
       name: 'dir-trailing-slash-redirect',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
-          for (const dir of ['/demo', '/edit', '/dashboard', '/account', '/dev-mail']) {
+          for (const dir of ['/demo', '/edit', '/dashboard', '/pricing', '/account', '/dev-mail']) {
             if (req.url === dir || req.url?.startsWith(`${dir}?`)) {
               res.statusCode = 302;
               res.setHeader('Location', req.url.replace(dir, `${dir}/`));

@@ -17,7 +17,6 @@ const DEVICES = ['Desktop', 'Tablet', 'Mobile'];
 
 export class ArchuraToolbar extends LitElement {
   @property({ attribute: false }) controller?: ArchuraEditorController;
-  @state() private saving = false;
   @state() private publishState: PublishState = 'idle';
   @state() private openPanel: 'none' | 'theme' | 'page' | 'targets' | 'breakpoints' = 'none';
   #resetTimer?: ReturnType<typeof setTimeout>;
@@ -104,22 +103,14 @@ export class ArchuraToolbar extends LitElement {
           ${this.controller?.canPublish
             ? html`
                 ${this.#renderStatusPill()}
-                <button class="save" ?disabled=${!this.controller.dirty || this.saving} @click=${this.#save}>
-                  ${this.saving ? 'Saving...' : 'Save'}
-                </button>
                 <button
                   class="primary ${this.publishState === 'failed' ? 'failed' : ''}"
-                  ?disabled=${!this.#hasUnpublishedChanges() || this.publishState === 'publishing'}
                   @click=${this.#publish}
                 >
                   ${PUBLISH_LABELS[this.publishState]}
                 </button>
               `
-            : html`
-                <button class="primary" ?disabled=${!this.controller?.dirty || this.saving} @click=${this.#save}>
-                  ${this.saving ? 'Saving...' : 'Save'}
-                </button>
-              `}
+            : ''}
         </span>
       </div>
       ${this.openPanel === 'theme' ? this.#renderThemePanel() : ''}
@@ -270,18 +261,10 @@ export class ArchuraToolbar extends LitElement {
     this.controller?.setThemeTokens({ [prop]: value });
   }
 
-  async #save() {
-    if (!this.controller) return;
-    this.saving = true;
-    try {
-      await this.controller.save();
-    } finally {
-      this.saving = false;
-    }
-  }
-
   async #publish() {
     if (!this.controller) return;
+    // Ignore re-clicks while a publish is in flight (the button stays enabled).
+    if (this.publishState === 'publishing') return;
     clearTimeout(this.#resetTimer);
     this.publishState = 'publishing';
     try {
@@ -294,12 +277,6 @@ export class ArchuraToolbar extends LitElement {
     this.#resetTimer = setTimeout(() => {
       this.publishState = 'idle';
     }, 2000);
-  }
-
-  // Publish is available only when a draft exists (unpublished changes).
-  #hasUnpublishedChanges(): boolean {
-    const state = this.controller?.contentState;
-    return state === 'draft' || state === 'changed';
   }
 
   #renderStatusPill() {
@@ -496,8 +473,7 @@ export class ArchuraToolbar extends LitElement {
       padding: 10px 16px;
     }
 
-    button.primary:disabled,
-    button.save:disabled {
+    button.primary:disabled {
       opacity: 0.45;
       cursor: default;
     }

@@ -41,6 +41,14 @@ export type ArchuraStore = {
   delete?(key: string): Promise<void>;
   /** Enumerate stored objects whose key starts with `prefix`. Host-tooling only. */
   list?(prefix: string): Promise<ArchuraStoreEntry[]>;
+  /**
+   * Optional server-orchestrated publish. When present, the editor calls this on
+   * publish instead of writing the served artifact + embeds itself: the backend
+   * promotes the saved draft to the served artifact, writes the given embed
+   * modules, clears the draft, and may run server-side gating. Used by the design
+   * store, where publish is a distinct operation from autosave.
+   */
+  publish?(embeds: Record<string, string>): Promise<void>;
 };
 
 export type ArchuraEditorConfig = {

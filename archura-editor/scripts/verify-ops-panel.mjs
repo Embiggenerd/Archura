@@ -59,9 +59,36 @@ try {
 
   // Fork redirects into the editor on the new fork.
   await page.getByRole('button', { name: 'Fork' }).click();
-  await page.waitForURL(`**/edit/?design=${FORK}`, { timeout: 8000 });
+  await page.waitForURL((url) => url.searchParams.get('design') === FORK, { timeout: 8000 });
   check('fork: redirects into the editor on the forked design', page.url().includes(`design=${FORK}`));
   await page.close();
+
+  // --- 3. Prod step-up: organizations 403 mfa_required → verify → list replays ---
+  let verified = false;
+  const mfaPage = await browser.newPage();
+  await mfaPage.route('**/api/ops/**', async (route) => {
+    const rest = new URL(route.request().url()).pathname.replace(/^\/api\/ops\//, '');
+    const method = route.request().method();
+    if (method === 'POST' && rest === 'mfa/verify') {
+      verified = true;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ elevated_until: new Date(Date.now() + 9e5).toISOString() }) });
+    }
+    if (rest === 'organizations' && !verified) {
+      return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { code: 'mfa_required', message: 'Verify your two-factor code to continue.' } }) });
+    }
+    if (rest === 'organizations') {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ organizations: [{ id: ORG, name: 'Acme Plumbing', slug: 'acme', status: 'active' }], next_cursor: null }) });
+    }
+    return route.fulfill({ status: 404, body: '{}' });
+  });
+  await mfaPage.goto(`${BASE}/ops/`, { waitUntil: 'domcontentloaded' });
+  await mfaPage.getByText(/Verify it/).waitFor({ timeout: 8000 });
+  check('mfa: step-up modal appears on mfa_required', true);
+  await mfaPage.getByPlaceholder('123456').fill('123456');
+  await mfaPage.getByRole('button', { name: 'Verify' }).click();
+  await mfaPage.getByRole('button', { name: 'Acme Plumbing' }).waitFor({ timeout: 8000 });
+  check('mfa: blocked view replays after successful verify', true);
+  await mfaPage.close();
 
   const passed = results.filter(Boolean).length;
   console.log(`\n${passed}/${results.length} checks passed`);

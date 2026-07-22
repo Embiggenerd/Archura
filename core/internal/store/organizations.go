@@ -66,11 +66,13 @@ func insertOrganization(ctx context.Context, tx pgx.Tx, p CreateOrganizationPara
 	err := tx.QueryRow(ctx, `
 		INSERT INTO organizations (name, slug, allowed_origins, edge_claim_token)
 		VALUES ($1, $2, $3, NULLIF($4, ''))
-		RETURNING id::text, name, slug, allowed_origins, status, created_at`,
+		RETURNING id::text, name, slug, allowed_origins, status,
+			caps_exempt, is_platform_workspace, created_at`,
 		p.Name, p.Slug, p.AllowedOrigins, p.EdgeClaimToken,
 	).Scan(
 		&organization.ID, &organization.Name, &organization.Slug,
-		&organization.AllowedOrigins, &organization.Status, &organization.CreatedAt,
+		&organization.AllowedOrigins, &organization.Status, &organization.CapsExempt,
+		&organization.IsPlatformWorkspace, &organization.CreatedAt,
 	)
 	if err != nil {
 		return Organization{}, mapStoreError("insert organization", err)
@@ -137,14 +139,16 @@ func ensureDefaultOrganization(
 ) (Organization, string, error) {
 	var organization Organization
 	err := tx.QueryRow(ctx, `
-		SELECT o.id::text, o.name, o.slug, o.allowed_origins, o.status, o.created_at
+		SELECT o.id::text, o.name, o.slug, o.allowed_origins, o.status,
+			o.caps_exempt, o.is_platform_workspace, o.created_at
 		FROM organization_memberships m
 		JOIN organizations o ON o.id = m.organization_id
 		WHERE m.account_id = $1::uuid AND m.is_default
 		FOR UPDATE`, account.ID,
 	).Scan(
 		&organization.ID, &organization.Name, &organization.Slug,
-		&organization.AllowedOrigins, &organization.Status, &organization.CreatedAt,
+		&organization.AllowedOrigins, &organization.Status, &organization.CapsExempt,
+		&organization.IsPlatformWorkspace, &organization.CreatedAt,
 	)
 	created := false
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -213,7 +217,8 @@ func ensureDefaultOrganization(
 
 func (s *Store) OrganizationsForAccount(ctx context.Context, accountID string) ([]AccountOrganization, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT o.id::text, o.name, o.slug, o.allowed_origins, o.status, o.created_at,
+		SELECT o.id::text, o.name, o.slug, o.allowed_origins, o.status,
+			o.caps_exempt, o.is_platform_workspace, o.created_at,
 			m.role, m.is_default, COALESCE(k.publishable_key, ''), sites.subdomain
 		FROM organization_memberships m
 		JOIN organizations o ON o.id = m.organization_id
@@ -238,7 +243,8 @@ func (s *Store) OrganizationsForAccount(ctx context.Context, accountID string) (
 		var item AccountOrganization
 		var site *string
 		if err := rows.Scan(
-			&item.ID, &item.Name, &item.Slug, &item.AllowedOrigins, &item.Status, &item.CreatedAt,
+			&item.ID, &item.Name, &item.Slug, &item.AllowedOrigins, &item.Status,
+			&item.CapsExempt, &item.IsPlatformWorkspace, &item.CreatedAt,
 			&item.Role, &item.IsDefault, &item.PublishableKey, &site,
 		); err != nil {
 			return nil, fmt.Errorf("scan account organization: %w", err)
@@ -258,6 +264,23 @@ func (s *Store) OrganizationsForAccount(ctx context.Context, accountID string) (
 		return nil, fmt.Errorf("iterate account organizations: %w", err)
 	}
 	return organizations, nil
+}
+
+func (s *Store) OrganizationByID(ctx context.Context, organizationID string) (Organization, error) {
+	var organization Organization
+	err := s.Pool.QueryRow(ctx, `
+		SELECT id::text, name, slug, allowed_origins, status,
+			caps_exempt, is_platform_workspace, created_at
+		FROM organizations
+		WHERE id = $1::uuid`, organizationID).Scan(
+		&organization.ID, &organization.Name, &organization.Slug,
+		&organization.AllowedOrigins, &organization.Status, &organization.CapsExempt,
+		&organization.IsPlatformWorkspace, &organization.CreatedAt,
+	)
+	if err != nil {
+		return Organization{}, mapStoreError("find organization", err)
+	}
+	return organization, nil
 }
 
 func (s *Store) BindOrganizationSite(

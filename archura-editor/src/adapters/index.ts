@@ -103,5 +103,62 @@ export function createR2Adapter(options: { endpoint: string; token?: string; sit
   return createHttpStore({ artifactBase: options.endpoint, origin, site: options.site, headers });
 }
 
+/**
+ * Store for a single design over the Worker design routes. A design has exactly
+ * one artifact, so keys route by draft-vs-published only: the draft (autosave)
+ * and the published artifact are separate endpoints, and `publish` is a
+ * server-orchestrated promote (draft → served artifact + embeds) rather than a
+ * client-side write. The editor calls `publish` when present, so `put` only ever
+ * writes the draft here.
+ */
+export function createDesignStore(options: { organizationId: string; designId: string }): ArchuraStore {
+  const base = `/api/orgs/${encodeURIComponent(options.organizationId)}/designs/${encodeURIComponent(options.designId)}`;
+  const isDraftKey = (key: string) => key.endsWith('.draft');
+
+  return {
+    async get(key: string): Promise<string | null> {
+      const response = await fetch(isDraftKey(key) ? `${base}/artifact/draft` : `${base}/artifact`);
+      if (response.status === 404) return null;
+      if (!response.ok) throw new Error(`Design load failed (${response.status})`);
+      return response.text();
+    },
+
+    async put(key: string, value: string): Promise<void> {
+      // Only the draft is written directly (autosave); publishing is a separate op.
+      if (!isDraftKey(key)) return;
+      const response = await fetch(`${base}/artifact/draft`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: value,
+      });
+      if (!response.ok) throw new Error(`Design draft save failed (${response.status})`);
+    },
+
+    async delete(key: string): Promise<void> {
+      if (!isDraftKey(key)) return;
+      const response = await fetch(`${base}/artifact/draft`, { method: 'DELETE' });
+      if (!response.ok && response.status !== 404) throw new Error(`Design draft delete failed (${response.status})`);
+    },
+
+    async publish(embeds: Record<string, string>): Promise<void> {
+      const response = await fetch(`${base}/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ embeds }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
+        const error = new Error(body?.error?.message ?? `Publish failed (${response.status})`) as Error & {
+          status?: number;
+          code?: string;
+        };
+        error.status = response.status;
+        error.code = body?.error?.code;
+        throw error;
+      }
+    },
+  };
+}
+
 // Re-export so hosts building keys share the one keyspace convention.
 export { artifactKey, embedKey, isEmbedKey } from '../editor/store-keys.js';

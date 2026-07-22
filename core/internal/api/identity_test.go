@@ -49,6 +49,9 @@ type fakeRepository struct {
 	billing             map[string]store.OrganizationBilling
 	webhookEvents       map[string]string
 	designs             map[string][]store.Design
+	mfaSecrets          map[string]string     // accountID → secret
+	mfaActivated        map[string]bool        // accountID → activated
+	sessionElevated     map[string]*time.Time  // session hash → elevated until
 }
 
 type fakeRateLimitCall struct {
@@ -84,6 +87,20 @@ func (f *fakeRepository) OrganizationBySecretHash(_ context.Context, hash string
 		return store.Organization{}, store.ErrNotFound
 	}
 	return f.organization, nil
+}
+
+func (f *fakeRepository) OrganizationByID(_ context.Context, organizationID string) (store.Organization, error) {
+	if f.organization.ID == organizationID {
+		return f.organization, nil
+	}
+	for _, organizations := range f.organizations {
+		for _, organization := range organizations {
+			if organization.ID == organizationID {
+				return organization.Organization, nil
+			}
+		}
+	}
+	return store.Organization{}, store.ErrNotFound
 }
 
 func (f *fakeRepository) UpsertPaymentComponent(_ context.Context, component store.PaymentComponent, audit store.AuditEvent) (store.PaymentComponent, error) {
@@ -245,6 +262,57 @@ func (f *fakeRepository) AccountByID(_ context.Context, id string) (store.Accoun
 		return store.Account{}, store.ErrNotFound
 	}
 	return account, nil
+}
+
+func (f *fakeRepository) AdminSessionByTokenHash(_ context.Context, hash string) (store.AdminSessionInfo, error) {
+	session, ok := f.accountSessions[hash]
+	if !ok || session.RevokedAt != nil || !session.ExpiresAt.After(time.Now()) {
+		return store.AdminSessionInfo{}, store.ErrNotFound
+	}
+	account, ok := f.accounts[session.AccountID]
+	if !ok {
+		return store.AdminSessionInfo{}, store.ErrNotFound
+	}
+	return store.AdminSessionInfo{
+		Account:       account,
+		MFASecret:     f.mfaSecrets[account.ID],
+		MFAActivated:  f.mfaActivated[account.ID],
+		ElevatedUntil: f.sessionElevated[hash],
+	}, nil
+}
+
+func (f *fakeRepository) SetAccountMFASecret(_ context.Context, accountID, secret string, _ store.AuditEvent) error {
+	if f.mfaSecrets == nil {
+		f.mfaSecrets = make(map[string]string)
+	}
+	f.mfaSecrets[accountID] = secret
+	if f.mfaActivated != nil {
+		delete(f.mfaActivated, accountID)
+	}
+	return nil
+}
+
+func (f *fakeRepository) ActivateAccountMFA(_ context.Context, accountID string, _ store.AuditEvent) error {
+	if f.mfaSecrets[accountID] == "" || f.mfaActivated[accountID] {
+		return store.ErrConflict
+	}
+	if f.mfaActivated == nil {
+		f.mfaActivated = make(map[string]bool)
+	}
+	f.mfaActivated[accountID] = true
+	return nil
+}
+
+func (f *fakeRepository) ElevateAdminSession(_ context.Context, hash string, until time.Time, _ store.AuditEvent) error {
+	if _, ok := f.accountSessions[hash]; !ok {
+		return store.ErrNotFound
+	}
+	if f.sessionElevated == nil {
+		f.sessionElevated = make(map[string]*time.Time)
+	}
+	value := until
+	f.sessionElevated[hash] = &value
+	return nil
 }
 
 func (f *fakeRepository) SitesForAccount(_ context.Context, accountID string) ([]string, error) {
@@ -623,6 +691,9 @@ func TestClientComponentAndSessionContract(t *testing.T) {
 	if repo.edgeClaimToken != "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" {
 		t.Fatalf("edge claim token was not passed to storage: %q", repo.edgeClaimToken)
 	}
+	repo.billing = map[string]store.OrganizationBilling{repo.organization.ID: {
+		OrganizationID: repo.organization.ID, StripeSubscriptionStatus: "active",
+	}}
 
 	componentBody := `{
 		"mode":"payment",
@@ -743,12 +814,66 @@ func TestComponentSessionRejectsCrossOrganizationComponent(t *testing.T) {
 		organization: store.Organization{ID: "organization-a", Status: "active", AllowedOrigins: []string{"http://localhost:5173"}},
 		secretHash:   archauth.Hash(secret),
 		component:    store.PaymentComponent{ID: testComponentID, OrganizationID: "organization-b", Status: "active", AllowedOrigins: []string{"http://localhost:5173"}},
+		billing: map[string]store.OrganizationBilling{"organization-a": {
+			OrganizationID: "organization-a", StripeSubscriptionStatus: "active",
+		}},
 	}
 	server := NewServer(config.Config{Env: "dev"}, repo, slog.Default())
 	body := `{"component_id":"` + testComponentID + `","origin":"http://localhost:5173"}`
 	response := performRequest(server.Router(), http.MethodPost, "/v1/component-sessions", body, secret)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("cross-organization mint status = %d, want 404; body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestPaymentBackendRequiresPaidComponentAccess(t *testing.T) {
+	secret := "sk_test_0123456789012345678901234567890123456789012"
+	repo := &fakeRepository{
+		organization: store.Organization{
+			ID: "organization-free", Status: "active", AllowedOrigins: []string{"http://localhost:5173"},
+		},
+		secretHash: archauth.Hash(secret),
+		component: store.PaymentComponent{
+			ID: testComponentID, OrganizationID: "organization-free", Status: "active",
+			AllowedOrigins: []string{"http://localhost:5173"},
+		},
+	}
+	server := NewServer(config.Config{Env: "dev"}, repo, slog.Default())
+	router := server.Router()
+
+	component := performRequest(router, http.MethodPost, "/v1/components", `{
+		"mode":"payment",
+		"stripe_price_id":"price_test_bread",
+		"success_url":"http://localhost:5173/success",
+		"cancel_url":"http://localhost:5173/cancel",
+		"allowed_origins":["http://localhost:5173"],
+		"status":"active"
+	}`, secret)
+	if component.Code != http.StatusPaymentRequired ||
+		!containsJSON(component.Body.String(), `"code":"component_requires_paid"`) {
+		t.Fatalf("free component create status=%d body=%s", component.Code, component.Body.String())
+	}
+	update := performRequest(router, http.MethodPut, "/v1/components/"+testComponentID, `{
+		"mode":"payment",
+		"stripe_price_id":"price_test_bread",
+		"success_url":"http://localhost:5173/success",
+		"cancel_url":"http://localhost:5173/cancel",
+		"allowed_origins":["http://localhost:5173"],
+		"status":"active"
+	}`, secret)
+	if update.Code != http.StatusPaymentRequired ||
+		!containsJSON(update.Body.String(), `"code":"component_requires_paid"`) {
+		t.Fatalf("free component update status=%d body=%s", update.Code, update.Body.String())
+	}
+
+	session := performRequest(router, http.MethodPost, "/v1/component-sessions",
+		`{"component_id":"`+testComponentID+`","origin":"http://localhost:5173"}`, secret)
+	if session.Code != http.StatusPaymentRequired ||
+		!containsJSON(session.Body.String(), `"code":"component_requires_paid"`) {
+		t.Fatalf("free component session status=%d body=%s", session.Code, session.Body.String())
+	}
+	if repo.session.ID != "" {
+		t.Fatal("free organization minted a component session")
 	}
 }
 

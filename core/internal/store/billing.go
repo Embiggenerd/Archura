@@ -17,6 +17,24 @@ const (
 	ServingGracePeriod = 7 * 24 * time.Hour
 )
 
+// HasPaidComponentAccess deliberately uses Stripe's raw subscription state,
+// not OrganizationEntitlement.Status. The derived entitlement status also
+// describes Archura's no-card/free plans and therefore cannot answer whether
+// an organization has paid component access.
+func HasPaidComponentAccess(billing OrganizationBilling, capsExempt bool, now time.Time) bool {
+	if capsExempt {
+		return true
+	}
+	switch billing.StripeSubscriptionStatus {
+	case "active", "trialing":
+		return true
+	case "canceled":
+		return billing.CurrentPeriodEnd != nil && now.Before(*billing.CurrentPeriodEnd)
+	default:
+		return false
+	}
+}
+
 func OrganizationEntitlementFor(billing OrganizationBilling, role string, now time.Time) OrganizationEntitlement {
 	entitlement := OrganizationEntitlement{
 		Status:             "unstarted",

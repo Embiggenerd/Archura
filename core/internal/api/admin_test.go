@@ -66,12 +66,23 @@ func TestAdminGateMatrixAndForeignOrganizationRead(t *testing.T) {
 	if customer.Code != http.StatusForbidden {
 		t.Fatalf("customer status=%d body=%s", customer.Code, customer.Body.String())
 	}
+	customerContext := performRequest(server.Router(), http.MethodGet, "/v1/admin/context", "", token)
+	if customerContext.Code != http.StatusForbidden {
+		t.Fatalf("customer context status=%d body=%s", customerContext.Code, customerContext.Body.String())
+	}
 	account := repository.accounts["staff-account"]
 	account.StaffRole = "platform_owner"
 	repository.accounts[account.ID] = account
 	staff := performRequest(server.Router(), http.MethodGet, "/v1/admin/organizations", "", token)
 	if staff.Code != http.StatusOK || !containsJSON(staff.Body.String(), repository.organization.ID) {
 		t.Fatalf("staff foreign-org read status=%d body=%s", staff.Code, staff.Body.String())
+	}
+	contextResponse := performRequest(server.Router(), http.MethodGet, "/v1/admin/context", "", token)
+	if contextResponse.Code != http.StatusOK || !containsJSON(contextResponse.Body.String(), `"env":"dev"`) {
+		t.Fatalf("staff context status=%d body=%s", contextResponse.Code, contextResponse.Body.String())
+	}
+	if cacheControl := contextResponse.Header().Get("Cache-Control"); cacheControl != "no-store" {
+		t.Fatalf("staff context Cache-Control=%q, want no-store", cacheControl)
 	}
 
 	disabled := NewServer(config.Config{Env: "prod", AdminAPIEnabled: false, RequireEdgeAuth: true}, repository, slog.Default())

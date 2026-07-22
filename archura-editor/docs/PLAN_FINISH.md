@@ -1,5 +1,19 @@
 # Plan — Finish the sprint (archura-editor)
 
+> **STATUS (2026-07-21): COMPLETE.** All items landed and tested — deploy-check on
+> every publish path (design publish, site publish, confirmation promotion), the
+> Designs dashboard card + design-cap upgrade modal, the mid-session 402 → upgrade
+> modal in design mode, the `/ops/` env badge reading core `GET /v1/admin/context`,
+> and step-up MFA for prod (core TOTP + gate, worker `/api/ops/mfa/*` proxy, ops
+> step-up/enrollment UI). Core additions: org search-by-owner-email, the
+> stale-trial cleanup migration (0013), and admin MFA (migration 0014 + `internal/totp`).
+> Verified: full core `go test ./...` green against live Postgres (migrations
+> 0013/0014 apply); all worker unit suites; the browser `verify-ops-panel` (incl.
+> the MFA step-up scenario), `verify-responsive`, `verify-stripe`. Pre-existing
+> unrelated red suites (`verify-breakpoints`, `verify-invariants`,
+> `verify-deploy`, `verify-client-styling`) are noted below, not caused by this work.
+
+
 Make the platform-owner admin console fully usable end to end: forks you can
 actually open and edit, designs as a first-class client entity, the design-cap
 boundary, the remaining loose ends, and a live validation. Core side:
@@ -28,11 +42,20 @@ the artifact alone.
 
 `/edit/?design=<id>&org=<orgId>` opens a design the same way `?site=` opens a site.
 
+- **Explicit draft/publish Worker routes** (replace today's single autosave
+  `PUT …/artifact`, so autosave is never mistaken for publication):
+  - `PUT /api/orgs/<org>/designs/<id>/artifact/draft` — save draft; **no tier
+    check**.
+  - `POST /api/orgs/<org>/designs/<id>/publish` — run `deploy-check` on the draft's
+    declared manifest; on allow, promote the draft to `artifact.json` **and write
+    its embed modules in the same operation**, then delete the draft.
+  - `GET /api/orgs/<org>/designs/<id>/artifact` — draft if present, else the
+    published artifact (editor restoration). Public/embed serving reads only
+    `artifact.json`.
 - **`createDesignStore({ organizationId, designId })`** — an `ArchuraStore` over
-  the Worker design routes. A design has exactly **one** artifact, so `get`/`put`
-  map the artifact key → `/api/orgs/<org>/designs/<id>/artifact` and embed keys →
-  `.../embed/<name>` (the componentPath→single-artifact mapping we settled on).
-  Reuses `ArchuraEditorController` + the draft/publish lifecycle unchanged.
+  those routes. A design has exactly **one** artifact, so `get` → the draft-first
+  GET, `put` → the draft PUT, and Publish → the `POST …/publish` op. Reuses
+  `ArchuraEditorController` + the Save/Publish lifecycle unchanged.
 - **Editor host** (`edit/index.html`): read `?design` + `?org`; `get` the
   artifact (it carries `componentPath`), mount the editor with the design store.
   No separate metadata fetch. If no artifact yet (fresh/forked-from-template),
@@ -70,6 +93,30 @@ the editor, and the 4th free design → upgrade modal.
 - Confirm all three boundaries (site, design, time) route to the one shared modal.
 
 **Verify**: extend the editor verify to assert a `402` publish surfaces the modal.
+
+## Phase 3b — Tier `deploy-check` on the publish paths
+
+Wire the Worker to core's `deploy-check` (see `core/PLAN_TIER_AND_ENV.md`) on
+every path that writes a **served** artifact. No funnel redesign is needed — the
+confirmation handler already creates the account + org and *then* promotes, so it
+is already an org-owned publish; it just needs the check.
+
+- **Extract the declared manifest** from the canonical artifact (top-level
+  `config.componentPath` + each `content.components[].componentPath`), and call
+  `POST /v1/organizations/{id}/deploy-check` (internal key) with a bounded
+  manifest before any served write. **Preserve a `402` body** back to the client
+  (never turn it into 503) so the upgrade/register modal shows.
+- **Paths:** (1) direct site publish — first assert URL path ==
+  site-metadata path == `artifact.config.componentPath`; (2) **confirmation
+  promotion** — check with the returned org id **before starting the trial and
+  before `promoteSite`**; on denial, keep the account+org, **retain the staged
+  draft**, and return a result that directs the user to billing (no served write,
+  no trial); (3) design **publish** (Phase 1's `POST …/publish`); (4) embed PUT —
+  re-run the check against the associated published artifact's manifest (or write
+  embeds only inside the orchestrated design publish).
+- **Verify**: a page declaring `payments/*` is blocked at publish
+  (`component_requires_paid` → modal); confirmation denial creates the org but
+  publishes nothing and points to billing.
 
 ## Phase 4 — Live end-to-end
 

@@ -352,6 +352,51 @@
         main.appendChild(card);
       }
 
+      async function renderDesigns(organization) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <h2>Designs</h2>
+          <p class="hint">Reusable components and pages you build in the editor. Open one to edit, or start a new one.</p>
+          <ul class="entries"><li>Loading…</li></ul>
+          <form class="new-design" style="margin-top:12px">
+            <input name="name" placeholder="New design name" required />
+            <button type="submit">New design</button>
+          </form>
+          <p class="error"></p>`;
+        main.appendChild(card);
+
+        const ul = card.querySelector('.entries');
+        const listed = await fetch(`/api/orgs/${encodeURIComponent(organization.id)}/designs`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null);
+        const designs = listed?.designs ?? [];
+        ul.innerHTML = designs.length
+          ? designs.map((d) => `<li><a href="/edit/?design=${encodeURIComponent(d.id)}&org=${encodeURIComponent(organization.id)}">${escapeHtml(d.name ?? d.id)}</a></li>`).join('')
+          : '<li>No designs yet — create your first below.</li>';
+
+        card.querySelector('.new-design').addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const message = card.querySelector('.error');
+          message.textContent = '';
+          const response = await fetch(`/api/orgs/${encodeURIComponent(organization.id)}/designs`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: form.name.value.trim(), componentPath: ['pages', 'Landing'] }),
+          }).catch(() => null);
+          const body = await response?.json().catch(() => null);
+          if (!response?.ok) {
+            if (response?.status === 409 && body?.error?.code === 'design_limit_reached') {
+              showUpgradeModal(organization, body.error.message);
+              return;
+            }
+            message.textContent = body?.error?.message ?? 'Could not create the design.';
+            return;
+          }
+          location.href = `/edit/?design=${encodeURIComponent(body.id)}&org=${encodeURIComponent(organization.id)}`;
+        });
+      }
+
       function renderInvite(organization) {
         if (organization.role !== 'owner') return;
         const card = document.createElement('div');
@@ -420,6 +465,7 @@
         document.getElementById('current-org').textContent = `· ${organization.name}`;
         renderOrganizationControls(me, organization);
         renderBilling(organization);
+        await renderDesigns(organization);
         renderInvite(organization);
         for (const site of organization.sites) await renderSite(site, organization.siteUrls?.[site] ?? `/s/${site}/`);
         if (organization.sites.length === 0) {

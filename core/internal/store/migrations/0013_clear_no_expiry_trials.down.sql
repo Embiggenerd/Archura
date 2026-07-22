@@ -1,0 +1,2 @@
+-- Irreversible data cleanup: the cleared trial timestamps are not recoverable.
+-- A no-expiry org needs no trial window, so this down migration is a no-op.

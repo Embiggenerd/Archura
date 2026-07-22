@@ -140,7 +140,7 @@ try {
     window.__a = null;
     document.getElementById('editor').addEventListener('artifactsave', (e) => (window.__a = e.detail.artifacts));
   });
-  await page.getByRole('button', { name: /Publish|Save/ }).click();
+  await page.evaluate(() => document.getElementById('editor').getController().save());
   await page.waitForFunction(() => window.__a !== null, null, { timeout: 10000 });
   const artifact = (await page.evaluate(() => window.__a))[0];
   check(

@@ -311,6 +311,35 @@ async function organizationEntitlement(env, organizationId, { fresh = false } = 
   return entitlement;
 }
 
+// Ask core whether `organizationId` may deploy the components an artifact
+// declares (its top-level componentPath + each nested instance's componentPath).
+// Returns null when allowed (or when core isn't configured — local dev), or a
+// Response (e.g. 402 component_requires_paid) to pass straight back to the client.
+async function deployCheck(env, organizationId, artifact) {
+  if (!coreConfigured(env) || !organizationId) return null;
+  const asPath = (value) => (Array.isArray(value) ? value.join('/') : typeof value === 'string' ? value : '');
+  const topLevel = asPath(artifact?.config?.componentPath);
+  const uses = [
+    ...new Set(
+      (artifact?.content?.components ?? [])
+        .map((component) => asPath(component?.componentPath))
+        .filter((path) => path !== '')
+    ),
+  ];
+  const response = await coreRequest(env, `/v1/organizations/${encodeURIComponent(organizationId)}/deploy-check`, {
+    method: 'POST',
+    body: { top_level: topLevel, uses },
+    bearer: env.CORE_INTERNAL_KEY,
+  });
+  if (response.ok) return null;
+  // Pass core's error (e.g. 402 component_requires_paid) through verbatim so the
+  // client can show the upgrade/register modal.
+  return new Response(response.body, {
+    status: response.status,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+  });
+}
+
 async function startOrganizationTrial(env, organizationId, bearer) {
   if (!coreConfigured(env) || !organizationId || !bearer) throw new Error('billing_unavailable');
   const response = await coreRequest(
@@ -536,11 +565,16 @@ function opsForwardAllowed(method, rest) {
       /^organizations\/[^/]+$/.test(rest) ||
       /^organizations\/[^/]+\/(designs|members)$/.test(rest) ||
       rest === 'forks' ||
-      rest === 'default-plan'
+      rest === 'default-plan' ||
+      rest === 'context'
     );
   }
   if (method === 'PATCH') {
     return rest === 'default-plan' || /^organizations\/[^/]+\/free-plan$/.test(rest);
+  }
+  if (method === 'POST') {
+    // Step-up MFA: enrollment + verification for the platform-owner console.
+    return rest === 'mfa/enroll' || rest === 'mfa/activate' || rest === 'mfa/verify';
   }
   return false;
 }
@@ -569,7 +603,8 @@ async function handleOpsApi(request, env, url) {
   // Everything else on the allowlist: gate-then-forward verbatim (core enforces staff).
   if (!opsForwardAllowed(request.method, rest)) return json({ error: 'Not found' }, 404);
   let body;
-  if (request.method === 'PATCH') {
+  // PATCH and the code-bearing MFA POSTs carry a JSON body; mfa/enroll does not.
+  if (request.method === 'PATCH' || rest === 'mfa/activate' || rest === 'mfa/verify') {
     try {
       body = await readBoundedJSON(request);
     } catch {
@@ -634,7 +669,10 @@ async function handleOpsFork(request, env, sessionToken) {
     }
     // 4. Finalize ready.
     await finalize(finBody);
-    return json({ fork_design_id: forkId, workspace_org_id: workspaceOrgId }, 201);
+    return json(
+      { fork_design_id: forkId, workspace_org_id: workspaceOrgId, component_path: fork.component_path ?? null },
+      201
+    );
   } catch (error) {
     // A core finalize rejection (Response) passes through; a copy error → 502.
     if (error instanceof Response) return opsPassthrough(error);
@@ -1060,19 +1098,32 @@ async function serveApi(request, env, url) {
     }
   }
 
-  // Load/save a design's artifact (autosave) and store its embed modules.
-  const designResourceMatch = url.pathname.match(/^\/api\/orgs\/([^/]+)\/designs\/([^/]+)\/(artifact|embed\/[^/]+)$/);
+  // A design's draft/published artifacts and its published embeds. Save writes the
+  // draft; publish promotes the draft to the served artifact.json, writes the
+  // generated embed modules, and clears the draft — a distinct operation from
+  // autosave. Editing/publishing a design (including a fork) is a normal
+  // org-scoped, membership-gated operation.
+  const designResourceMatch = url.pathname.match(
+    /^\/api\/orgs\/([^/]+)\/designs\/([^/]+)\/(artifact\/draft|artifact|publish|embed\/[^/]+)$/
+  );
   if (designResourceMatch) {
     const [, orgId, designId, resource] = designResourceMatch;
     if (!ORG_ID.test(orgId) || !DESIGN_ID.test(designId)) return json({ error: 'Bad request' }, 400);
     const org = await sessionOrganization(request, env, orgId);
     if (!org) return json({ error: 'Unauthorized' }, 401);
     const base = `orgs/${orgId}/designs/${designId}`;
+    const publishedKey = `${base}/artifact.json`;
+    const draftKey = `${base}/artifact.draft.json`;
 
-    if (resource === 'artifact') {
-      const key = `${base}/artifact.json`;
+    if (resource === 'artifact' && request.method === 'GET') {
+      const object = await env.ARTIFACTS.get(publishedKey);
+      if (!object) return json({ error: 'Not found' }, 404);
+      return new Response(object.body, { headers: { 'Content-Type': 'application/json' } });
+    }
+
+    if (resource === 'artifact/draft') {
       if (request.method === 'GET') {
-        const object = await env.ARTIFACTS.get(key);
+        const object = await env.ARTIFACTS.get(draftKey);
         if (!object) return json({ error: 'Not found' }, 404);
         return new Response(object.body, { headers: { 'Content-Type': 'application/json' } });
       }
@@ -1086,9 +1137,47 @@ async function serveApi(request, env, url) {
           if (error instanceof RangeError) return json({ error: 'Artifact too large' }, 413);
           return json({ error: 'Invalid artifact' }, 400);
         }
-        await env.ARTIFACTS.put(key, body, { httpMetadata: { contentType: 'application/json' } });
+        await env.ARTIFACTS.put(draftKey, body, { httpMetadata: { contentType: 'application/json' } });
         return new Response(null, { status: 204 });
       }
+      if (request.method === 'DELETE') {
+        await env.ARTIFACTS.delete(draftKey);
+        return new Response(null, { status: 204 });
+      }
+    }
+
+    if (resource === 'publish' && request.method === 'POST') {
+      const limited = await rateLimitRequest(request, env, 'design-autosave');
+      if (limited) return limited;
+      const draft = await env.ARTIFACTS.get(draftKey);
+      if (!draft) return json({ error: 'Nothing to publish' }, 409);
+      const draftBytes = await draft.arrayBuffer();
+      let input;
+      try {
+        input = await readBoundedJSON(request);
+      } catch {
+        return json({ error: 'Invalid body' }, 400);
+      }
+      // Tier gate: the org may only publish components it's entitled to. Deny (e.g.
+      // a free org publishing a payment component) leaves the draft untouched.
+      let draftArtifact = null;
+      try {
+        draftArtifact = JSON.parse(new TextDecoder().decode(draftBytes));
+      } catch {
+        return json({ error: 'Invalid artifact' }, 400);
+      }
+      const denied = await deployCheck(env, orgId, draftArtifact);
+      if (denied) return denied;
+      await env.ARTIFACTS.put(publishedKey, draftBytes, { httpMetadata: { contentType: 'application/json' } });
+      const embeds = input && typeof input.embeds === 'object' && input.embeds ? input.embeds : {};
+      for (const [name, source] of Object.entries(embeds)) {
+        if (!EMBED_NAME.test(name) || typeof source !== 'string') continue;
+        await env.ARTIFACTS.put(`${base}/embed/${name}`, source, {
+          httpMetadata: { contentType: 'text/javascript; charset=utf-8' },
+        });
+      }
+      await env.ARTIFACTS.delete(draftKey);
+      return new Response(null, { status: 204 });
     }
 
     if (resource.startsWith('embed/') && request.method === 'PUT') {
@@ -1146,6 +1235,11 @@ async function serveApi(request, env, url) {
         if (error instanceof RangeError) return json({ error: 'Artifact too large' }, 413);
         return json({ error: 'Invalid artifact' }, 400);
       }
+      // Tier gate: the owning org may only publish components it's entitled to.
+      const publishMeta = await env.ARTIFACTS.get(`sites/${site}/meta.json`);
+      const publishOrg = publishMeta ? (await publishMeta.json())?.organizationId : null;
+      const tierDenied = await deployCheck(env, publishOrg, artifact);
+      if (tierDenied) return tierDenied;
       await env.ARTIFACTS.put(key, body, { httpMetadata: { contentType: 'application/json' } });
       await recordModerationResult(env, site, artifact);
       return new Response(null, { status: 204 });
@@ -1318,6 +1412,24 @@ async function handleConfirm(request, env, url) {
     if (metaObj) {
       const meta = await metaObj.json();
       if (meta.status === 'drafted') {
+        // Tier gate: the staged draft can't go live if it declares a component
+        // the org's plan doesn't cover. Core is the authority; a denial leaves
+        // the draft parked so they can upgrade and re-confirm from the dashboard.
+        const stagedPath = Array.isArray(meta.componentPath) && meta.componentPath.length > 0
+          ? meta.componentPath.join('/')
+          : HOME_ARTIFACT;
+        const stagedObj = await env.ARTIFACTS.get(`sites/${subdomain}/draft/${stagedPath}.json`);
+        if (stagedObj) {
+          const denied = await deployCheck(env, organization.id, await stagedObj.json());
+          if (denied) {
+            return messagePage(
+              'This site needs a paid plan',
+              'Your account is ready, but this design uses a component that needs Basic. Open your dashboard to upgrade, then publish from there.',
+              [['/dashboard/', 'Go to your dashboard']],
+              402
+            );
+          }
+        }
         try {
           await startOrganizationTrial(env, organization.id, session.token);
           await promoteSite(env, subdomain);

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Archura Plans</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        margin: 0; min-height: 100vh; background: #f3f4f6;
+        font-family: Helvetica, Arial, sans-serif; color: #111827;
+      }
+      header {
+        display: flex; align-items: baseline; gap: 12px;
+        padding: 14px 28px; background: #111827; color: #e5e7eb;
+      }
+      header h1 { font-size: 1rem; margin: 0; }
+      header a { margin-left: auto; color: #e5e7eb; font-size: 0.82rem; text-decoration: none; }
+      main { max-width: 1000px; margin: 40px auto; padding: 0 16px; }
+      .intro { text-align: center; margin-bottom: 28px; }
+      .intro h2 { margin: 0 0 6px; font-size: 1.6rem; }
+      .intro p { margin: 0; color: #6b7280; font-size: 0.95rem; }
+      .plans {
+        display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px;
+        align-items: start;
+      }
+      @media (max-width: 760px) { .plans { grid-template-columns: 1fr; } }
+      .plan {
+        background: white; border: 1px solid #e5e7eb; border-radius: 16px;
+        padding: 26px 22px; display: flex; flex-direction: column;
+      }
+      .plan.featured { border-color: #4f46e5; box-shadow: 0 12px 30px rgba(79,70,229,.14); }
+      .plan.current { background: #eef2ff; border-color: #4f46e5; }
+      .tag {
+        align-self: flex-start; font-size: 0.62rem; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.05em; color: #4f46e5;
+        background: #eef2ff; border-radius: 999px; padding: 3px 9px; margin-bottom: 10px;
+      }
+      .plan h3 { margin: 0 0 2px; font-size: 1.2rem; }
+      .price { display: flex; align-items: baseline; gap: 4px; margin: 8px 0 2px; }
+      .price .amount { font-size: 2rem; font-weight: 800; }
+      .price .per { color: #6b7280; font-size: 0.9rem; }
+      .sub { color: #6b7280; font-size: 0.82rem; min-height: 1.1em; margin-bottom: 16px; }
+      ul.features { list-style: none; margin: 0 0 22px; padding: 0; flex: 1; }
+      ul.features li {
+        position: relative; padding: 6px 0 6px 24px; font-size: 0.88rem; color: #374151;
+        border-top: 1px solid #f3f4f6;
+      }
+      ul.features li::before {
+        content: '✓'; position: absolute; left: 0; top: 6px; color: #16a34a; font-weight: 700;
+      }
+      .cta {
+        display: block; width: 100%; box-sizing: border-box; text-align: center;
+        padding: 11px 14px; border-radius: 10px; border: none; cursor: pointer;
+        font-size: 0.9rem; font-weight: 700; text-decoration: none;
+      }
+      .cta.primary { background: #4f46e5; color: white; }
+      .cta.ghost { background: white; color: #111827; border: 1px solid #d1d5db; }
+      .cta.muted { background: #f3f4f6; color: #9ca3af; cursor: default; }
+      .cta[disabled] { opacity: 0.6; cursor: default; }
+      .err { color: #dc2626; font-size: 0.82rem; min-height: 1em; margin-top: 8px; text-align: center; }
+      .foot { text-align: center; color: #9ca3af; font-size: 0.8rem; margin-top: 26px; }
+    </style>
+  </head>
+  <body>
+    <header><h1>Archura</h1><a href="/dashboard/">← Back to dashboard</a></header>
+    <main>
+      <div class="intro">
+        <h2>Plans that grow with you</h2>
+        <p>Start free. Upgrade when you need more room — no surprises.</p>
+      </div>
+      <div class="plans" id="plans"></div>
+      <p class="err" id="err" aria-live="polite"></p>
+      <p class="foot">Prices in USD. Cancel anytime from your dashboard.</p>
+    </main>
+    <script type="module">
+      const escapeHtml = (value) => String(value ?? '')
+        .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+      const selectedOrganizationKey = 'archura:selected-organization';
+
+      // Static plan catalog — the pricing page is a marketing surface. Free/Basic
+      // limits mirror the product defaults; a signed-in org's actual (possibly
+      // admin-edited) free terms are reflected where we can. Max is a listed tier
+      // (not yet purchasable).
+      const PLANS = [
+        {
+          id: 'free', name: 'Free', amount: '$0', per: '', sub: 'Starts when you first publish',
+          features: ['1 hosted subdomain', '3 designs', 'Full-page components', 'Publish & host on Archura'],
+        },
+        {
+          id: 'basic', name: 'Basic', amount: '$5', per: '/mo', sub: '14-day free trial · no card to start',
+          featured: true,
+          features: ['3 hosted subdomains', '10 designs', 'All components, incl. Stripe payments', 'Custom breakpoints', 'Everything in Free'],
+        },
+        {
+          id: 'max', name: 'Max', amount: '$15', per: '/mo', sub: 'For teams that need room to grow',
+          features: ['Your own custom domains', 'Unlimited designs', '10 subdomains', 'Priority support', 'Everything in Basic'],
+        },
+      ];
+
+      const params = new URLSearchParams(location.search);
+      const errEl = document.getElementById('err');
+
+      async function init() {
+        const me = await fetch('/api/me').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        let organization = null;
+        if (me?.organizations?.length) {
+          const preferred = params.get('organization') ?? localStorage.getItem(selectedOrganizationKey);
+          organization = me.organizations.find((o) => o.id === preferred)
+            ?? me.organizations.find((o) => o.is_default)
+            ?? me.organizations[0];
+        }
+        const billing = organization?.billing;
+        // Which plan the org is on today (unstarted/trialing Free vs active Basic).
+        const currentPlan = billing?.status === 'active' ? 'basic'
+          : billing ? 'free'
+          : null;
+
+        // Reflect the org's real free terms when we have them.
+        const free = PLANS[0];
+        if (billing) {
+          const sites = billing.free_site_limit ?? 1;
+          const designs = billing.free_design_limit ?? 3;
+          free.features[0] = `${sites} hosted subdomain${sites === 1 ? '' : 's'}`;
+          free.features[1] = `${designs} design${designs === 1 ? '' : 's'}`;
+        }
+
+        document.getElementById('plans').innerHTML = PLANS.map((plan) => {
+          const isCurrent = currentPlan === plan.id;
+          return `
+            <div class="plan${plan.featured ? ' featured' : ''}${isCurrent ? ' current' : ''}">
+              ${isCurrent ? '<span class="tag">Current plan</span>' : plan.featured ? '<span class="tag">Most popular</span>' : ''}
+              <h3>${escapeHtml(plan.name)}</h3>
+              <div class="price"><span class="amount">${escapeHtml(plan.amount)}</span><span class="per">${escapeHtml(plan.per)}</span></div>
+              <div class="sub">${escapeHtml(plan.sub)}</div>
+              <ul class="features">${plan.features.map((f) => `<li>${escapeHtml(f)}</li>`).join('')}</ul>
+              ${ctaFor(plan, { organization, billing, isCurrent })}
+            </div>`;
+        }).join('');
+
+        wireCtas(organization);
+      }
+
+      function ctaFor(plan, { organization, billing, isCurrent }) {
+        if (plan.id === 'max') return `<button class="cta muted" disabled>Coming soon</button>`;
+        if (plan.id === 'free') {
+          if (isCurrent) return `<button class="cta ghost" disabled>Your current plan</button>`;
+          return `<a class="cta ghost" href="/account/">Get started</a>`;
+        }
+        // Basic
+        if (isCurrent) return `<a class="cta ghost" href="/dashboard/">Manage billing</a>`;
+        if (!organization) return `<a class="cta primary" href="/account/">Sign in to start</a>`;
+        if (billing?.can_manage_billing === false) return `<button class="cta ghost" disabled>Ask an owner to upgrade</button>`;
+        return `<button class="cta primary" data-checkout="${escapeHtml(organization.id)}">Start 14-day trial</button>`;
+      }
+
+      function wireCtas(organization) {
+        document.querySelector('[data-checkout]')?.addEventListener('click', async (event) => {
+          const button = event.currentTarget;
+          const orgId = button.dataset.checkout;
+          button.disabled = true;
+          errEl.textContent = '';
+          const response = await fetch(`/api/organizations/${encodeURIComponent(orgId)}/billing/checkout`, { method: 'POST' }).catch(() => null);
+          const body = await response?.json().catch(() => null);
+          if (response?.ok && body?.url) {
+            location.href = body.url;
+            return;
+          }
+          button.disabled = false;
+          errEl.textContent = body?.error?.message ?? body?.error ?? 'Could not start checkout. Please try again.';
+        });
+      }
+
+      init();
+    </script>
+  </body>
+</html>

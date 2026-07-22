@@ -148,14 +148,16 @@
     <script type="module">
       import './../src/index.ts';
       import { defaultComponents } from './../src/components/index.ts';
-      import { createFileSystemAdapter, createR2Adapter } from './../src/adapters/index.ts';
+      import { createFileSystemAdapter, createR2Adapter, createDesignStore } from './../src/adapters/index.ts';
       import { ensureFunnelStyles, showDeployModal, showRegisterModal } from './funnel-ui.js';
       import { showUpgradeModal } from './../src/upgrade-modal.ts';
       ensureFunnelStyles(); // the claim screen builds its own .overlay
 
       const params = new URLSearchParams(location.search);
       const site = params.get('site');
-      const component = params.get('component') ?? (site ? 'pages/Landing' : null);
+      const design = params.get('design');
+      const org = params.get('org');
+      const component = params.get('component') ?? (site || design ? 'pages/Landing' : null);
 
       // In the built app, component modules are the self-contained bundles
       // served by the Worker, not raw Vite source
@@ -311,7 +313,27 @@
       }
 
       async function initPage() {
-      if (site) {
+      if (design && org) {
+        // Design mode: edit a design (including a fork) in its own workspace.
+        // Save keeps a draft; Publish promotes it to the served artifact. The
+        // design store speaks the /api/orgs/<org>/designs/<id> routes.
+        const bar = document.createElement('div');
+        bar.className = 'site-bar';
+        bar.innerHTML = `<strong>Design</strong> <span>Save keeps a draft · Publish makes it live</span>
+          <span style="flex:1"></span>
+          <a class="button secondary" href="/dashboard/">Dashboard</a>`;
+        document.body.appendChild(bar);
+        const editor = mountEditor(createDesignStore({ organizationId: org, designId: design }));
+        // Mid-session tier boundary: publishing a component the plan doesn't cover
+        // returns 402 from core (deploy-check). Offer the upgrade rather than a raw error.
+        editor.addEventListener('editorerror', async (event) => {
+          const error = event.detail?.error;
+          if (error?.status !== 402 && error?.code !== 'component_requires_paid') return;
+          const me = await fetch('/api/me').then((response) => response.ok ? response.json() : null).catch(() => null);
+          const organization = me?.organizations?.find((candidate) => candidate.id === org) ?? { id: org };
+          showUpgradeModal(organization, error?.message ?? 'This design uses a component that needs the Basic plan.');
+        });
+      } else if (site) {
         const token = localStorage.getItem(`archura:site-token:${site}`);
         const url = localStorage.getItem(`archura:site-url:${site}`);
         const siteUrl = url ?? `/s/${site}/`;

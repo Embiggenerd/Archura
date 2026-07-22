@@ -69,16 +69,6 @@
 
     <script type="module">
       const main = document.getElementById('main');
-      // Environment badge. Local hosts are Dev; anything else is treated as
-      // Production until core exposes an authoritative ARCHURA_ENV (see the core
-      // plan) — then this should read that instead of guessing from the host.
-      {
-        const h = location.hostname;
-        const isLocal = h === 'localhost' || h.startsWith('127.') || h === '0.0.0.0' || h.endsWith('.local');
-        const badge = document.getElementById('ops-env');
-        badge.textContent = isLocal ? 'Dev' : 'Production';
-        if (isLocal) badge.style.background = '#334155';
-      }
       const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
 
       async function api(path, opts) {
@@ -89,15 +79,125 @@
         return res;
       }
 
+      // Environment badge — authoritative from core's ARCHURA_ENV (GET
+      // /v1/admin/context), so dev and prod are never confused. Falls back to a
+      // host heuristic only if the context call is unavailable.
+      async function setEnvBadge() {
+        const badge = document.getElementById('ops-env');
+        const context = await api('context').then((r) => (r?.ok ? r.json() : null)).catch(() => null);
+        let env = context?.env;
+        if (!env) {
+          const h = location.hostname;
+          const isLocal = h === 'localhost' || h.startsWith('127.') || h === '0.0.0.0' || h.endsWith('.local');
+          env = isLocal ? 'dev' : 'prod';
+        }
+        const isDev = env === 'dev';
+        badge.textContent = isDev ? 'Dev' : 'Production';
+        if (isDev) badge.style.background = '#334155';
+      }
+      setEnvBadge();
+
       function renderDenied() {
         main.innerHTML = `<div class="denied"><h2>Not authorized</h2><p class="hint">This console is for Archura platform owners. Sign in with a staff account.</p></div>`;
       }
 
+      // The view to replay after a successful step-up (each view sets this).
+      let rerender = () => renderOrgs();
+
+      // Central auth-failure handling: a plain 401/403 is a denial, but an
+      // MFA 403 launches the step-up flow instead. Returns true when it handled
+      // the response so the caller stops.
+      async function authFailed(res) {
+        if (!res) return false;
+        if (res.status === 401) { renderDenied(); return true; }
+        if (res.status === 403) {
+          const body = await res.clone().json().catch(() => null);
+          const code = body?.error?.code;
+          if (code === 'mfa_required' || code === 'mfa_enrollment_required') {
+            showMfaModal(code, body?.error?.message);
+            return true;
+          }
+          renderDenied();
+          return true;
+        }
+        return false;
+      }
+
+      // For mutations: a 403 with an MFA code launches step-up without wiping the
+      // form (unlike authFailed, which renders a denial page for GETs).
+      async function maybeStepUp(res) {
+        if (!res || res.status !== 403) return false;
+        const body = await res.clone().json().catch(() => null);
+        const code = body?.error?.code;
+        if (code === 'mfa_required' || code === 'mfa_enrollment_required') {
+          showMfaModal(code, body?.error?.message);
+          return true;
+        }
+        return false;
+      }
+
+      // Step-up MFA overlay. Enrollment shows the TOTP secret to add to an
+      // authenticator app; verification just takes a code. Either way, a success
+      // closes the overlay and replays the view that was blocked.
+      function showMfaModal(code, message) {
+        document.querySelector('[data-mfa-modal]')?.remove();
+        const overlay = document.createElement('div');
+        overlay.dataset.mfaModal = '';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(17,24,39,.6);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+        const enrolling = code === 'mfa_enrollment_required';
+        overlay.innerHTML = `
+          <div style="background:#fff;color:#111827;border-radius:14px;padding:24px;width:min(420px,94vw);box-shadow:0 20px 40px rgba(0,0,0,.3);font-family:Helvetica,Arial,sans-serif">
+            <h2 style="margin:0 0 6px;font-size:1.1rem">${enrolling ? 'Set up two-factor authentication' : 'Verify it’s you'}</h2>
+            <p style="margin:0 0 14px;color:#6b7280;font-size:.9rem">${esc(message || (enrolling ? 'Add Archura Ops to your authenticator app, then enter a code.' : 'Enter the 6-digit code from your authenticator app.'))}</p>
+            <div data-enroll style="display:${enrolling ? 'block' : 'none'};margin-bottom:12px"></div>
+            <input data-code inputmode="numeric" autocomplete="one-time-code" placeholder="123456" style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:1rem;box-sizing:border-box">
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+              <button data-close style="background:#fff;border:1px solid #d1d5db;color:#111827;padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer">Cancel</button>
+              <button data-submit style="background:#4f46e5;border:none;color:#fff;padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer">${enrolling ? 'Activate' : 'Verify'}</button>
+            </div>
+            <p data-err style="color:#dc2626;font-size:.85rem;min-height:1em;margin:8px 0 0"></p>
+          </div>`;
+        const err = overlay.querySelector('[data-err]');
+        const close = () => overlay.remove();
+        overlay.querySelector('[data-close]').addEventListener('click', close);
+
+        if (enrolling) {
+          const enrollBox = overlay.querySelector('[data-enroll]');
+          enrollBox.innerHTML = `<p style="color:#6b7280;font-size:.85rem;margin:0">Loading enrollment…</p>`;
+          api('mfa/enroll', { method: 'POST' }).then(async (res) => {
+            const body = res ? await res.json().catch(() => null) : null;
+            if (!res || !res.ok || !body?.secret) {
+              enrollBox.innerHTML = `<p style="color:#dc2626;font-size:.85rem;margin:0">Could not start enrollment.</p>`;
+              return;
+            }
+            enrollBox.innerHTML = `
+              <p style="margin:0 0 4px;font-size:.85rem;color:#374151">Secret key (enter manually if you can't scan):</p>
+              <code style="display:block;word-break:break-all;background:#f3f4f6;padding:8px;border-radius:6px;font-size:.85rem">${esc(body.secret)}</code>`;
+          });
+        }
+
+        overlay.querySelector('[data-submit]').addEventListener('click', async (event) => {
+          const button = event.currentTarget;
+          const value = overlay.querySelector('[data-code]').value.trim();
+          if (!/^\d{6}$/.test(value)) { err.textContent = 'Enter the 6-digit code.'; return; }
+          button.disabled = true;
+          err.textContent = '';
+          const path = enrolling ? 'mfa/activate' : 'mfa/verify';
+          const res = await api(path, { method: 'POST', body: JSON.stringify({ code: value }) });
+          const body = res ? await res.json().catch(() => null) : null;
+          if (res && res.ok) { close(); rerender(); return; }
+          button.disabled = false;
+          err.textContent = body?.error?.message ?? 'That code was not accepted.';
+        });
+        document.body.appendChild(overlay);
+      }
+
       // --- Organizations list ---
       async function renderOrgs(query = '') {
+        rerender = () => renderOrgs(query);
         main.innerHTML = `<div class="card">Loading…</div>`;
         const res = await api(`organizations?q=${encodeURIComponent(query)}&limit=25`);
-        if (res && (res.status === 401 || res.status === 403)) return renderDenied();
+        if (await authFailed(res)) return;
         if (!res || !res.ok) { main.innerHTML = `<div class="card">Could not load organizations.</div>`; return; }
         const { organizations = [] } = await res.json();
         const items = organizations;
@@ -119,12 +219,13 @@
 
       // --- Organization detail: designs (read-only) + fork + free-plan terms ---
       async function renderOrg(id) {
+        rerender = () => renderOrg(id);
         main.innerHTML = `<div class="card">Loading…</div>`;
         const [orgRes, designsRes] = await Promise.all([
           api(`organizations/${encodeURIComponent(id)}`),
           api(`organizations/${encodeURIComponent(id)}/designs?limit=100`),
         ]);
-        if (orgRes && (orgRes.status === 401 || orgRes.status === 403)) return renderDenied();
+        if (await authFailed(orgRes)) return;
         if (!orgRes || !orgRes.ok) { main.innerHTML = `<div class="card">Organization not found.</div>`; return; }
         const org = await orgRes.json();
         const designs = designsRes && designsRes.ok ? (await designsRes.json()).designs ?? [] : [];
@@ -176,9 +277,12 @@
         btn.disabled = true;
         btn.textContent = 'Forking…';
         const res = await api('forks', { method: 'POST', body: JSON.stringify({ source_design_id: btn.dataset.fork }) });
+        if (await maybeStepUp(res)) { btn.disabled = false; btn.textContent = 'Fork'; return; }
         const body = res ? await res.json().catch(() => null) : null;
         if (res && res.status === 201 && body?.fork_design_id) {
-          location.href = `/edit/?design=${encodeURIComponent(body.fork_design_id)}`;
+          const q = new URLSearchParams({ design: body.fork_design_id, org: body.workspace_org_id });
+          if (body.component_path) q.set('component', body.component_path);
+          location.href = `/edit/?${q}`;
           return;
         }
         btn.disabled = false;
@@ -200,6 +304,7 @@
         const dl = num('#fp-designs'); if (dl !== undefined) patch.free_design_limit = dl;
         const sl = num('#fp-sites'); if (sl !== undefined) patch.free_site_limit = sl;
         const res = await api(`organizations/${encodeURIComponent(id)}/free-plan`, { method: 'PATCH', body: JSON.stringify(patch) });
+        if (await maybeStepUp(res)) return;
         const body = res ? await res.json().catch(() => null) : null;
         if (res && res.ok) { msg.className = 'ok'; msg.textContent = 'Saved.'; return; }
         msg.textContent = body?.error?.message ?? body?.error ?? `Could not save (${res?.status ?? '?'}).`;
@@ -207,9 +312,10 @@
 
       // --- Default free plan (what new orgs get) ---
       async function renderDefaultPlan() {
+        rerender = () => renderDefaultPlan();
         main.innerHTML = `<div class="card">Loading…</div>`;
         const res = await api('default-plan');
-        if (res && (res.status === 401 || res.status === 403)) return renderDenied();
+        if (await authFailed(res)) return;
         if (!res || !res.ok) { main.innerHTML = `<div class="card">Could not load the default plan.</div>`; return; }
         const p = await res.json();
         main.innerHTML = `
@@ -234,6 +340,7 @@
             free_no_expiry: main.querySelector('#dp-forever').checked,
           };
           const r = await api('default-plan', { method: 'PATCH', body: JSON.stringify(patch) });
+          if (await maybeStepUp(r)) return;
           const body = r ? await r.json().catch(() => null) : null;
           if (r && r.ok) { msg.className = 'ok'; msg.textContent = 'Saved.'; return; }
           msg.textContent = body?.error?.message ?? `Could not save (${r?.status ?? '?'}).`;

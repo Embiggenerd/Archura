@@ -43,12 +43,17 @@ func (s *Store) CreateOrganization(ctx context.Context, p CreateOrganizationPara
 func (s *Store) OrganizationBySecretHash(ctx context.Context, hash string) (Organization, error) {
 	var organization Organization
 	err := s.Pool.QueryRow(ctx, `
-		SELECT t.id::text, t.name, t.slug, t.allowed_origins, t.status, t.created_at
+		SELECT t.id::text, t.name, t.slug, t.allowed_origins, t.status,
+			t.caps_exempt, t.is_platform_workspace, t.created_at
 		FROM organizations t
 		JOIN organization_api_keys k ON k.organization_id = t.id
 		WHERE k.secret_key_hash = $1 AND k.revoked_at IS NULL AND t.status = 'active'`,
 		hash,
-	).Scan(&organization.ID, &organization.Name, &organization.Slug, &organization.AllowedOrigins, &organization.Status, &organization.CreatedAt)
+	).Scan(
+		&organization.ID, &organization.Name, &organization.Slug, &organization.AllowedOrigins,
+		&organization.Status, &organization.CapsExempt, &organization.IsPlatformWorkspace,
+		&organization.CreatedAt,
+	)
 	if err != nil {
 		return Organization{}, mapStoreError("find organization by secret", err)
 	}

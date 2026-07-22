@@ -33,7 +33,7 @@ try {
   await fontSize.press('Enter');
 
   // Save writes a DRAFT and leaves the served artifact untouched.
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.evaluate(() => document.getElementById('editor').getController().save());
   const afterSave = await page.evaluate(async () => {
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     let draft = 0;
@@ -116,7 +116,7 @@ try {
   await page.evaluate(() =>
     document.querySelector('#slow-editor').getController().setPageMeta({ title: 'slow' })
   );
-  await page.locator('#slow-editor').getByRole('button', { name: 'Save', exact: true }).click();
+  await page.evaluate(() => document.querySelector('#slow-editor').getController().save());
   const slowButton = page.locator('#slow-editor').getByRole('button', { name: /Publish/ });
   await slowButton.click();
   await page.locator('#slow-editor').getByRole('button', { name: 'Publishing...' }).waitFor({ timeout: 2000 });
@@ -149,7 +149,7 @@ try {
   await page.evaluate(() =>
     document.querySelector('#failing-editor').getController().setPageMeta({ title: 'fail' })
   );
-  await page.locator('#failing-editor').getByRole('button', { name: 'Save', exact: true }).click();
+  await page.evaluate(() => document.querySelector('#failing-editor').getController().save());
   await page.locator('#failing-editor').getByRole('button', { name: /Publish/ }).click();
   await page.locator('#failing-editor').getByRole('button', { name: 'Publish failed' }).waitFor({ timeout: 5000 });
   const failErrors = await page.evaluate(() => window.__failErrors);

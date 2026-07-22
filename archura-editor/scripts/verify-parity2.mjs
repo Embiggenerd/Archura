@@ -165,7 +165,7 @@ try {
   check('resize: dragging the right handle writes --width', /(px|%)$/.test(resized), `--width="${resized}"`);
 
   // --- Publish: everything lands in the artifact through existing channels ---
-  await page.getByRole('button', { name: /Publish|Save/ }).click();
+  await page.evaluate(() => document.getElementById('editor').getController().save());
   await page.waitForFunction(() => window.__artifacts !== null, null, { timeout: 10000 });
   const artifact = (await page.evaluate(() => window.__artifacts))[0];
   check(

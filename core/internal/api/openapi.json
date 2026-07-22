@@ -33,6 +33,12 @@
         "scheme": "bearer",
         "bearerFormat": "adm_..., sk_..., or sess_...",
         "description": "Platform-admin key, organization secret key, or account session token, according to the operation."
+      },
+      "InternalAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "int_...",
+        "description": "Internal Worker credential. Customer and account-session credentials are rejected."
       }
     },
     "schemas": {
@@ -437,6 +443,43 @@
           "template_ref": { "type": "string" }
         }
       },
+      "CreateDesignRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "maxLength": 80 },
+          "component_path": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "An exact path from Core's component registry. Defaults to pages/Landing only when omitted."
+          }
+        }
+      },
+      "DeployCheckRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["top_level", "uses"],
+        "properties": {
+          "top_level": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "uses": {
+            "type": "array",
+            "maxItems": 100,
+            "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        }
+      },
+      "DeployCheckAllowed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["allowed"],
+        "properties": { "allowed": { "type": "boolean", "const": true } }
+      },
+      "AdminContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["env"],
+        "properties": { "env": { "type": "string", "enum": ["dev", "prod"] } }
+      },
       "DevConfirmations": {
         "type": "object",
         "required": ["confirmations", "invitations"],
@@ -479,6 +522,7 @@
       "BadRequest": { "description": "Invalid request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "Unauthorized": { "description": "Missing or invalid service/admin/organization credential", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "Forbidden": { "description": "Authenticated but not allowed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+      "PaymentRequired": { "description": "The organization needs the Basic plan for this component", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "NotFound": { "description": "Resource not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "Conflict": { "description": "Resource conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
       "RateLimited": { "description": "Rate limit exceeded", "headers": { "Retry-After": { "schema": { "type": "integer" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
@@ -559,6 +603,7 @@
           "201": { "description": "Component created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Component" } } } },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
           "429": { "$ref": "#/components/responses/RateLimited" },
           "500": { "$ref": "#/components/responses/InternalError" },
           "503": { "$ref": "#/components/responses/Unavailable" }
@@ -579,6 +624,7 @@
           "200": { "description": "Component updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Component" } } } },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
           "404": { "$ref": "#/components/responses/NotFound" },
           "429": { "$ref": "#/components/responses/RateLimited" },
           "500": { "$ref": "#/components/responses/InternalError" },
@@ -598,6 +644,7 @@
           "201": { "description": "Component session created", "headers": { "Cache-Control": { "schema": { "type": "string", "example": "no-store" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ComponentSessionCreated" } } } },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
           "403": { "$ref": "#/components/responses/Forbidden" },
           "404": { "$ref": "#/components/responses/NotFound" },
           "429": { "$ref": "#/components/responses/RateLimited" },
@@ -717,11 +764,14 @@
         "description": "Account session with organization membership. Enforces the plan's design cap; the content itself lives in R2.",
         "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
         "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateDesignRequest" } } } },
         "responses": {
           "201": { "description": "Design created" },
-          "400": { "$ref": "#/components/responses/InvalidRequest" },
+          "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
           "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/BadRequest" },
           "409": { "$ref": "#/components/responses/Conflict" },
           "500": { "$ref": "#/components/responses/InternalError" }
         }
@@ -770,6 +820,26 @@
           "200": { "description": "Current organization entitlement", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BillingEntitlement" } } } },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "404": { "$ref": "#/components/responses/NotFound" },
+          "500": { "$ref": "#/components/responses/InternalError" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/organizations/{organizationID}/deploy-check": {
+      "post": {
+        "tags": ["Organizations", "Components"],
+        "operationId": "checkOrganizationComponentDeploy",
+        "summary": "Authorize a declared component manifest before publication",
+        "description": "Internal Worker operation. Unknown registry paths fail closed. The organization ID must come from trusted site or design metadata.",
+        "security": [{ "ServiceAuth": [], "InternalAuth": [] }],
+        "parameters": [{ "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeployCheckRequest" } } } },
+        "responses": {
+          "200": { "description": "Publication is allowed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeployCheckAllowed" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "422": { "$ref": "#/components/responses/BadRequest" },
           "500": { "$ref": "#/components/responses/InternalError" },
           "503": { "$ref": "#/components/responses/Unavailable" }
         }
@@ -890,6 +960,49 @@
           "409": { "$ref": "#/components/responses/Conflict" },
           "500": { "$ref": "#/components/responses/InternalError" },
           "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+    "/v1/admin/context": {
+      "get": {
+        "tags": ["Admin"],
+        "operationId": "getAdminContext",
+        "summary": "Return the Core environment for the operations UI",
+        "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Admin environment context", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminContext" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/v1/admin/mfa/enroll": {
+      "post": {
+        "tags": ["Admin"], "operationId": "enrollAdminMFA", "summary": "Issue a TOTP secret for the platform owner", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "responses": {
+          "200": { "description": "Secret and provisioning URI", "content": { "application/json": { "schema": { "type": "object", "properties": { "secret": { "type": "string" }, "otpauth_uri": { "type": "string" } } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/v1/admin/mfa/activate": {
+      "post": {
+        "tags": ["Admin"], "operationId": "activateAdminMFA", "summary": "Confirm TOTP enrollment with a code", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string" } } } } } },
+        "responses": {
+          "200": { "description": "Enrollment confirmed and session elevated", "content": { "application/json": { "schema": { "type": "object", "properties": { "elevated_until": { "type": "string", "format": "date-time" } } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/v1/admin/mfa/verify": {
+      "post": {
+        "tags": ["Admin"], "operationId": "verifyAdminMFA", "summary": "Step-up: verify a TOTP code to elevate the session", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string" } } } } } },
+        "responses": {
+          "200": { "description": "Session elevated", "content": { "application/json": { "schema": { "type": "object", "properties": { "elevated_until": { "type": "string", "format": "date-time" } } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },

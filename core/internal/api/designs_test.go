@@ -68,3 +68,55 @@ func TestDesignRequiresOrganizationMembership(t *testing.T) {
 		t.Fatalf("designs for a non-membership org: status=%d", otherOrg.Code)
 	}
 }
+
+func TestDesignComponentTierAndPathValidation(t *testing.T) {
+	t.Run("absent path defaults to page", func(t *testing.T) {
+		_, server, token, organizationID := billingTestServer(t, "owner")
+		response := performRequest(server.Router(), http.MethodPost,
+			"/v1/organizations/"+organizationID+"/designs", `{"name":"Default page"}`, token)
+		if response.Code != http.StatusCreated || !containsJSON(response.Body.String(), `"component_path":"pages/Landing"`) {
+			t.Fatalf("default page status=%d body=%s", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("free standalone component denied", func(t *testing.T) {
+		_, server, token, organizationID := billingTestServer(t, "owner")
+		response := performRequest(server.Router(), http.MethodPost,
+			"/v1/organizations/"+organizationID+"/designs",
+			`{"name":"Card","component_path":"cards/Card"}`, token)
+		if response.Code != http.StatusPaymentRequired ||
+			!containsJSON(response.Body.String(), `"code":"component_requires_paid"`) {
+			t.Fatalf("free component status=%d body=%s", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("paid standalone component allowed", func(t *testing.T) {
+		repo, server, token, organizationID := billingTestServer(t, "owner")
+		repo.billing = map[string]store.OrganizationBilling{organizationID: {
+			OrganizationID: organizationID, StripeSubscriptionStatus: "active",
+		}}
+		response := performRequest(server.Router(), http.MethodPost,
+			"/v1/organizations/"+organizationID+"/designs",
+			`{"name":"Card","component_path":"cards/Card"}`, token)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("paid component status=%d body=%s", response.Code, response.Body.String())
+		}
+	})
+
+	for name, body := range map[string]string{
+		"null":      `{"component_path":null}`,
+		"empty":     `{"component_path":""}`,
+		"malformed": `{"component_path":"pages/../Landing"}`,
+		"unknown":   `{"component_path":"pages/Unknown"}`,
+	} {
+		t.Run("invalid "+name, func(t *testing.T) {
+			_, server, token, organizationID := billingTestServer(t, "owner")
+			response := performRequest(server.Router(), http.MethodPost,
+				"/v1/organizations/"+organizationID+"/designs", body, token)
+			if response.Code != http.StatusUnprocessableEntity ||
+				!containsJSON(response.Body.String(), `"code":"invalid_component_path"`) {
+				t.Fatalf("invalid path status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}

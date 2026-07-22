@@ -105,15 +105,15 @@ try {
   assert.equal(listRes.status, 200, 'list proxied');
   assert.equal((await listRes.json()).designs[0].id, DESIGN_ID);
 
-  // --- artifact BLOB round-trips through R2 (no core meta) ---
+  // --- draft artifact BLOB round-trips through R2 (no core meta) ---
   const artifact = { config: { componentPath: ['pages', 'Landing'] }, content: { components: [] }, snapshot: { html: '<main>hi</main>', css: '' }, meta: {} };
   const saved = await worker.fetch(
-    signed(`/api/orgs/${ORG}/designs/${DESIGN_ID}/artifact`, { method: 'PUT', body: JSON.stringify(artifact) }),
+    signed(`/api/orgs/${ORG}/designs/${DESIGN_ID}/artifact/draft`, { method: 'PUT', body: JSON.stringify(artifact) }),
     env
   );
-  assert.equal(saved.status, 204, 'autosave artifact blob');
-  const loaded = await worker.fetch(signed(`/api/orgs/${ORG}/designs/${DESIGN_ID}/artifact`), env);
-  assert.deepEqual(await loaded.json(), artifact, 'artifact blob round-trips');
+  assert.equal(saved.status, 204, 'autosave writes the draft blob');
+  const loaded = await worker.fetch(signed(`/api/orgs/${ORG}/designs/${DESIGN_ID}/artifact/draft`), env);
+  assert.deepEqual(await loaded.json(), artifact, 'draft blob round-trips');
 
   const embed = await worker.fetch(
     signed(`/api/orgs/${ORG}/designs/${DESIGN_ID}/embed/Landing.js`, { method: 'PUT', body: 'export {};' }),

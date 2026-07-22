@@ -233,6 +233,11 @@ func (s *Store) AdminOrganizations(ctx context.Context, query string, limit, off
 		FROM organizations o
 		JOIN organization_billing b ON b.organization_id = o.id
 		WHERE $1 = '' OR o.id::text = $1 OR o.name ILIKE '%' || $1 || '%' OR o.slug ILIKE '%' || $1 || '%'
+			OR EXISTS (
+				SELECT 1 FROM organization_memberships m
+				JOIN accounts a ON a.id = m.account_id
+				WHERE m.organization_id = o.id AND a.email ILIKE '%' || $1 || '%'
+			)
 		ORDER BY o.created_at DESC, o.id
 		LIMIT $2 OFFSET $3`, strings.TrimSpace(query), limit+1, offset)
 	if err != nil {

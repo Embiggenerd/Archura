@@ -40,6 +40,9 @@ const DEFAULT_BREAKPOINTS: ArchuraBreakpoint[] = [
 
 const ALL_STYLE_GROUPS = ['typography', 'spacing', 'dimension', 'decorations', 'hover', 'flex'];
 
+// How long editing settles before an autosave writes the draft.
+const AUTOSAVE_DELAY_MS = 800;
+
 function createDefaultHtml(componentPath: string[]) {
   const componentName = componentPath.at(-1)?.toLowerCase() ?? 'component';
   return `<section data-archura-component="${componentName}">
@@ -195,6 +198,13 @@ export class ArchuraEditorController {
   #components: ArchuraComponentDefinition[];
   #definition: ArchuraComponentDefinition | null = null;
   #dirty = false;
+  // Autosave: edits persist to the draft automatically (debounced), so there is
+  // no manual Save. Publishing is still an explicit promote of the saved draft.
+  #autosaveTimer?: ReturnType<typeof setTimeout>;
+  #autosaving = false;
+  // Content signature of what's currently live, so re-publishing identical
+  // content is a no-op rather than redundant work.
+  #lastPublishedFingerprint: string | null = null;
   // Draft/published lifecycle (Sanity-style): a draft blob exists only while
   // there are unpublished changes. These mirror what's in the store, so the
   // content state is derived, not an ephemeral flag — it survives reload.
@@ -261,6 +271,8 @@ export class ArchuraEditorController {
   // Save persists the working source to the draft key without touching what is
   // served. Publish promotes it. So content is saved without being published.
   async save(): Promise<CanonicalComponentData[]> {
+    // Supersede any pending autosave — this write covers it.
+    clearTimeout(this.#autosaveTimer);
     const artifact = this.#createCurrentArtifact();
     this.#artifacts = [artifact];
     const store = this.#config.persistence;
@@ -287,6 +299,28 @@ export class ArchuraEditorController {
 
   #markDirty(): void {
     this.#dirty = true;
+    this.#scheduleAutosave();
+  }
+
+  // Debounced autosave: a burst of edits collapses into one draft write shortly
+  // after the user stops. The #dirty guard makes a stale timer a no-op (e.g. a
+  // timer scheduled by canvas population, which resets #dirty before it fires).
+  #scheduleAutosave(): void {
+    if (!this.#config.persistence) return;
+    clearTimeout(this.#autosaveTimer);
+    this.#autosaveTimer = setTimeout(() => void this.#autosave(), AUTOSAVE_DELAY_MS);
+  }
+
+  async #autosave(): Promise<void> {
+    if (this.#autosaving || !this.#dirty || !this.#config.persistence) return;
+    this.#autosaving = true;
+    try {
+      await this.save();
+    } catch (error) {
+      this.#config.onError?.(error);
+    } finally {
+      this.#autosaving = false;
+    }
   }
 
   undo(): void {
@@ -571,33 +605,66 @@ export class ArchuraEditorController {
     return !!this.#config.persistence;
   }
 
-  // Publish promotes the saved draft to the served artifact + module, then
-  // removes the draft — so "unpublished changes exist" == "a draft exists".
-  // It publishes what was saved, not unsaved buffer edits.
+  // Publish is always available (the button never greys out). It reads the live
+  // buffer directly — never a possibly-stale saved copy — so it reflects exactly
+  // what's on screen even if change-tracking missed an edit. If that content is
+  // byte-for-byte what's already live, it's a no-op, so re-clicking Publish with
+  // nothing new to say costs nothing.
   async publish(): Promise<CanonicalComponentData[]> {
     const store = this.#config.persistence;
     if (!store) {
       throw new Error('No persistence store configured.');
     }
 
-    const artifact = this.#artifacts[0] ?? this.#createCurrentArtifact();
+    clearTimeout(this.#autosaveTimer);
+    const artifact = this.#createCurrentArtifact();
     const path = artifact.config.componentPath;
+    this.#artifacts = [artifact];
+
+    // Nothing changed since the last publish → don't republish identical content.
+    const fingerprint = this.#publishFingerprint(artifact);
+    if (fingerprint === this.#lastPublishedFingerprint) {
+      return [...this.#artifacts];
+    }
+
     try {
-      await store.put(artifactKey(path), JSON.stringify(artifact));
-      await this.#publishEmbeds(store, artifact);
-      if (store.delete) await store.delete(draftKey(path));
+      // Keep the server draft in step with what we're about to publish; the
+      // design store promotes that draft (and runs the tier gate) on publish.
+      await store.put(draftKey(path), JSON.stringify(artifact));
+      this.#draftExists = true;
+      this.#dirty = false;
+      if (store.publish) {
+        // Server-orchestrated publish (design store): send the generated embed
+        // modules and let the backend promote the draft + gate.
+        const modules = buildEmbedModules(artifact, this.#components, globalThis.location?.href ?? '');
+        await store.publish(Object.fromEntries(modules.map((module) => [module.name, module.source])));
+      } else {
+        await store.put(artifactKey(path), JSON.stringify(artifact));
+        await this.#publishEmbeds(store, artifact);
+        if (store.delete) await store.delete(draftKey(path));
+      }
     } catch (error) {
       this.#config.onError?.(error);
       throw error;
     }
 
-    this.#artifacts = [artifact];
+    this.#lastPublishedFingerprint = fingerprint;
     this.#publishedExists = true;
-    if (store.delete) this.#draftExists = false;
+    if (store.publish || store.delete) this.#draftExists = false;
     this.#config.onSave?.({ artifacts: this.#artifacts, published: true });
     this.#config.onChange?.(this.#artifacts);
     this.#notify();
     return [...this.#artifacts];
+  }
+
+  // A stable content signature (excludes the volatile meta timestamps) used to
+  // skip republishing identical content.
+  #publishFingerprint(artifact: CanonicalComponentData): string {
+    return JSON.stringify({
+      config: artifact.config,
+      content: artifact.content,
+      snapshot: artifact.snapshot,
+    });
   }
 
   // Per-client embed modules, one per component instance, written as ordinary
@@ -1231,6 +1298,7 @@ export class ArchuraEditorController {
       this.#injectCanvasHints(editor);
       // Loading/expansion fires component:update; the canvas isn't user-dirty yet
       this.#dirty = false;
+      clearTimeout(this.#autosaveTimer);
       this.#notify();
     } catch (error) {
       this.#config.onError?.(error);
