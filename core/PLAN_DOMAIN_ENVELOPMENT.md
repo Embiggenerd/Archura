@@ -1,27 +1,32 @@
-# Core plan: move archura.ai → envelopment.ai
+# Core plan: move Core hostnames to envelopment.ai
 
-Companion doc: `archura-editor/docs/PLAN_DOMAIN_ENVELOPMENT.md` (worker,
-Cloudflare steps, cutover order — read that first; this doc is the box/core
-half). Igor executes box and dashboard steps; nothing deploys without him.
-Status (2026-07-23): editor code changes are landed; email domain onboarded
-and verified (SPF/DKIM/DMARC pass); staging-core DNS record created; origin
-cert and box `.env` flip are pending with Igor.
+Scope: the Core API moves to `staging-core.envelopment.ai` now and
+`core.envelopment.ai` for a future production deployment. The public app,
+confirmation flow, billing returns, email identities, and published
+`<my-site>.archura.ai` sites remain on archura.ai.
+
+Companion doc: `archura-editor/docs/PLAN_DOMAIN_ENVELOPMENT.md` covers the
+Worker and Cloudflare side. For this split-domain design, only its Core target
+and Core DNS/routing steps apply; do not move the public Worker routes or
+`ROOT_DOMAIN` away from archura.ai. Igor executes box and dashboard steps;
+nothing deploys without him.
+
+Status (2026-07-23): the staging-core DNS record exists; the origin certificate
+and box `.env` flip are pending with Igor.
 
 ## Core implementation tasks — the complete list
 
-1. **`deploy/hetzner/.env.example`** — five value swaps:
+1. **`deploy/hetzner/.env.example`** — one value swap:
    - line 4: `CORE_HOSTNAME=staging-core.envelopment.ai`
-   - line 16: `CONFIRM_URL_BASE=https://envelopment.ai/confirm`
-   - line 19: `EMAIL_FROM=hello@envelopment.ai`
-   - line 34: `PLATFORM_OWNER_EMAIL=owner@envelopment.ai` — only after the
-     owner-account handoff below; otherwise keep the existing owner address
-   - line 41 (commented Stripe block): `# BILLING_PUBLIC_ORIGIN=https://envelopment.ai`
-2. **`fly.toml`** (repo root of core/) — carries `CONFIRM_URL_BASE` and
-   `EMAIL_FROM` for a Fly.io deployment that no longer exists (production is
-   the Hetzner compose stack). Keep the file, but update its two hostname
-   values so it cannot mislead.
-3. **`BILLING_TEST_RUNBOOK.md`** — update the app origin and Stripe webhook
-   examples to the envelopment.ai staging hostnames.
+   Keep `CONFIRM_URL_BASE=https://archura.ai/confirm`,
+   `EMAIL_FROM=hello@archura.ai`,
+   `PLATFORM_OWNER_EMAIL=owner@archura.ai`, and
+   `BILLING_PUBLIC_ORIGIN=https://archura.ai`.
+2. **`fly.toml`** — keep it unchanged. Its `CONFIRM_URL_BASE` and `EMAIL_FROM`
+   values correctly remain on archura.ai even though the obsolete Fly
+   deployment is not used.
+3. **`BILLING_TEST_RUNBOOK.md`** — update only the Stripe webhook host to
+   `staging-core.envelopment.ai`; the app origin remains archura.ai.
 4. **No Go changes.** Every runtime hostname in core is configuration
    (`CORE_HOSTNAME` via Caddy, `CONFIRM_URL_BASE`, `EMAIL_FROM`,
    `BILLING_PUBLIC_ORIGIN`); nothing in `internal/` references the domain.
@@ -32,54 +37,34 @@ cert and box `.env` flip are pending with Igor.
 
 ## Box `.env` changes (Igor, at cutover — mirrors the example)
 
-Same five values. **EMAIL_FROM sequencing**: flip it only after the
-envelopment.ai sending domain has verified in Cloudflare Email Service
-(DKIM/SPF) — sending from an unverified domain bounces or lands in spam,
-which for sign-in links means nobody can log in. Until it verifies, keep
-`EMAIL_FROM=hello@archura.ai`; everything else can cut over first.
-`CONFIRM_URL_BASE` must flip together with the worker's route change — the
-links in sign-in emails point at it.
-
-**PLATFORM_OWNER_EMAIL sequencing**: this value identifies an account; changing
-it does not transfer the `platform_owner` role. Email Sending verification is
-outbound-only, so first confirm `owner@envelopment.ai` can receive mail through
-Email Routing or another mailbox. Then sign up as that address and re-run a
-deploy or `adminctl grant-staff` so the role is granted. Until that handoff is
-verified in `/ops/`, keep the existing owner address in the box `.env`.
+Change only `CORE_HOSTNAME=staging-core.envelopment.ai`. Leave
+`CONFIRM_URL_BASE`, `EMAIL_FROM`, `PLATFORM_OWNER_EMAIL`, and
+`BILLING_PUBLIC_ORIGIN` on archura.ai. A future production Core deployment
+uses `CORE_HOSTNAME=core.envelopment.ai`.
 
 ## Certificates (Igor, on the box)
 
 Install the new Cloudflare Origin CA cert covering
 `envelopment.ai, *.envelopment.ai` at `/etc/caddy/certs/origin.pem` +
-`origin-key.pem`, then restart Caddy. One-level hostname, so no paid cert
-tier — identical situation to the archura.ai cert. Keep the old cert files
-aside until the old zone is retired if `staging-core.archura.ai` should keep
-answering during the transition (Caddy serves one `CORE_HOSTNAME`; if both
-hostnames must answer simultaneously, that's a second site block — simplest
-is a clean flip and let the old hostname go dark).
+`origin-key.pem`, then restart Caddy. The wildcard covers both the one-level
+`staging-core.envelopment.ai` and `core.envelopment.ai` hostnames.
 
 ## Stripe (Igor, dashboard, test mode)
 
 Webhook endpoint → `https://staging-core.envelopment.ai/stripe/webhooks`.
-`BILLING_PUBLIC_ORIGIN` in `.env` must match the new app origin (the https
-validation already enforces the scheme).
+`BILLING_PUBLIC_ORIGIN` remains `https://archura.ai`, because Stripe Checkout
+and portal sessions return users to the public app rather than to Core.
 
-## Database audit
+## Explicitly unaffected
 
-Before cutover, check persistent `organizations.allowed_origins` plus
-`payment_components.success_url`, `cancel_url`, and `allowed_origins` for
-archura.ai values. Existing component sessions also carry an audience and
-allowed origin, but they are short-lived and can expire naturally. If every
-matching organization/component is disposable staging data, record that and
-leave it; otherwise update the persistent configuration for envelopment.ai and
-include an affected component in the smoke test.
-
-CI/CD (deploys over Tailscale by address, not domain), R2 keys, Tailscale/ssh,
-backups, and the remaining database data are unaffected.
+The database's archura.ai origins and URLs remain valid because the public app
+and published sites stay on that domain. CI/CD (deploys over Tailscale by
+address, not domain), R2 keys, Tailscale/ssh, and backups are also unaffected.
 
 ## Smoke checks after cutover (with the companion doc's)
 
 `curl https://staging-core.envelopment.ai/healthz` through Cloudflare →
-sign-up email arrives from the new domain (inbox, not spam) → confirm link
-points at envelopment.ai and signs in → Stripe test checkout completes and
-the webhook shows 2xx in the Stripe dashboard.
+sign-up email arrives from the existing sender → confirm link points at
+archura.ai and signs in → publish a site at `<my-site>.archura.ai` → Stripe
+test checkout returns to archura.ai and the new Core webhook shows 2xx in the
+Stripe dashboard.

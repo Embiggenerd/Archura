@@ -64,3 +64,30 @@ the new host — everyone signs in again. Published sites keep their R2 data
 and re-serve at `<name>.envelopment.ai` immediately; their old
 `<name>.archura.ai` URLs work via the redirect for as long as the old zone
 keeps its routes.
+
+## Addendum (2026-07-23): split domains — app vs. published sites
+
+Igor's decision after cutover: **envelopment.ai is the app + front page and
+the core address; published customer sites live on `<name>.archura.ai`**
+(user-content-domain pattern — untrusted published pages can never set or
+toss cookies the app receives, and scam content doesn't ride the app's
+domain). Implemented:
+
+- wrangler routes: `envelopment.ai/*` (app), `archura.ai/*` +
+  `*.archura.ai/*` (sites). Deliberately **no `*.envelopment.ai` route** —
+  stray app-domain subdomains don't resolve, the missing wildcard DNS on
+  envelopment.ai is a feature, and the staging-core route exclusion is no
+  longer needed (harmless leftover if present).
+- `ROOT_DOMAIN=archura.ai`, new `APP_ORIGIN=https://envelopment.ai`; the bare
+  sites domain 301s to the app.
+- `siteUrlFor`/`embedBaseFor` now emit canonical subdomain/embed URLs
+  whenever ROOT_DOMAIN is set, regardless of which host the request came
+  through (previously they fell back to path URLs off-root — which would
+  have silently path-ified every link once the app moved off the root).
+- archura.ai is therefore **permanent customer-facing infrastructure again**
+  (reverses "goes dark"); its zone keeps the existing apex + wildcard records
+  and Universal SSL. Core is unaffected (stores bare subdomains; all its
+  config points at the app side).
+- Known cosmetic debt: embed snippets minted during the one day sites lived
+  on envelopment.ai reference `embed.envelopment.ai` — disposable staging
+  data.

@@ -31,7 +31,7 @@ an `sk_test_` key.
 - Staging `.env`: `STRIPE_SECRET_KEY=sk_test_…`, `STRIPE_WEBHOOK_SECRET=whsec_…`
   (from the **test-mode** endpoint), `STRIPE_BASIC_PRICE_ID=price_…` (a $5/mo
   recurring price created in test mode),
-  `BILLING_PUBLIC_ORIGIN=https://envelopment.ai`.
+  `BILLING_PUBLIC_ORIGIN=https://archura.ai`.
 - Register the webhook in the Stripe **test-mode** dashboard →
   `https://staging-core.envelopment.ai/stripe/webhooks`, events:
   `checkout.session.completed`, `customer.subscription.{created,updated,deleted}`,

@@ -151,6 +151,15 @@ try {
   assert.equal(version.status, 200, 'version probe answers');
   assert.deepEqual(await version.json(), { commit: 'abc123', deployed_at: '2026-07-22T00:00:00Z' }, 'version probe echoes build vars');
 
+  // --- split domains: sites on ROOT_DOMAIN, app elsewhere, apex redirects ---
+  const splitEnv = { ...env, ROOT_DOMAIN: 'archura.ai', APP_ORIGIN: 'https://envelopment.ai' };
+  const apex = await worker.fetch(new Request('https://archura.ai/pricing/?a=1', { redirect: 'manual' }), splitEnv);
+  assert.equal(apex.status, 301, 'bare sites domain redirects');
+  assert.equal(apex.headers.get('Location'), 'https://envelopment.ai/pricing/?a=1', 'redirect preserves path and query');
+  const siteOnRoot = await worker.fetch(new Request('https://never-published-xyz.archura.ai/'), splitEnv);
+  assert.equal(siteOnRoot.status, 200, 'subdomain of sites root serves a site response');
+  assert.ok((await siteOnRoot.text()).includes('Nothing published'), 'unclaimed subdomain shows the waiting page');
+
   // --- access gate ---
   const anon = await worker.fetch(new Request('https://archura.test/api/ops/organizations', { method: 'GET' }), env);
   assert.equal(anon.status, 401, 'no session rejected');

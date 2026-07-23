@@ -4,9 +4,15 @@ compatibility_date = "2026-07-15"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
+# Split domains: envelopment.ai is the app + marketing front door; published
+# customer sites (untrusted content) live on *.archura.ai so they can never
+# set or toss cookies the app sees. No *.envelopment.ai route on purpose —
+# stray subdomains of the app domain don't resolve, and staging-core reaches
+# the core box without needing a route exclusion.
 routes = [
   { pattern = "envelopment.ai/*", zone_name = "envelopment.ai" },
-  { pattern = "*.envelopment.ai/*", zone_name = "envelopment.ai" },
+  { pattern = "archura.ai/*", zone_name = "archura.ai" },
+  { pattern = "*.archura.ai/*", zone_name = "archura.ai" },
 ]
 
 [triggers]
@@ -30,7 +36,9 @@ namespace_id = "1001"
 
 [vars]
 # Cloudflare zone serving wildcard subdomains; empty = path-based sites only (/s/<name>/)
-ROOT_DOMAIN = "envelopment.ai"
+ROOT_DOMAIN = "archura.ai"
+# The app's own origin — the bare sites domain redirects here.
+APP_ORIGIN = "https://envelopment.ai"
 # Core target. CORE_SERVICE_KEY (transport) and CORE_INTERNAL_KEY (per-request
 # auth for machine endpoints: entitlement reads, billing-recovery release) must
 # be set with `wrangler secret put` in production or in `.dev.vars` locally.

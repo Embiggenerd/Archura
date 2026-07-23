@@ -107,6 +107,11 @@ export default {
       }
     }
 
+    // The bare sites domain has no front door of its own — send it to the app.
+    if (env.APP_ORIGIN && root && url.hostname === root) {
+      return Response.redirect(`${env.APP_ORIGIN.replace(/\/+$/, '')}${url.pathname}${url.search}`, 301);
+    }
+
     // Published site via path fallback (workers.dev, wrangler dev)
     if (url.pathname.startsWith('/s/')) {
       const [, , site, ...rest] = url.pathname.split('/');
@@ -180,24 +185,25 @@ function siteUrlFor(request, env, site) {
   if (env.PUBLIC_ORIGIN) {
     return `${env.PUBLIC_ORIGIN.replace(/\/+$/, '')}/s/${site}/`;
   }
-  const url = new URL(request.url);
+  // The sites root is its own domain (the app may run elsewhere), so a
+  // configured root always means canonical subdomain URLs — the origin-path
+  // form is only the no-root (workers.dev / local) fallback.
   const root = env.ROOT_DOMAIN;
-  if (root && (url.hostname === root || url.hostname.endsWith(`.${root}`))) {
+  if (root) {
     return `https://${site}.${root}/`;
   }
-  return `${url.origin}/s/${site}/`;
+  return `${new URL(request.url).origin}/s/${site}/`;
 }
 
 function embedBaseFor(request, env, publishableKey, siteId) {
   if (env.PUBLIC_ORIGIN) {
     return `${env.PUBLIC_ORIGIN.replace(/\/+$/, '')}/embed/${publishableKey}/${siteId}`;
   }
-  const url = new URL(request.url);
   const root = env.ROOT_DOMAIN;
-  if (root && (url.hostname === root || url.hostname.endsWith(`.${root}`))) {
+  if (root) {
     return `https://embed.${root}/${publishableKey}/${siteId}`;
   }
-  return `${url.origin}/embed/${publishableKey}/${siteId}`;
+  return `${new URL(request.url).origin}/embed/${publishableKey}/${siteId}`;
 }
 
 // White-label embeds load component modules from foreign origins, and module
