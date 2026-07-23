@@ -36,10 +36,7 @@ done
 echo
 
 if [ -z "$run_id" ]; then
-  {
-    echo "no run appeared for ${sha:0:7} within ~90s."
-    echo "(the '$WORKFLOW' workflow only runs on pushes to master that change core/**.)"
-  } >&2
+  echo "no run appeared for ${sha:0:7} within ~90s." >&2
   exit 1
 fi
 
