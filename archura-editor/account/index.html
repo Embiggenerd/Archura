@@ -178,7 +178,13 @@
 
       async function init() {
         const response = await fetch('/api/me').catch(() => null);
-        if (!response?.ok) {
+        if (!response || response.status >= 500) {
+          // Transient outage — the session is not dead; don't show sign-in.
+          main.innerHTML = '<section class="card"><h1>One moment</h1><p class="muted">The service is briefly unavailable — refresh in a few seconds. You are still signed in.</p></section>';
+          return;
+        }
+        if (!response.ok) {
+          // 401: the worker already destroyed the dead cookie server-side.
           renderRegister();
           return;
         }

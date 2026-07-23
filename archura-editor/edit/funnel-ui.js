@@ -69,6 +69,27 @@ export function checkEmailHtml(email) {
     ${isLocalDev() ? '<p><a href="/dev-mail/">Running locally? Open the dev mailbox.</a></p>' : ''}`;
 }
 
+// Signed-in capacity preemption: if the session's default organization has no
+// site slots left, publishing is doomed — say so the moment a site-creating
+// form opens, before any work is invested. Advisory only (the claim/confirm
+// paths stay authoritative); silent for anonymous visitors, transient
+// failures, exempt orgs (null), and cores that predate the field.
+export function warnIfOutOfSiteSlots(container) {
+  fetch('/api/me')
+    .then((res) => (res.ok ? res.json() : null))
+    .catch(() => null)
+    .then((me) => {
+      const organization = me?.organizations?.find((candidate) => candidate.is_default) ?? me?.organizations?.[0];
+      if (!organization || organization.site_slots_remaining !== 0) return;
+      const warning = document.createElement('p');
+      warning.className = 'capacity-warning';
+      warning.style.cssText = 'margin:0 0 12px;padding:9px 12px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:.85rem';
+      warning.innerHTML = 'Your plan has no site slots left — publishing will fail. <a href="/account/" style="color:#9a3412;font-weight:600">Open your account</a> to upgrade, or remove a site you no longer need.';
+      const form = container.querySelector('form');
+      if (form) form.parentNode.insertBefore(warning, form);
+    });
+}
+
 // Debounced live availability hint for a site-name input: says taken/reserved
 // before the user submits. Quiet while typing or on transient errors — the
 // submit path's 409 remains the authoritative, race-proof check.
@@ -150,6 +171,7 @@ export function showDeployModal(editorEl, components) {
     </form>
     <p class="error"></p>`);
   attachSiteAvailability(overlay.querySelector('input[name="site"]'), overlay.querySelector('.site-hint'));
+  warnIfOutOfSiteSlots(overlay.querySelector('.modal') ?? overlay);
   overlay.querySelector('form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const site = overlay.querySelector('input[name="site"]').value.trim().toLowerCase();
@@ -182,7 +204,9 @@ export function showDeployModal(editorEl, components) {
     if (!res || !res.ok) {
       button.disabled = false;
       button.textContent = 'Publish component';
+      const failure = res ? await res.json().catch(() => null) : null;
       errorEl.textContent =
+        failure?.error?.code === 'account_exists' ? 'That email already has an account — sign in to publish from it.' :
         res?.status === 409 ? 'That site name is already claimed — pick another.' :
         res?.status === 403 ? 'Deploys are currently restricted.' :
         res?.status === 429 ? 'Too many attempts — wait a bit and try again.' :

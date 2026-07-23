@@ -39,6 +39,10 @@ namespace_id = "1001"
 ROOT_DOMAIN = "archura.ai"
 # The app's own origin — the bare sites domain redirects here.
 APP_ORIGIN = "https://envelopment.ai"
+# This deployment is staging: edge rate limits off, mirroring core (whose
+# limiters only enforce under ARCHURA_ENV=prod). The prod worker config, when
+# it exists, must NOT set this.
+DISABLE_EDGE_RATE_LIMITS = "true"
 # Core target. CORE_SERVICE_KEY (transport) and CORE_INTERNAL_KEY (per-request
 # auth for machine endpoints: entitlement reads, billing-recovery release) must
 # be set with `wrangler secret put` in production or in `.dev.vars` locally.

@@ -140,10 +140,12 @@ globalThis.fetch = async (input, init) => {
     return Response.json(bound ? { bound: true, organization_id: bound } : { bound: false });
   }
   if (p === '/v1/sessions/me' && method === 'GET') {
-    if ((init?.headers?.Authorization ?? '') !== `Bearer ${SESSION}`) return new Response('unauthorized', { status: 401 });
+    const bearer = init?.headers?.Authorization ?? '';
+    if (bearer === 'Bearer boom-session') return new Response('core exploding', { status: 500 });
+    if (bearer !== `Bearer ${SESSION}`) return new Response('unauthorized', { status: 401 });
     return Response.json({
-      id: 'claim-account', email: 'claimer@example.com',
-      organizations: [{ id: CLAIM_ORG, is_default: true, role: 'owner', publishable_key: 'pk_test_claimorg0000000000' }],
+      account: { id: 'claim-account', email: 'claimer@example.com' },
+      organizations: [{ id: CLAIM_ORG, is_default: true, role: 'owner', publishable_key: 'pk_test_claimorg0000000000', site_slots_remaining: 0 }],
     });
   }
   if (p === '/v1/site-ownership' && method === 'POST') {
@@ -157,7 +159,16 @@ globalThis.fetch = async (input, init) => {
   if (p === '/v1/confirmations' && method === 'POST') {
     const request = JSON.parse(init.body);
     if ((request.email ?? '').startsWith('fail@')) return new Response('confirmation down', { status: 500 });
+    if ((request.email ?? '').startsWith('existing@')) {
+      return Response.json({ error: { code: 'account_exists' } }, { status: 409 });
+    }
     return Response.json({}, { status: 201 });
+  }
+  if (p === '/v1/confirmations/verify' && method === 'POST') {
+    const request = JSON.parse(init.body);
+    if (request.token === 'tok-limit') return Response.json({ error: { code: 'site_limit_reached' } }, { status: 409 });
+    if (request.token === 'tok-owned') return Response.json({ error: { code: 'site_owned' } }, { status: 409 });
+    return new Response('unexpected verify', { status: 500 });
   }
   throw new Error(`Unexpected core request: ${method} ${p}`);
 };
@@ -246,6 +257,22 @@ try {
   const confirmFail = await worker.fetch(deployRequest('cleanup-site', 'x', 'fail@example.com'), env);
   assert.equal(confirmFail.status, 502, 'confirmation failure surfaces');
   assert.equal(siteKeysOf('cleanup-site').length, 0, 'full cleanup after confirmation failure');
+  // Edge rate limits: a denying limiter 429s normally, but the staging kill
+  // switch bypasses it entirely.
+  const denyingLimiter = { limit: async () => ({ success: false }) };
+  const limited = await worker.fetch(deployRequest('limited-site', 'x'), { ...env, CORE_RATE_LIMITER: denyingLimiter });
+  assert.equal(limited.status, 429, 'denying edge limiter 429s');
+  const unlimited = await worker.fetch(deployRequest('limited-site', 'x'), { ...env, CORE_RATE_LIMITER: denyingLimiter, DISABLE_EDGE_RATE_LIMITS: 'true' });
+  assert.equal(unlimited.status, 201, 'staging kill switch bypasses the edge limiter');
+  await releaseSiteObjects(env, 'limited-site');
+
+  // Registration semantics: an existing-account email is turned away with a
+  // distinct code, and the reservation it briefly held is fully released.
+  const alreadyRegistered = await worker.fetch(deployRequest('registered-site', 'x', 'existing@example.com'), env);
+  assert.equal(alreadyRegistered.status, 409, 'existing-account email 409s');
+  assert.equal((await alreadyRegistered.json()).error.code, 'account_exists', 'distinct account_exists code surfaces');
+  assert.equal(siteKeysOf('registered-site').length, 0, 'its reservation is fully released');
+
   // Partial cleanup (draft delete fails) → meta REMAINS: the name stays
   // reserved and sweep-collectable, never free with residue under it.
   bucket.failDelete = 'sites/partial-site/draft/';
@@ -254,6 +281,32 @@ try {
   assert.ok(bucket.objects.has('sites/partial-site/meta.json'), 'meta survives a partial cleanup — name stays reserved');
   bucket.failDelete = null;
   await releaseSiteObjects(env, 'partial-site');
+
+  // --- /api/me cookie hygiene: destroy dead sessions, never transient ones ---
+  const meWith = (token) => worker.fetch(new Request('https://archura.test/api/me', token ? { headers: { Cookie: `archura_session=${token}` } } : {}), env);
+  const meAlive = await meWith(SESSION);
+  assert.equal(meAlive.status, 200, 'valid session resolves');
+  assert.equal(meAlive.headers.get('Set-Cookie'), null, 'valid session keeps its cookie');
+  const meBody = await meAlive.json();
+  assert.equal(meBody.organizations[0].site_slots_remaining, 0, 'site_slots_remaining passes through /api/me untouched');
+  const meDead = await meWith('dead-session');
+  assert.equal(meDead.status, 401, 'dead session 401s');
+  assert.ok((meDead.headers.get('Set-Cookie') ?? '').includes('Max-Age=0'), 'dead cookie is destroyed at the source');
+  const meBoom = await meWith('boom-session');
+  assert.equal(meBoom.status, 503, 'core failure is 503, not 401');
+  assert.equal(meBoom.headers.get('Set-Cookie'), null, 'transient failure never touches the cookie');
+  const meAnon = await meWith(null);
+  assert.equal(meAnon.status, 401, 'no cookie is a plain 401');
+  assert.equal(meAnon.headers.get('Set-Cookie'), null, 'nothing to destroy without a cookie');
+
+  // --- confirm-time 409s: plan limit and name conflict get honest pages ---
+  const limitPage = await worker.fetch(new Request('https://archura.test/confirm?token=tok-limit'), env);
+  assert.equal(limitPage.status, 409, 'limit confirm 409s');
+  const limitHtml = await limitPage.text();
+  assert.ok(limitHtml.includes('out of sites'), 'plan-limit failure names the real cause');
+  assert.ok(!limitHtml.includes('taken in the meantime'), 'plan-limit failure does not claim the name was taken');
+  const ownedPage = await worker.fetch(new Request('https://archura.test/confirm?token=tok-owned'), env);
+  assert.ok((await ownedPage.text()).includes('taken in the meantime'), 'real name conflict keeps the taken message');
 
   // --- split domains: sites on ROOT_DOMAIN, app elsewhere, apex redirects ---
   const splitEnv = { ...env, ROOT_DOMAIN: 'archura.ai', APP_ORIGIN: 'https://envelopment.ai' };

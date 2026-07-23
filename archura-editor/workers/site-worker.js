@@ -248,6 +248,10 @@ async function readBoundedJSON(request, limit = JSON_BODY_LIMIT) {
 }
 
 async function rateLimitRequest(request, env, operation) {
+  // Staging runs with edge limits off (mirrors core, whose limiters only
+  // enforce under ARCHURA_ENV=prod). The future prod worker config simply
+  // omits this var.
+  if (env.DISABLE_EDGE_RATE_LIMITS === 'true') return null;
   if (!env.CORE_RATE_LIMITER) return null;
   const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
   const { success } = await env.CORE_RATE_LIMITER.limit({ key: `${operation}:${clientIP}` });
@@ -930,6 +934,12 @@ async function serveApi(request, env, url) {
       if (!confirmation.ok) {
         await releaseSiteObjects(env, site, meta).catch(() => {});
         if (confirmation.status === 429) return json({ error: 'Too many requests' }, 429);
+        // The funnel is the REGISTRATION path — an already-registered email
+        // is turned away to sign in (core: account_exists), not re-registered.
+        const code = await confirmation.clone().json().then((body) => body?.error?.code ?? '').catch(() => '');
+        if (code === 'account_exists') {
+          return json({ error: { code: 'account_exists', message: 'This email already has an account. Sign in to publish.' } }, 409);
+        }
         return json({ error: 'Confirmation failed' }, 502);
       }
       return json({ site }, 201);
@@ -1038,8 +1048,28 @@ async function serveApi(request, env, url) {
   }
 
   if (url.pathname === '/api/me' && request.method === 'GET') {
-    const session = await sessionAccount(request, env);
-    if (!session) return json({ error: 'Unauthorized' }, 401);
+    const token = sessionTokenFromRequest(request);
+    if (!token || !coreConfigured(env)) return json({ error: 'Unauthorized' }, 401);
+    const me = await coreRequest(env, '/v1/sessions/me', { bearer: token }).catch(() => null);
+    // Distinguish "core says this session is dead" from "core is unreachable":
+    // only the former may destroy the cookie. Nuking sessions on transient
+    // failures logs users out every time core restarts.
+    if (!me || me.status >= 500) return json({ error: 'Core unavailable' }, 503);
+    if (me.status === 401 || me.status === 403) {
+      // Definitively dead cookie — destroy it here, at the one endpoint every
+      // signed-in surface calls, so pages need no logout calls of their own.
+      const secure = url.protocol === 'https:' ? '; Secure' : '';
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          'Set-Cookie': `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`,
+        },
+      });
+    }
+    if (!me.ok) return json({ error: 'Unauthorized' }, 401);
+    const session = await me.json();
     const organizations = session.organizations ?? [];
     const sites = organizations.flatMap((organization) => organization.sites ?? []);
     const siteUrls = Object.fromEntries(sites.map((s) => [s, siteUrlFor(request, env, s)]));
@@ -1459,6 +1489,18 @@ async function handleConfirm(request, env, url) {
   const response = await coreRequest(env, '/v1/confirmations/verify', { body: { token } });
   if (!response.ok) {
     if (response.status === 409) {
+      // Core 409s for two distinct reasons — a name conflict and a plan
+      // limit. Telling a limited account "the name was taken" sends them
+      // hunting for a new name that will fail identically.
+      const code = await response.clone().json().then((body) => body?.error?.code ?? '').catch(() => '');
+      if (code === 'site_limit_reached') {
+        return messagePage(
+          'Your plan is out of sites',
+          "The name wasn't taken — your account has reached its plan's site limit. Open your account to upgrade or remove a site you no longer need, then publish again.",
+          [['/account/', 'Open your account'], ['/edit/', 'Back to the editor']],
+          409
+        );
+      }
       return messagePage(
         'That name was taken in the meantime',
         'Someone else claimed this subdomain before you confirmed. Head back to the editor and pick another name.',
@@ -1846,7 +1888,7 @@ async function proxyCore(request, env, url) {
   // Postgres in the core; this IP bucket also covers callers with invalid or
   // deliberately changing Authorization headers. The binding is optional in
   // the Node verification and local setups that do not configure it.
-  if (env.CORE_RATE_LIMITER) {
+  if (env.CORE_RATE_LIMITER && env.DISABLE_EDGE_RATE_LIMITS !== 'true') {
     const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
     const operation = coreRateLimitOperation(corePath);
     const { success } = await env.CORE_RATE_LIMITER.limit({ key: `${operation}:${clientIP}` });

@@ -149,7 +149,7 @@
       import './../src/index.ts';
       import { defaultComponents } from './../src/components/index.ts';
       import { createFileSystemAdapter, createR2Adapter, createDesignStore } from './../src/adapters/index.ts';
-      import { ensureFunnelStyles, showDeployModal, showRegisterModal, attachSiteAvailability } from './funnel-ui.js';
+      import { ensureFunnelStyles, showDeployModal, showRegisterModal, attachSiteAvailability, warnIfOutOfSiteSlots } from './funnel-ui.js';
       import { showUpgradeModal } from './../src/upgrade-modal.ts';
       ensureFunnelStyles(); // the claim screen builds its own .overlay
 
@@ -286,6 +286,7 @@
           <p class="error"></p>
         `;
         attachSiteAvailability(el.querySelector('input[name="site"]'), el.querySelector('.site-hint'));
+        warnIfOutOfSiteSlots(el);
         el.querySelector('form').addEventListener('submit', async (e) => {
           e.preventDefault();
           const name = el.querySelector('input').value.trim().toLowerCase();

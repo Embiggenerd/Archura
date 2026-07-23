@@ -441,14 +441,22 @@
 
       async function init() {
         const pathAccount = location.pathname.match(/^\/([0-9a-fA-F][0-9a-fA-F-]{7,})\/dashboard\/?$/)?.[1] ?? null;
-        const me = await fetch('/api/me').then((r) => (r.ok ? r.json() : null)).catch(() => null);
-        if (!me) {
-          // Any lingering session cookie is stale (e.g. minted before a key
-          // rotation). It is HttpOnly — invisible to this page — so clear it
-          // through the worker; otherwise "/" keeps redirecting here on
-          // cookie presence alone. A no-cookie visitor gets a harmless 204.
-          await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+        const response = await fetch('/api/me').catch(() => null);
+        if (!response || response.status >= 500) {
+          // Transient (core restarting, network blip): the session is NOT dead
+          // — say so instead of showing sign-in, and never touch the cookie.
+          main.innerHTML = `<div class="card"><h2>One moment</h2>
+            <p class="hint">The service is briefly unavailable — refresh in a few seconds. You are still signed in.</p></div>`;
+          return;
+        }
+        if (!response.ok) {
+          // 401: the worker has already destroyed the dead cookie server-side.
           renderRegister(pathAccount ? 'This dashboard belongs to a signed-out account — enter its email to get a fresh link.' : '');
+          return;
+        }
+        const me = await response.json().catch(() => null);
+        if (!me) {
+          renderRegister('');
           return;
         }
         // Canonical URL is plain /dashboard/; a legacy /<accountId>/ path for
