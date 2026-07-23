@@ -180,6 +180,15 @@ func (s *Server) handleCreateConfirmation(w http.ResponseWriter, r *http.Request
 	}) {
 		return
 	}
+	if input.Subdomain != "" {
+		if _, err := s.store.AccountByEmail(r.Context(), email); err == nil {
+			writeError(w, r, http.StatusConflict, "account_exists", "This email already has an account. Sign in to publish.")
+			return
+		} else if !errors.Is(err, store.ErrNotFound) {
+			s.internalError(w, r, err)
+			return
+		}
+	}
 	token, err := archauth.Generate("cfm", s.cfg.Env)
 	if err != nil {
 		s.internalError(w, r, err)
@@ -343,6 +352,7 @@ func (s *Server) handleSessionMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	now := s.now().UTC()
 	organizationBodies := make([]map[string]any, 0, len(organizations))
 	for index := range organizations {
 		billing, billingErr := s.store.BillingForOrganization(r.Context(), organizations[index].ID)
@@ -352,7 +362,11 @@ func (s *Server) handleSessionMe(w http.ResponseWriter, r *http.Request) {
 		}
 		organizations[index].Billing = billing
 		organization := organizations[index]
-		organizationBodies = append(organizationBodies, organizationResponse(organization, s.now().UTC()))
+		response := organizationResponse(organization, now)
+		response["site_slots_remaining"] = store.SiteSlotsRemaining(
+			organization.Billing, organization.CapsExempt, len(organization.Sites), now,
+		)
+		organizationBodies = append(organizationBodies, response)
 	}
 	invitations, err := s.store.PendingInvitationsForEmail(r.Context(), account.Email)
 	if err != nil {

@@ -86,6 +86,33 @@ type resourceLimits struct {
 	Sites   int
 }
 
+func resourceLimitsForBilling(billing OrganizationBilling, now time.Time) resourceLimits {
+	paid := billing.StripeSubscriptionStatus == "active" || billing.StripeSubscriptionStatus == "trialing" ||
+		(billing.StripeSubscriptionStatus == "canceled" && billing.CurrentPeriodEnd != nil && now.Before(*billing.CurrentPeriodEnd))
+	if paid {
+		return resourceLimits{Designs: 10, Sites: 3}
+	}
+	return resourceLimits{Designs: billing.FreeDesignLimit, Sites: billing.FreeSiteLimit}
+}
+
+// SiteSlotsRemaining reports capacity only. Callers separately enforce
+// entitlement.CanEdit when deciding whether an organization may write.
+func SiteSlotsRemaining(
+	billing OrganizationBilling,
+	capsExempt bool,
+	currentSites int,
+	now time.Time,
+) *int {
+	if capsExempt {
+		return nil
+	}
+	remaining := resourceLimitsForBilling(billing, now).Sites - currentSites
+	if remaining < 0 {
+		remaining = 0
+	}
+	return &remaining
+}
+
 func effectiveResourceLimitsTx(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -111,12 +138,7 @@ func effectiveResourceLimitsTx(
 	if !entitlement.CanEdit {
 		return resourceLimits{}, false, ErrReadOnly
 	}
-	paid := billing.StripeSubscriptionStatus == "active" || billing.StripeSubscriptionStatus == "trialing" ||
-		(billing.StripeSubscriptionStatus == "canceled" && billing.CurrentPeriodEnd != nil && now.Before(*billing.CurrentPeriodEnd))
-	if paid {
-		return resourceLimits{Designs: 10, Sites: 3}, false, nil
-	}
-	return resourceLimits{Designs: billing.FreeDesignLimit, Sites: billing.FreeSiteLimit}, false, nil
+	return resourceLimitsForBilling(billing, now), false, nil
 }
 
 func (s *Store) DesignsForOrganization(ctx context.Context, organizationID string) ([]Design, error) {

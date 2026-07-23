@@ -38,6 +38,8 @@ type fakeRepository struct {
 	confirmations       map[string]store.EmailConfirmation
 	accounts            map[string]store.Account
 	accountByEmail      map[string]string
+	accountByEmailErr   error
+	accountByEmailCalls int
 	accountSessions     map[string]store.AccountSession
 	organizations       map[string][]store.AccountOrganization
 	invitations         map[string]store.OrganizationInvitation
@@ -222,6 +224,10 @@ func (f *fakeRepository) VerifyConfirmation(_ context.Context, p store.VerifyCon
 }
 
 func (f *fakeRepository) AccountByEmail(_ context.Context, email string) (store.Account, error) {
+	f.accountByEmailCalls++
+	if f.accountByEmailErr != nil {
+		return store.Account{}, f.accountByEmailErr
+	}
 	accountID := f.accountByEmail[email]
 	if accountID == "" {
 		return store.Account{}, store.ErrNotFound

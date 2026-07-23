@@ -319,32 +319,140 @@ func TestOrganizationInvitationDeliveryFailureCanRetrySameInvitation(t *testing.
 	}
 }
 
-func TestAccountCanConfirmAdditionalSite(t *testing.T) {
+func TestFunnelConfirmationRejectsExistingEmail(t *testing.T) {
 	account := store.Account{ID: "account-1", Email: "owner@example.com", CreatedAt: time.Now()}
 	repo := &fakeRepository{
 		accounts:       map[string]store.Account{"account-1": account},
 		accountByEmail: map[string]string{"owner@example.com": "account-1"},
-		sites:          map[string]string{"first-site": "account-1"},
 	}
 	server := NewServer(config.Config{Env: "dev", ConfirmURLBase: "http://localhost:8787/confirm"}, repo, slog.Default())
-	created := performRequest(server.Router(), http.MethodPost, "/v1/confirmations", `{"email":"owner@example.com","subdomain":"second-site"}`, "")
-	if created.Code != http.StatusCreated {
-		t.Fatalf("additional site confirmation status=%d body=%s", created.Code, created.Body.String())
+	router := server.Router()
+
+	existing := performRequest(router, http.MethodPost, "/v1/confirmations",
+		`{"email":" Owner@Example.com ","subdomain":"second-site"}`, "")
+	if existing.Code != http.StatusConflict ||
+		!strings.Contains(existing.Body.String(), `"code":"account_exists"`) ||
+		len(repo.confirmations) != 0 {
+		t.Fatalf("existing funnel confirmation status=%d confirmations=%d body=%s",
+			existing.Code, len(repo.confirmations), existing.Body.String())
+	}
+	if repo.accountByEmailCalls != 1 {
+		t.Fatalf("existing funnel account lookups = %d, want 1", repo.accountByEmailCalls)
+	}
+
+	signIn := performRequest(router, http.MethodPost, "/v1/confirmations",
+		`{"email":"owner@example.com"}`, "")
+	if signIn.Code != http.StatusCreated || repo.accountByEmailCalls != 1 {
+		t.Fatalf("existing sign-in confirmation status=%d lookups=%d body=%s",
+			signIn.Code, repo.accountByEmailCalls, signIn.Body.String())
+	}
+
+	newFunnel := performRequest(router, http.MethodPost, "/v1/confirmations",
+		`{"email":"new@example.com","subdomain":"new-site"}`, "")
+	if newFunnel.Code != http.StatusCreated || repo.accountByEmailCalls != 2 {
+		t.Fatalf("new funnel confirmation status=%d lookups=%d body=%s",
+			newFunnel.Code, repo.accountByEmailCalls, newFunnel.Body.String())
+	}
+}
+
+func TestFunnelAccountLookupRunsAfterRateLimitsAndFailsClosed(t *testing.T) {
+	t.Run("rate limited", func(t *testing.T) {
+		repo := &fakeRepository{rateLimitDenied: true}
+		server := NewServer(config.Config{Env: "prod"}, repo, slog.Default())
+		response := performRequest(server.Router(), http.MethodPost, "/v1/confirmations",
+			`{"email":"owner@example.com","subdomain":"new-site"}`, "")
+		if response.Code != http.StatusTooManyRequests || repo.accountByEmailCalls != 0 {
+			t.Fatalf("status=%d account lookups=%d body=%s",
+				response.Code, repo.accountByEmailCalls, response.Body.String())
+		}
+	})
+
+	t.Run("lookup error", func(t *testing.T) {
+		repo := &fakeRepository{accountByEmailErr: errors.New("database unavailable")}
+		server := NewServer(config.Config{Env: "prod"}, repo, slog.Default())
+		response := performRequest(server.Router(), http.MethodPost, "/v1/confirmations",
+			`{"email":"owner@example.com","subdomain":"new-site"}`, "")
+		if response.Code != http.StatusInternalServerError ||
+			repo.accountByEmailCalls != 1 || len(repo.confirmations) != 0 {
+			t.Fatalf("status=%d account lookups=%d confirmations=%d body=%s",
+				response.Code, repo.accountByEmailCalls, len(repo.confirmations), response.Body.String())
+		}
+	})
+}
+
+func TestSessionMeReportsSiteSlotsRemaining(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	trialEnd := now.Add(-time.Hour)
+	graceEnd := now.Add(time.Hour)
+	token := "sess_test_3123456789012345678901234567890123456789012"
+	account := store.Account{ID: "account-1", Email: "owner@example.com", CreatedAt: now}
+	organizations := []store.AccountOrganization{
+		{Organization: store.Organization{ID: "free", CreatedAt: now}, Role: "owner", IsDefault: true},
+		{Organization: store.Organization{ID: "full", CreatedAt: now}, Role: "owner"},
+		{Organization: store.Organization{ID: "paid", CreatedAt: now}, Role: "owner"},
+		{Organization: store.Organization{ID: "exempt", CapsExempt: true, CreatedAt: now}, Role: "owner"},
+		{Organization: store.Organization{ID: "read-only", CreatedAt: now}, Role: "owner"},
+	}
+	repo := &fakeRepository{
+		accounts: map[string]store.Account{account.ID: account},
+		accountSessions: map[string]store.AccountSession{
+			archauth.Hash(token): {AccountID: account.ID, ExpiresAt: time.Now().Add(time.Hour)},
+		},
+		organizations: map[string][]store.AccountOrganization{account.ID: organizations},
+		sites: map[string]string{
+			"free-used": "free", "full-used": "full",
+			"paid-one": "paid", "paid-two": "paid", "read-only-used": "read-only",
+		},
+		billing: map[string]store.OrganizationBilling{
+			"free":      {FreeSiteLimit: 2, FreeNoExpiry: true},
+			"full":      {FreeSiteLimit: 1, FreeNoExpiry: true},
+			"paid":      {FreeSiteLimit: 1, StripeSubscriptionStatus: "active"},
+			"exempt":    {FreeSiteLimit: 0},
+			"read-only": {FreeSiteLimit: 3, TrialEndsAt: &trialEnd, ServeGraceEndsAt: &graceEnd},
+		},
+	}
+	server := NewServer(config.Config{Env: "dev"}, repo, slog.Default())
+	server.now = func() time.Time { return now }
+	response := performRequest(server.Router(), http.MethodGet, "/v1/sessions/me", "", token)
+	if response.Code != http.StatusOK {
+		t.Fatalf("session status=%d body=%s", response.Code, response.Body.String())
 	}
 	var body struct {
-		ConfirmURL string `json:"confirm_url"`
+		Organizations []struct {
+			ID                 string          `json:"id"`
+			SiteSlotsRemaining json.RawMessage `json:"site_slots_remaining"`
+			Billing            struct {
+				CanEdit bool `json:"can_edit"`
+			} `json:"billing"`
+		} `json:"organizations"`
 	}
-	if err := json.NewDecoder(created.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	parsed, _ := url.Parse(body.ConfirmURL)
-	token := parsed.Query().Get("token")
-	verified := performRequest(server.Router(), http.MethodPost, "/v1/confirmations/verify", `{"token":"`+token+`"}`, "")
-	if verified.Code != http.StatusOK {
-		t.Fatalf("verify additional site status=%d body=%s", verified.Code, verified.Body.String())
+	expected := map[string]string{
+		"free": "1", "full": "0", "paid": "1", "exempt": "null", "read-only": "2",
 	}
-	if confirmation := repo.confirmations[archauth.Hash(token)]; confirmation.UsedAt == nil {
-		t.Fatalf("additional site confirmation was not consumed: %+v", confirmation)
+	for _, organization := range body.Organizations {
+		want, ok := expected[organization.ID]
+		if !ok {
+			t.Fatalf("unexpected organization %q", organization.ID)
+		}
+		if string(organization.SiteSlotsRemaining) != want {
+			t.Fatalf("%s site_slots_remaining = %s, want %s",
+				organization.ID, organization.SiteSlotsRemaining, want)
+		}
+		if organization.ID == "read-only" && organization.Billing.CanEdit {
+			t.Fatal("read-only organization unexpectedly reports can_edit")
+		}
+		delete(expected, organization.ID)
+	}
+	if len(expected) != 0 {
+		t.Fatalf("missing organizations: %v", expected)
+	}
+
+	shared := organizationResponse(organizations[0], now)
+	if _, exists := shared["site_slots_remaining"]; exists {
+		t.Fatal("shared organization response contains session-only capacity")
 	}
 }
 

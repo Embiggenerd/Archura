@@ -218,6 +218,22 @@
           "created_at": { "type": "string", "format": "date-time" }
         }
       },
+      "SessionOrganization": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Organization" },
+          {
+            "type": "object",
+            "required": ["site_slots_remaining"],
+            "properties": {
+              "site_slots_remaining": {
+                "type": ["integer", "null"],
+                "minimum": 0,
+                "description": "Remaining capacity for additional sites; null when site caps are disabled."
+              }
+            }
+          }
+        ]
+      },
       "BillingEntitlement": {
         "type": "object",
         "required": ["status", "can_edit", "can_serve", "can_manage_billing", "cancel_at_period_end"],
@@ -298,7 +314,7 @@
         "required": ["account", "organizations", "invitations"],
         "properties": {
           "account": { "$ref": "#/components/schemas/Account" },
-          "organizations": { "type": "array", "items": { "$ref": "#/components/schemas/Organization" } },
+          "organizations": { "type": "array", "items": { "$ref": "#/components/schemas/SessionOrganization" } },
           "invitations": { "type": "array", "items": { "$ref": "#/components/schemas/Invitation" } }
         }
       },
