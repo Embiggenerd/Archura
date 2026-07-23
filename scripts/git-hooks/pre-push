@@ -16,12 +16,21 @@ set -euo pipefail
 
 zero=0000000000000000000000000000000000000000
 sha=""
-while read -r _local_ref local_sha remote_ref _remote_sha; do
+base=""
+while read -r _local_ref local_sha remote_ref remote_sha; do
   if [ "$remote_ref" = "refs/heads/master" ] && [ "$local_sha" != "$zero" ]; then
     sha=$local_sha
+    base=$remote_sha
   fi
 done
 [ -n "$sha" ] || exit 0   # not pushing master (or deleting it)
+
+# The core-image workflow only triggers for core/** (or its own file). If this
+# push touches neither, there is no run to watch — skip silently instead of
+# polling 90s for one that will never appear. Unknown base → watch (safe).
+if [ "$base" != "$zero" ] && git rev-parse -q --verify "$base^{commit}" >/dev/null 2>&1; then
+  git diff --name-only "$base" "$sha" -- core/ .github/workflows/core-image.yml | grep -q . || exit 0
+fi
 
 command -v gh >/dev/null 2>&1 || {
   echo "pre-push: install gh to auto-watch deploys (brew install gh && gh auth login)" >&2
