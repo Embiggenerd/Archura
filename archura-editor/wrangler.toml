@@ -5,8 +5,8 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
 routes = [
-  { pattern = "archura.ai/*", zone_name = "archura.ai" },
-  { pattern = "*.archura.ai/*", zone_name = "archura.ai" },
+  { pattern = "envelopment.ai/*", zone_name = "envelopment.ai" },
+  { pattern = "*.envelopment.ai/*", zone_name = "envelopment.ai" },
 ]
 
 [triggers]
@@ -30,14 +30,14 @@ namespace_id = "1001"
 
 [vars]
 # Cloudflare zone serving wildcard subdomains; empty = path-based sites only (/s/<name>/)
-ROOT_DOMAIN = "archura.ai"
+ROOT_DOMAIN = "envelopment.ai"
 # Core target. CORE_SERVICE_KEY (transport) and CORE_INTERNAL_KEY (per-request
 # auth for machine endpoints: entitlement reads, billing-recovery release) must
 # be set with `wrangler secret put` in production or in `.dev.vars` locally.
 # MODERATION_ADMIN_KEY is also a Worker secret; it protects the manual
 # moderation list and suspend/restore endpoints.
 # ALLOW_CORE_DEV_PROXY is dev-only and must never be set in production.
-CORE_URL = "https://staging-core.archura.ai"
+CORE_URL = "https://staging-core.envelopment.ai"
 # ALLOW_ANONYMOUS_SITE_CLAIMS is intentionally omitted. dev-up.sh sets it
 # explicitly for local claim-token compatibility; production requires sessions.
 

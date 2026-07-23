@@ -4,7 +4,7 @@
 //   VERIFY_ORIGIN=https://staging.example node scripts/await-deployed-version.mjs
 import { execSync } from 'node:child_process';
 
-const origin = process.env.VERIFY_ORIGIN ?? 'https://archura.ai';
+const origin = process.env.VERIFY_ORIGIN ?? 'https://envelopment.ai';
 const expected = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
 const dirty = execSync('git status --porcelain', { encoding: 'utf8' }).trim() !== '';
 if (dirty) {

@@ -20,11 +20,11 @@
 // clock, or read email. Those are manual (see the billing test runbook) —
 // this covers the repeatable, scriptable parts so they aren't click-tested.
 //
-// Config: CORE_ORIGIN (default https://core.archura.ai),
-//         APP_ORIGIN  (default https://archura.ai).
+// Config: CORE_ORIGIN (default https://staging-core.envelopment.ai),
+//         APP_ORIGIN  (default https://envelopment.ai).
 
-const CORE = (process.env.CORE_ORIGIN || 'https://core.archura.ai').replace(/\/+$/, '');
-const APP = (process.env.APP_ORIGIN || 'https://archura.ai').replace(/\/+$/, '');
+const CORE = (process.env.CORE_ORIGIN || 'https://staging-core.envelopment.ai').replace(/\/+$/, '');
+const APP = (process.env.APP_ORIGIN || 'https://envelopment.ai').replace(/\/+$/, '');
 
 const results = [];
 const check = (name, cond, detail = '') => {

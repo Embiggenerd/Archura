@@ -1,4 +1,4 @@
-# Billing Test Runbook — Trial → $5/month, Stripe Test Mode in Prod
+# Billing Test Runbook — Trial → $5/month, Stripe Test Mode in Staging
 
 How to verify the 30-day trial and recurring $5/month subscription against a
 deployed environment, using Stripe **test mode** (no real money moves). Pairs
@@ -23,16 +23,17 @@ trial**, so subscribing charges **$5 immediately** — it does not defer to day
 it's a code change (set a Stripe `trial_end` aligned to `trial_ends_at`), not a
 test-setup issue.
 
-## Prerequisites (Stripe test mode in prod)
+## Prerequisites (Stripe test mode in staging)
 
-The core config validator accepts `sk_test_`, so test mode runs against the real
-prod core.
+The core config validator requires test mode outside production, so staging uses
+an `sk_test_` key.
 
-- Prod `.env`: `STRIPE_SECRET_KEY=sk_test_…`, `STRIPE_WEBHOOK_SECRET=whsec_…`
+- Staging `.env`: `STRIPE_SECRET_KEY=sk_test_…`, `STRIPE_WEBHOOK_SECRET=whsec_…`
   (from the **test-mode** endpoint), `STRIPE_BASIC_PRICE_ID=price_…` (a $5/mo
-  recurring price created in test mode), `BILLING_PUBLIC_ORIGIN=https://archura.ai`.
+  recurring price created in test mode),
+  `BILLING_PUBLIC_ORIGIN=https://envelopment.ai`.
 - Register the webhook in the Stripe **test-mode** dashboard →
-  `https://core.archura.ai/stripe/webhooks`, events:
+  `https://staging-core.envelopment.ai/stripe/webhooks`, events:
   `checkout.session.completed`, `customer.subscription.{created,updated,deleted}`,
   `invoice.paid`, `invoice.payment_failed`.
 - Run `node archura-editor/scripts/verify-billing-prod.mjs` — the webhook check
