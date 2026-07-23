@@ -48,7 +48,7 @@ async function registerAndConfirm(email) {
 }
 
 const accountPage = await fetch(new URL('/account/', origin));
-expect(accountPage.status === 200 && (await accountPage.text()).includes('Your Archura account'), 'account page missing');
+expect(accountPage.status === 200 && (await accountPage.text()).includes('Your Envelopment account'), 'account page missing');
 
 const ownerCookie = await registerAndConfirm(ownerEmail);
 let ownerMe = await json('/api/me', { headers: { Cookie: ownerCookie } });

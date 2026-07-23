@@ -956,7 +956,7 @@
         "operationId": "releaseExpiredOrganizationSite",
         "summary": "Release a site after its billing recovery window",
         "description": "Worker service operation used by scheduled recovery cleanup. Idempotently removes the Core ownership binding before R2 artifacts are deleted.",
-        "security": [{ "ServiceAuth": [] }],
+        "security": [{ "ServiceAuth": [], "InternalAuth": [] }],
         "parameters": [
           { "name": "organizationID", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
           { "name": "subdomain", "in": "path", "required": true, "schema": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$" } }

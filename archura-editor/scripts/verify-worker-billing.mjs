@@ -22,11 +22,19 @@ class MemoryBucket {
     return this.objects.has(key) ? { key } : null;
   }
 
-  async put(key, value) {
+  async put(key, value, options) {
+    // Create-if-absent emulation, matching real R2: lost race → null, no write.
+    if (options?.onlyIf && this.objects.has(key)) {
+      const condition = typeof options.onlyIf.get === 'function'
+        ? options.onlyIf.get('If-None-Match')
+        : options.onlyIf.etagDoesNotMatch;
+      if (condition === '*') return null;
+    }
     if (value instanceof ReadableStream) {
       value = new Uint8Array(await new Response(value).arrayBuffer());
     }
     this.objects.set(key, typeof value === 'string' ? value : new Uint8Array(value));
+    return { key };
   }
 
   async delete(key) {

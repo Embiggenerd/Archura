@@ -14,7 +14,7 @@ export class Landing extends PageBase {
   render() {
     return html`
       <archura-hero
-        heading="Welcome to Archura"
+        heading="Welcome to Envelopment"
         subheading="Everything on this page is editable — nothing on it is movable."
       ></archura-hero>
       <div style="display: flex; gap: 16px; margin-top: 16px;">

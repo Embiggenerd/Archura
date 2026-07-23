@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 
-import worker, { reconcileDeletedOrganizations } from '../workers/site-worker.js';
+import worker, { reconcileDeletedOrganizations, releaseSiteObjects } from '../workers/site-worker.js';
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
@@ -27,10 +27,19 @@ class MemoryBucket {
       },
     };
   }
-  async put(key, value) {
+  async put(key, value, options) {
     if (this.failPut && key.includes(this.failPut)) throw new Error('put failed');
+    // Create-if-absent emulation (If-None-Match: * / etagDoesNotMatch), the
+    // same semantics the real bucket verified: lost race → null, no write.
+    if (options?.onlyIf && this.objects.has(key)) {
+      const condition = typeof options.onlyIf.get === 'function'
+        ? options.onlyIf.get('If-None-Match')
+        : options.onlyIf.etagDoesNotMatch;
+      if (condition === '*') return null;
+    }
     if (value instanceof ArrayBuffer) value = new Uint8Array(value);
     this.objects.set(key, typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value));
+    return { key };
   }
   async delete(key) {
     if (this.failDelete && key.includes(this.failDelete)) throw new Error('delete failed');
@@ -62,6 +71,9 @@ const FORK_DESIGN = `dsn_${'f'.repeat(32)}`;
 // and what a subdomain's binding resolves to.
 const deletedOrgs = new Set();
 const siteBindings = new Map();
+// Claim-flow stubs: the session's org, and every core bind attempt observed.
+const CLAIM_ORG = '99999999-1111-2222-3333-444444444444';
+const bindAttempts = [];
 
 // Stub core: admin fork create/finalize + a design read + an org list. The
 // bearer distinguishes a staff session (allowed) from a customer one (403).
@@ -127,6 +139,26 @@ globalThis.fetch = async (input, init) => {
     const bound = siteBindings.get(bindingMatch[1]);
     return Response.json(bound ? { bound: true, organization_id: bound } : { bound: false });
   }
+  if (p === '/v1/sessions/me' && method === 'GET') {
+    if ((init?.headers?.Authorization ?? '') !== `Bearer ${SESSION}`) return new Response('unauthorized', { status: 401 });
+    return Response.json({
+      id: 'claim-account', email: 'claimer@example.com',
+      organizations: [{ id: CLAIM_ORG, is_default: true, role: 'owner', publishable_key: 'pk_test_claimorg0000000000' }],
+    });
+  }
+  if (p === '/v1/site-ownership' && method === 'POST') {
+    const request = JSON.parse(init.body);
+    bindAttempts.push(request.subdomain);
+    if (request.subdomain === 'bind-conflict-site') {
+      return Response.json({ error: { code: 'site_owned' } }, { status: 409 });
+    }
+    return Response.json({}, { status: 201 });
+  }
+  if (p === '/v1/confirmations' && method === 'POST') {
+    const request = JSON.parse(init.body);
+    if ((request.email ?? '').startsWith('fail@')) return new Response('confirmation down', { status: 500 });
+    return Response.json({}, { status: 201 });
+  }
   throw new Error(`Unexpected core request: ${method} ${p}`);
 };
 
@@ -150,6 +182,78 @@ try {
   const version = await worker.fetch(new Request('https://archura.test/api/version'), { ...env, GIT_COMMIT: 'abc123', DEPLOYED_AT: '2026-07-22T00:00:00Z' });
   assert.equal(version.status, 200, 'version probe answers');
   assert.deepEqual(await version.json(), { commit: 'abc123', deployed_at: '2026-07-22T00:00:00Z' }, 'version probe echoes build vars');
+
+  // --- site availability probe (drives the debounced form hint) ---
+  bucket.objects.set('sites/already-taken/meta.json', new TextEncoder().encode('{}'));
+  const availability = async (site) =>
+    (await worker.fetch(new Request(`https://archura.test/api/site-availability?site=${site}`), env)).json();
+  assert.deepEqual(await availability('already-taken'), { available: false, reason: 'taken' }, 'claimed name reports taken');
+  assert.deepEqual(await availability('api'), { available: false, reason: 'reserved' }, 'reserved name reports reserved');
+  assert.deepEqual(await availability('x'), { available: false, reason: 'invalid' }, 'invalid name reports invalid');
+  assert.deepEqual(await availability('definitely-free-name'), { available: true }, 'free name reports available');
+  bucket.objects.delete('sites/already-taken/meta.json');
+
+  // --- claim atomicity: the conditional meta create is the namespace gate ---
+  const deployRequest = (site, marker, email = 'anon@example.com') =>
+    new Request('https://archura.test/api/deploys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        site, email,
+        artifact: { config: { componentPath: ['pages', 'Landing'] }, snapshot: { html: marker } },
+        targetEmbed: { name: 'Landing.js', tag: 'archura-landing' },
+        embeds: { 'Landing.js': `// ${marker}` },
+      }),
+    });
+  const siteKeysOf = (site) => [...bucket.objects.keys()].filter((key) => key.startsWith(`sites/${site}/`)).sort();
+
+  const winner = await worker.fetch(deployRequest('atomic-site', 'winner'), env);
+  assert.equal(winner.status, 201, 'first anonymous deploy wins the reservation');
+  const winnerKeys = siteKeysOf('atomic-site');
+  const winnerDraft = new TextDecoder().decode(bucket.objects.get('sites/atomic-site/draft/pages/Landing.json'));
+  const raceLoser = await worker.fetch(deployRequest('atomic-site', 'loser'), env);
+  assert.equal(raceLoser.status, 409, 'second deploy for the same name 409s');
+  assert.deepEqual(siteKeysOf('atomic-site'), winnerKeys, 'loser wrote zero keys');
+  assert.equal(
+    new TextDecoder().decode(bucket.objects.get('sites/atomic-site/draft/pages/Landing.json')),
+    winnerDraft,
+    "winner's draft content is untouched by the losing request"
+  );
+
+  // Cross-flow: a signed-in claim loses to the anonymous reservation without
+  // ever reaching the core bind.
+  const bindsBefore = bindAttempts.length;
+  const crossLoser = await worker.fetch(signed('/api/sites', { method: 'POST', body: JSON.stringify({ site: 'atomic-site' }) }), env);
+  assert.equal(crossLoser.status, 409, 'cross-flow claim 409s at the reservation');
+  assert.equal(bindAttempts.length, bindsBefore, 'losing claim never attempts a core bind');
+  await releaseSiteObjects(env, 'atomic-site');
+
+  // Signed-in claim records intent (organizationId) in the reservation.
+  const claimed = await worker.fetch(signed('/api/sites', { method: 'POST', body: JSON.stringify({ site: 'intent-claim' }) }), env);
+  assert.equal(claimed.status, 201, 'signed-in claim succeeds');
+  const claimMeta = JSON.parse(new TextDecoder().decode(bucket.objects.get('sites/intent-claim/meta.json')));
+  assert.equal(claimMeta.organizationId, CLAIM_ORG, 'reservation records the intended organization before core binds');
+  assert.ok(bindAttempts.includes('intent-claim'), 'core bind attempted for the winner');
+  await releaseSiteObjects(env, 'intent-claim');
+  bucket.objects.delete(`embed-identities/pk_test_claimorg0000000000/${claimMeta.siteId}.json`);
+
+  // Core conflict → the claim deletes its own reservation (sole writer, safe).
+  const coreConflict = await worker.fetch(signed('/api/sites', { method: 'POST', body: JSON.stringify({ site: 'bind-conflict-site' }) }), env);
+  assert.equal(coreConflict.status, 409, 'core ownership conflict surfaces');
+  assert.equal(bucket.objects.has('sites/bind-conflict-site/meta.json'), false, 'losing claim cleaned its own reservation');
+
+  // Confirmation-service failure → shared cleanup, meta deleted last.
+  const confirmFail = await worker.fetch(deployRequest('cleanup-site', 'x', 'fail@example.com'), env);
+  assert.equal(confirmFail.status, 502, 'confirmation failure surfaces');
+  assert.equal(siteKeysOf('cleanup-site').length, 0, 'full cleanup after confirmation failure');
+  // Partial cleanup (draft delete fails) → meta REMAINS: the name stays
+  // reserved and sweep-collectable, never free with residue under it.
+  bucket.failDelete = 'sites/partial-site/draft/';
+  const partialFail = await worker.fetch(deployRequest('partial-site', 'x', 'fail@example.com'), env);
+  assert.equal(partialFail.status, 502, 'partial-cleanup failure still surfaces');
+  assert.ok(bucket.objects.has('sites/partial-site/meta.json'), 'meta survives a partial cleanup — name stays reserved');
+  bucket.failDelete = null;
+  await releaseSiteObjects(env, 'partial-site');
 
   // --- split domains: sites on ROOT_DOMAIN, app elsewhere, apex redirects ---
   const splitEnv = { ...env, ROOT_DOMAIN: 'archura.ai', APP_ORIGIN: 'https://envelopment.ai' };
@@ -276,27 +380,54 @@ try {
   assert.equal([...bucket.objects.keys()].some((key) => key.startsWith(`orgs/${ACCT_ORG}/`)), false, 'sweep purged the org prefix');
   assert.ok(siteKeys('other-site').length > 0, 'sweep leaves live-org sites untouched');
 
-  // Unassociated metas (no organizationId): bound → backfilled; a modern claim
-  // that is old and never published → released; young → kept; legacy published
-  // sites (no createdAt, or published content) → preserved forever.
+  // Reconciliation matrix (PLAN_SITE_CLAIM_ORDERING rev 6): reservations are
+  // never adoptable; backfill survives only for positively-published tokenless
+  // legacy shapes; intent recorded in the meta is compared against core's
+  // actual owner.
   const oldStamp = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+  // Token-bearing reservation, bound → released, never backfilled (was the
+  // pre-rev6 backfill case; rev 6 forbids adopting reservations).
   seedSite('stranded-site', { site: 'stranded-site', siteId: 'site_s1', tokenHash: 'x', createdAt: oldStamp }, { published: false });
   siteBindings.set('stranded-site', SOURCE_ORG);
+  // REGRESSION: token meta sitting over published residue, core bound to
+  // another org — the cross-tenant adoption case. Must release, never adopt.
+  seedSite('residue-site', { site: 'residue-site', siteId: 'site_r1', tokenHash: 'x', createdAt: oldStamp }, { published: true });
+  siteBindings.set('residue-site', SOURCE_ORG);
   seedSite('abandoned-claim', { site: 'abandoned-claim', siteId: 'site_s2', tokenHash: 'x', createdAt: oldStamp }, { published: false });
   seedSite('young-claim', { site: 'young-claim', siteId: 'site_s3', tokenHash: 'x', createdAt: new Date().toISOString() }, { published: false });
+  // Modern anonymous drafts: bound + aged → released; young → kept.
+  seedSite('drafted-bound', { site: 'drafted-bound', siteId: 'site_d1', status: 'drafted', createdAt: oldStamp }, { published: false });
+  siteBindings.set('drafted-bound', SOURCE_ORG);
+  seedSite('drafted-young', { site: 'drafted-young', siteId: 'site_d2', status: 'drafted', createdAt: new Date().toISOString() }, { published: false });
+  siteBindings.set('drafted-young', SOURCE_ORG);
+  // Recorded intent vs core's owner: agreement → healthy; mismatch → released.
+  seedSite('intent-healthy', { site: 'intent-healthy', siteId: 'site_i1', tokenHash: 'x', createdAt: oldStamp, organizationId: CLAIM_ORG }, { published: true });
+  siteBindings.set('intent-healthy', CLAIM_ORG);
+  seedSite('intent-mismatch', { site: 'intent-mismatch', siteId: 'site_i2', tokenHash: 'x', createdAt: oldStamp, organizationId: CLAIM_ORG }, { published: true });
+  siteBindings.set('intent-mismatch', SOURCE_ORG);
+  // Legacy shapes: preserved; the bound one is the only backfill left.
   seedSite('legacy-site', { site: 'legacy-site' });
   seedSite('legacy-stamped', { site: 'legacy-stamped', createdAt: oldStamp });
+  seedSite('legacy-bound', { site: 'legacy-bound' });
+  siteBindings.set('legacy-bound', SOURCE_ORG);
   await reconcileDeletedOrganizations(env);
-  const stranded = JSON.parse(new TextDecoder().decode(bucket.objects.get('sites/stranded-site/meta.json')));
-  assert.equal(stranded.organizationId, SOURCE_ORG, 'bound stranded meta backfilled with its org');
+  assert.equal(siteKeys('stranded-site').length, 0, 'token-bearing bound reservation released, not backfilled');
+  assert.equal(siteKeys('residue-site').length, 0, 'token meta over published residue released — cross-tenant adoption impossible');
   assert.equal(siteKeys('abandoned-claim').length, 0, 'old unbound unpublished claim released');
   assert.ok(bucket.objects.has('sites/young-claim/meta.json'), 'young unbound claim preserved');
+  assert.equal(siteKeys('drafted-bound').length, 0, 'aged bound anonymous draft released, never adopted');
+  assert.ok(bucket.objects.has('sites/drafted-young/meta.json'), 'young bound anonymous draft preserved');
+  const healthy = JSON.parse(new TextDecoder().decode(bucket.objects.get('sites/intent-healthy/meta.json')));
+  assert.equal(healthy.organizationId, CLAIM_ORG, 'intent matching core owner is left healthy');
+  assert.equal(siteKeys('intent-mismatch').length, 0, 'recorded intent differing from core owner is released');
   assert.ok(bucket.objects.has('sites/legacy-site/meta.json'), 'legacy published site preserved (no createdAt)');
   assert.ok(bucket.objects.has('sites/legacy-site/pages/Landing.json'), 'legacy artifacts untouched');
-  assert.ok(bucket.objects.has('sites/legacy-stamped/meta.json'), 'published content alone vetoes release');
+  assert.ok(bucket.objects.has('sites/legacy-stamped/meta.json'), 'tokenless published content vetoes release');
+  const legacyBound = JSON.parse(new TextDecoder().decode(bucket.objects.get('sites/legacy-bound/meta.json')));
+  assert.equal(legacyBound.organizationId, SOURCE_ORG, 'positively-published tokenless legacy shape still backfills');
 
   console.log(
-    'worker: /api/ops staff-gated; fork create→copy→finalize leaves source intact (correct dest+etag+kind), template + copy-failure paths, R2 enrichment; org/account deletes purge from the response with 409 passthrough; reconciliation completes partial purges, backfills stranded metas, preserves legacy sites'
+    'worker: /api/ops staff-gated; fork orchestration + R2 enrichment; org/account deletes purge from the response; atomic claim reservation (winner-only writes, cross-flow, intent recording, shared meta-last cleanup); reconciliation matrix per rev 6 — reservations never adopted, legacy preserved and backfilled'
   );
 } finally {
   globalThis.fetch = originalFetch;

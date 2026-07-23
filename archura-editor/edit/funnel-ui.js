@@ -69,6 +69,34 @@ export function checkEmailHtml(email) {
     ${isLocalDev() ? '<p><a href="/dev-mail/">Running locally? Open the dev mailbox.</a></p>' : ''}`;
 }
 
+// Debounced live availability hint for a site-name input: says taken/reserved
+// before the user submits. Quiet while typing or on transient errors — the
+// submit path's 409 remains the authoritative, race-proof check.
+export function attachSiteAvailability(input, hint) {
+  let timer;
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    hint.textContent = '';
+    const site = input.value.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/.test(site)) return;
+    timer = setTimeout(async () => {
+      const res = await fetch(`/api/site-availability?site=${encodeURIComponent(site)}`).catch(() => null);
+      const body = res?.ok ? await res.json().catch(() => null) : null;
+      if (!body || input.value.trim().toLowerCase() !== site) return; // stale or unknown
+      if (body.available) {
+        hint.style.color = '#16a34a';
+        hint.textContent = `${site}.archura.ai is available`;
+      } else if (body.reason === 'reserved') {
+        hint.style.color = '#dc2626';
+        hint.textContent = `“${site}” is reserved — pick another name`;
+      } else if (body.reason === 'taken') {
+        hint.style.color = '#dc2626';
+        hint.textContent = `${site}.archura.ai is taken — pick another name`;
+      }
+    }, 400);
+  });
+}
+
 export function showRegisterModal() {
   const overlay = showOverlay(`
     <h2>Sign in or register</h2>
@@ -111,12 +139,17 @@ export function showDeployModal(editorEl, components) {
     <h2>Publish your component</h2>
     <p>Pick a name and enter your email — we'll send a link with its hosted preview and embed code.</p>
     <form>
-      <input name="site" placeholder="my-site" autocomplete="off"
-             pattern="[a-z0-9][a-z0-9\\-]{1,38}[a-z0-9]" required />
+      <div style="display:flex;align-items:center;gap:8px">
+        <input name="site" placeholder="my-site" autocomplete="off"
+               pattern="[a-z0-9][a-z0-9\\-]{1,38}[a-z0-9]" required style="flex:1;min-width:0" />
+        <span style="color:#6b7280;white-space:nowrap">.archura.ai</span>
+      </div>
+      <p class="site-hint" style="margin:4px 0 0;font-size:.85rem;min-height:1.1em"></p>
       <input name="email" type="email" placeholder="you@example.com" required />
       <button type="submit">Publish component</button>
     </form>
     <p class="error"></p>`);
+  attachSiteAvailability(overlay.querySelector('input[name="site"]'), overlay.querySelector('.site-hint'));
   overlay.querySelector('form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const site = overlay.querySelector('input[name="site"]').value.trim().toLowerCase();

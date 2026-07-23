@@ -50,7 +50,7 @@ try {
   }));
   check(
     'site: published page renders with styles on /s/<name>/',
-    served.heading === 'Welcome to Archura' && served.firstCardProp === '28px',
+    served.heading === 'Welcome to Envelopment' && served.firstCardProp === '28px',
     JSON.stringify(served)
   );
 

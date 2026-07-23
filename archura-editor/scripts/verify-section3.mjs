@@ -77,7 +77,7 @@ try {
     'save: content.components has hero + both cards with their attributes',
     content.length === 3 &&
       hero?.componentPath.join('/') === 'heroes/Hero' &&
-      hero?.attributes.heading === 'Welcome to Archura' &&
+      hero?.attributes.heading === 'Welcome to Envelopment' &&
       cards.length === 2 &&
       cards[0]?.attributes.title === 'First Feature' &&
       cards[1]?.attributes.title === 'Second Feature',
@@ -125,7 +125,7 @@ try {
   }));
   check(
     'deploy: standalone page renders hero, per-card styles, and layout',
-    deployed.heroHeading === 'Welcome to Archura' &&
+    deployed.heroHeading === 'Welcome to Envelopment' &&
       deployed.cardProps[0] === '24px' &&
       deployed.cardProps[1] !== '24px' &&
       deployed.rowDisplay === 'flex',

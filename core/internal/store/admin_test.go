@@ -270,6 +270,112 @@ func TestSiteCapUsesFreeAndPaidLimits(t *testing.T) {
 	}
 }
 
+func TestConcurrentSiteBindHasSingleOwner(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	requestPrefix := "site-bind-race-" + suffix
+	subdomain := "concurrent-site-" + suffix
+
+	organizations := []Organization{
+		createAdminTestOrganization(t, ctx, st, suffix+"-site-race-a", requestPrefix+"-organization-a"),
+		createAdminTestOrganization(t, ctx, st, suffix+"-site-race-b", requestPrefix+"-organization-b"),
+	}
+	accountIDs := make([]string, len(organizations))
+	for i, organization := range organizations {
+		if err := st.Pool.QueryRow(ctx, `
+			INSERT INTO accounts (email, email_verified_at)
+			VALUES ($1, now()) RETURNING id::text`,
+			fmt.Sprintf("site-bind-race-%d-%s@example.com", i, suffix),
+		).Scan(&accountIDs[i]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.Pool.Exec(ctx, `
+			INSERT INTO organization_memberships (account_id, organization_id, role)
+			VALUES ($1::uuid, $2::uuid, 'owner')`,
+			accountIDs[i], organization.ID,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = st.Pool.Exec(ctx, `DELETE FROM audit_log WHERE request_id LIKE $1`, requestPrefix+"%")
+		for _, organization := range organizations {
+			_, _ = st.Pool.Exec(ctx, `DELETE FROM organizations WHERE id = $1::uuid`, organization.ID)
+		}
+		for _, accountID := range accountIDs {
+			_, _ = st.Pool.Exec(ctx, `DELETE FROM accounts WHERE id = $1::uuid`, accountID)
+		}
+	})
+
+	type bindResult struct {
+		organizationID string
+		err            error
+	}
+	start := make(chan struct{})
+	results := make(chan bindResult, len(organizations))
+	var ready sync.WaitGroup
+	ready.Add(len(organizations))
+	for i, organization := range organizations {
+		go func(accountID string, organization Organization) {
+			ready.Done()
+			<-start
+			err := st.BindOrganizationSite(ctx, subdomain, organization.ID, accountID, AuditEvent{
+				ActorType: "account", ActorID: accountID, Action: "site_ownership.bound",
+				ResourceType: "site", ResourceID: subdomain,
+				RequestID: requestPrefix + "-" + organization.ID, Metadata: EmptyAuditMetadata{},
+			})
+			results <- bindResult{organizationID: organization.ID, err: err}
+		}(accountIDs[i], organization)
+	}
+	ready.Wait()
+	close(start)
+
+	var winnerID string
+	conflicts := 0
+	for range organizations {
+		result := <-results
+		switch {
+		case result.err == nil:
+			if winnerID != "" {
+				t.Fatalf("both organizations bound subdomain %q", subdomain)
+			}
+			winnerID = result.organizationID
+		case errors.Is(result.err, ErrConflict):
+			conflicts++
+		default:
+			t.Fatalf("bind organization %s: %v", result.organizationID, result.err)
+		}
+	}
+	if winnerID == "" || conflicts != 1 {
+		t.Fatalf("winner = %q, conflicts = %d; want one winner and one conflict", winnerID, conflicts)
+	}
+
+	boundOrganizationID, bound, err := st.SiteBinding(ctx, subdomain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bound || boundOrganizationID != winnerID {
+		t.Fatalf("binding = (%q, %t), want (%q, true)", boundOrganizationID, bound, winnerID)
+	}
+	var bindingCount, auditCount int
+	if err := st.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM organization_sites WHERE subdomain = $1`, subdomain,
+	).Scan(&bindingCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Pool.QueryRow(ctx, `
+		SELECT count(*) FROM audit_log
+		WHERE request_id LIKE $1 AND action = 'site_ownership.bound'`,
+		requestPrefix+"%",
+	).Scan(&auditCount); err != nil {
+		t.Fatal(err)
+	}
+	if bindingCount != 1 || auditCount != 1 {
+		t.Fatalf("binding rows = %d, successful bind audits = %d; want 1 each", bindingCount, auditCount)
+	}
+}
+
 func TestAdminOrganizationsSearchByOwnerEmail(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()

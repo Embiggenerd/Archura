@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Your Archura account</title>
+    <title>Your Envelopment account</title>
     <style>
       :root { color-scheme: light; }
       * { box-sizing: border-box; }
@@ -54,7 +54,7 @@
     </style>
   </head>
   <body>
-    <nav><a href="/"><strong>Archura</strong></a><button class="ghost" id="signout">Sign out</button></nav>
+    <nav><a href="/"><strong>Envelopment</strong></a><button class="ghost" id="signout">Sign out</button></nav>
     <main id="main"><p class="muted">Loading your account…</p></main>
     <script type="module">
       const main = document.getElementById('main');
@@ -78,7 +78,7 @@
         main.innerHTML = `
           ${invited ? '<div class="card notice">Sign in with the email address that received the invitation.</div>' : ''}
           <section class="card">
-            <h1>Sign in to Archura</h1>
+            <h1>Sign in to Envelopment</h1>
             <p class="muted">Enter your email and we’ll send you a secure sign-in link.</p>
             <form id="register" style="margin-top:22px">
               <label>Email address<input name="email" type="email" autocomplete="email" placeholder="you@example.com" required /></label>

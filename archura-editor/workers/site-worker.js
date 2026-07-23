@@ -770,6 +770,17 @@ async function serveApi(request, env, url) {
     return handleModerationApi(request, env, url);
   }
 
+  // Live availability check for the claim/publish forms (debounced client-side).
+  // Site names are public URLs, so this leaks nothing; the claim/deploy 409s
+  // remain the authoritative race-proof check at submit time.
+  if (url.pathname === '/api/site-availability' && request.method === 'GET') {
+    const site = (url.searchParams.get('site') ?? '').trim().toLowerCase();
+    if (!SITE_NAME.test(site)) return json({ available: false, reason: 'invalid' });
+    if (RESERVED.has(site)) return json({ available: false, reason: 'reserved' });
+    const claimed = await env.ARTIFACTS.head(`sites/${site}/meta.json`);
+    return json({ available: !claimed, ...(claimed ? { reason: 'taken' } : {}) });
+  }
+
   if (url.pathname === '/api/sites' && request.method === 'POST') {
     const limited = await rateLimitRequest(request, env, 'claim-site');
     if (limited) return limited;
@@ -788,9 +799,6 @@ async function serveApi(request, env, url) {
     if (typeof site !== 'string' || !SITE_NAME.test(site) || RESERVED.has(site)) {
       return json({ error: 'Invalid site name' }, 400);
     }
-    if (await env.ARTIFACTS.head(`sites/${site}/meta.json`)) {
-      return json({ error: 'Site already claimed' }, 409);
-    }
 
     const organization = organizationId
       ? session?.organizations?.find((candidate) => candidate.id === organizationId)
@@ -802,17 +810,22 @@ async function serveApi(request, env, url) {
     const token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '');
     const siteId = `site_${crypto.randomUUID().replaceAll('-', '')}`;
     const metaKey = `sites/${site}/meta.json`;
-    await env.ARTIFACTS.put(
-      metaKey,
-      JSON.stringify({
-        site,
-        // Permanent identity, independent of the (renamable, releasable) slug —
-        // the future namespace key once custom domains land
-        siteId,
-        tokenHash: await sha256Hex(token),
-        createdAt: new Date().toISOString(),
-      })
-    );
+    // Atomic reservation: create-if-absent means a lost race writes nothing
+    // and this request, if it proceeds, is the prefix's only writer. The meta
+    // records the INTENDED organization before core binds, so reconciliation
+    // can never mistake whom a reservation was for.
+    const reserved = await reserveSiteMeta(env, site, {
+      site,
+      // Permanent identity, independent of the (renamable, releasable) slug —
+      // the future namespace key once custom domains land
+      siteId,
+      tokenHash: await sha256Hex(token),
+      createdAt: new Date().toISOString(),
+      ...(organization ? { organizationId: organization.id } : {}),
+    });
+    if (!reserved) {
+      return json({ error: 'Site already claimed' }, 409);
+    }
 
     // Signed-in claims are recorded in core so the organization owns every
     // artifact and its one billing entitlement covers all of its sites.
@@ -881,47 +894,49 @@ async function serveApi(request, env, url) {
     ) {
       return json({ error: 'Invalid deploy' }, 400);
     }
-    if (await env.ARTIFACTS.head(`sites/${site}/meta.json`)) {
+    // Reservation FIRST: the conditional meta create is the atomic namespace
+    // gate, so a lost race writes nothing at all — draft keys included. Meta
+    // content depends on nothing from the draft writes.
+    const meta = {
+      site,
+      siteId: `site_${crypto.randomUUID().replaceAll('-', '')}`,
+      componentPath,
+      embedName: targetEmbed?.name ?? null,
+      embedTag: targetEmbed?.tag ?? null,
+      status: 'drafted',
+      createdAt: new Date().toISOString(),
+    };
+    const reserved = await reserveSiteMeta(env, site, meta);
+    if (!reserved) {
       return json({ error: 'Site already claimed' }, 409);
     }
 
-    const metaKey = `sites/${site}/meta.json`;
-    await env.ARTIFACTS.put(`sites/${site}/draft/${componentPath.join('/')}.json`, JSON.stringify(artifact));
-    for (const [name, source] of Object.entries(embeds ?? {})) {
-      if (!EMBED_NAME.test(name) || typeof source !== 'string') continue;
-      await env.ARTIFACTS.put(`sites/${site}/draft/embed/${name}`, source, {
-        httpMetadata: { contentType: 'text/javascript; charset=utf-8' },
-      });
-    }
-    await env.ARTIFACTS.put(
-      metaKey,
-      JSON.stringify({
-        site,
-        siteId: `site_${crypto.randomUUID().replaceAll('-', '')}`,
-        componentPath,
-        embedName: targetEmbed?.name ?? null,
-        embedTag: targetEmbed?.tag ?? null,
-        status: 'drafted',
-        createdAt: new Date().toISOString(),
-      })
-    );
+    // Every failure past the reservation shares one cleanup: draft keys
+    // first, meta LAST (releaseSiteObjects). A partial cleanup then leaves
+    // the name reserved and sweep-collectable — never free with another
+    // claimant's residue under it.
+    try {
+      await env.ARTIFACTS.put(`sites/${site}/draft/${componentPath.join('/')}.json`, JSON.stringify(artifact));
+      for (const [name, source] of Object.entries(embeds ?? {})) {
+        if (!EMBED_NAME.test(name) || typeof source !== 'string') continue;
+        await env.ARTIFACTS.put(`sites/${site}/draft/embed/${name}`, source, {
+          httpMetadata: { contentType: 'text/javascript; charset=utf-8' },
+        });
+      }
 
-    const confirmation = await coreRequest(env, '/v1/confirmations', {
-      body: { email: email.trim().toLowerCase(), subdomain: site },
-    });
-    if (!confirmation.ok) {
-      await env.ARTIFACTS.delete(metaKey);
-      const drafts = await listAllObjects(env.ARTIFACTS, `sites/${site}/draft/`);
-      for (const object of drafts) await env.ARTIFACTS.delete(object.key);
-      const code = await confirmation
-        .clone()
-        .json()
-        .then((body) => body?.error?.code ?? '')
-        .catch(() => '');
-      if (confirmation.status === 429) return json({ error: 'Too many requests' }, 429);
-      return json({ error: 'Confirmation failed' }, 502);
+      const confirmation = await coreRequest(env, '/v1/confirmations', {
+        body: { email: email.trim().toLowerCase(), subdomain: site },
+      });
+      if (!confirmation.ok) {
+        await releaseSiteObjects(env, site, meta).catch(() => {});
+        if (confirmation.status === 429) return json({ error: 'Too many requests' }, 429);
+        return json({ error: 'Confirmation failed' }, 502);
+      }
+      return json({ site }, 201);
+    } catch (error) {
+      await releaseSiteObjects(env, site, meta).catch(() => {});
+      return json({ error: 'Deploy failed' }, 502);
     }
-    return json({ site }, 201);
   }
 
   // Register-first (funnel flow 1): email-only confirmation, no subdomain.
@@ -1657,6 +1672,16 @@ async function cleanupExpiredSites(env) {
   }
 }
 
+// Atomic namespace reservation: create the site's meta only if none exists.
+// R2 honors RFC 7232 If-None-Match — a lost race returns null having written
+// nothing (verified against the real bucket, 2026-07-23). Every claim flow
+// reserves through this gate before touching anything else under the prefix.
+function reserveSiteMeta(env, site, meta) {
+  return env.ARTIFACTS.put(`sites/${site}/meta.json`, JSON.stringify(meta), {
+    onlyIf: new Headers({ 'If-None-Match': '*' }),
+  });
+}
+
 // Ordered site purge: meta.json strictly last. Two invariants depend on this —
 // serveSite treats a site with missing meta as a legacy *published* site and
 // would serve leftover artifacts, and the reconciliation sweep discovers
@@ -1691,12 +1716,14 @@ async function purgePrefix(env, prefix) {
 // than the email-confirmation TTL (1h in core) plus a day of slack.
 const ABANDONED_CLAIM_GRACE_MS = 25 * 60 * 60 * 1000;
 
-// Nightly R2↔core reconciliation. Purges blobs whose core rows are gone (an
-// admin deletion whose purge failed or whose response was lost), backfills
-// site metas stranded by a crash between the claim's meta write and its core
-// bind, and releases positively abandoned claims. Fails safe throughout: only
-// an explicit exists:false / bound:false from core is destructive; any error
-// or unknown answer means "leave it".
+// Nightly R2↔core reconciliation. Purges blobs whose core rows are gone,
+// releases abandoned or losing claims, and adopts (backfills) ONLY positively
+// identified legacy content. The disposition matrix is specified in
+// core/PLAN_SITE_CLAIM_ORDERING.md rev 6; its central rule: a reservation is
+// never adoptable — published residue under a prefix proves something once
+// lived there, not that the CURRENT meta (and its claim token) belongs to
+// core's owner. Fails safe throughout: destructive action requires an
+// explicit answer from core; errors and unknowns mean "leave it".
 export async function reconcileDeletedOrganizations(env) {
   if (!coreConfigured(env) || !env.CORE_INTERNAL_KEY) return;
 
@@ -1723,38 +1750,68 @@ export async function reconcileDeletedOrganizations(env) {
     const meta = await stored.json().catch(() => null);
     if (!meta) continue;
 
+    const aged = meta.createdAt
+      ? Date.now() - Date.parse(meta.createdAt) > ABANDONED_CLAIM_GRACE_MS
+      : false;
+    const binding = await coreRequest(env, `/v1/sites/${encodeURIComponent(site)}/binding`, { bearer: env.CORE_INTERNAL_KEY })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+    if (!binding) continue; // core unreachable → nothing destructive
+
     if (meta.organizationId) {
       if (await organizationGone(meta.organizationId)) {
         await releaseSiteObjects(env, site, meta).catch(() => {});
         console.log(JSON.stringify({ event: 'reconcile_site_released', site, organization_id: meta.organizationId }));
+        continue;
+      }
+      // Intent vs. truth: the meta names the org this reservation was FOR;
+      // core names who actually owns the subdomain. Agreement → healthy.
+      if (binding.bound && binding.organization_id === meta.organizationId) continue;
+      if (binding.bound) {
+        // A losing claim over someone else's binding — release, never adopt.
+        if (aged) {
+          await releaseSiteObjects(env, site, meta).catch(() => {});
+          console.log(JSON.stringify({ event: 'reconcile_mismatched_claim_released', site, intended: meta.organizationId, owner: binding.organization_id }));
+        }
+        continue;
+      }
+      // Unbound: an unconfirmed reservation — abandonment rules.
+      if (aged && (meta.status === 'drafted' || (await publishedComponentCount(env, [site])) === 0)) {
+        await releaseSiteObjects(env, site, meta).catch(() => {});
+        console.log(JSON.stringify({ event: 'reconcile_abandoned_claim_released', site }));
       }
       continue;
     }
 
-    // Unassociated meta: the claim flow writes meta before binding core, so a
-    // crash in between strands a bound site here. Resolve via core.
-    const binding = await coreRequest(env, `/v1/sites/${encodeURIComponent(site)}/binding`, { bearer: env.CORE_INTERNAL_KEY })
-      .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null);
-    if (!binding) continue;
-    if (binding.bound) {
-      if (binding.organization_id) {
+    // No organizationId: provenance decides. A modern anonymous draft
+    // (status) or a token-bearing reservation (pre-intent signed-in claim or
+    // race loser) is never adoptable — a losing claim and a crashed success
+    // are indistinguishable here, and any published residue under the prefix
+    // proves nothing about THIS meta. Aged → release; core bindings, if any,
+    // heal by same-org reclaim.
+    if (meta.status === 'drafted' || meta.tokenHash) {
+      if (aged) {
+        await releaseSiteObjects(env, site, meta).catch(() => {});
+        console.log(JSON.stringify({ event: 'reconcile_unadoptable_claim_released', site, bound: binding.bound === true }));
+      }
+      continue;
+    }
+
+    // Tokenless and statusless: content decides. Published → a legacy site;
+    // adopt its core owner if bound (the only shape where backfill remains).
+    // Unpublished with a timestamp → ambiguous old reservation, aged out.
+    // Unpublished without a timestamp → inert; leave it.
+    if ((await publishedComponentCount(env, [site])) > 0) {
+      if (binding.bound && binding.organization_id) {
         await env.ARTIFACTS.put(object.key, JSON.stringify({ ...meta, organizationId: binding.organization_id }));
         console.log(JSON.stringify({ event: 'reconcile_meta_backfilled', site, organization_id: binding.organization_id }));
       }
       continue;
     }
-    // Unbound: never touch a legacy published site. Release requires a modern
-    // timestamp past the grace AND positive abandonment — a drafted funnel
-    // claim (serves nothing) or zero published content (a claim that crashed
-    // before any deploy). Legacy metas lack createdAt and have published
-    // artifacts, so they fail both tests and are preserved.
-    const age = meta.createdAt ? Date.now() - Date.parse(meta.createdAt) : NaN;
-    if (!(age > ABANDONED_CLAIM_GRACE_MS)) continue;
-    const abandoned = meta.status === 'drafted' || (await publishedComponentCount(env, [site])) === 0;
-    if (!abandoned) continue;
-    await releaseSiteObjects(env, site, meta).catch(() => {});
-    console.log(JSON.stringify({ event: 'reconcile_abandoned_claim_released', site }));
+    if (aged) {
+      await releaseSiteObjects(env, site, meta).catch(() => {});
+      console.log(JSON.stringify({ event: 'reconcile_abandoned_claim_released', site }));
+    }
   }
 
   const orgObjects = await listAllObjects(env.ARTIFACTS, 'orgs/');

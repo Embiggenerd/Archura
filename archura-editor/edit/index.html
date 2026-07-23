@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Archura Editor</title>
+    <title>Envelopment Editor</title>
     <style>
       :root {
         color-scheme: light;
@@ -149,7 +149,7 @@
       import './../src/index.ts';
       import { defaultComponents } from './../src/components/index.ts';
       import { createFileSystemAdapter, createR2Adapter, createDesignStore } from './../src/adapters/index.ts';
-      import { ensureFunnelStyles, showDeployModal, showRegisterModal } from './funnel-ui.js';
+      import { ensureFunnelStyles, showDeployModal, showRegisterModal, attachSiteAvailability } from './funnel-ui.js';
       import { showUpgradeModal } from './../src/upgrade-modal.ts';
       ensureFunnelStyles(); // the claim screen builds its own .overlay
 
@@ -275,12 +275,17 @@
           <h1>Claim your site</h1>
           <p>Pick a name, build your page, hit publish. It goes live immediately.</p>
           <form>
-            <input name="site" placeholder="my-site" autocomplete="off"
-                   pattern="[a-z0-9][a-z0-9\\-]{1,38}[a-z0-9]" required />
+            <div style="display:flex;align-items:center;gap:8px;flex:1">
+              <input name="site" placeholder="my-site" autocomplete="off"
+                     pattern="[a-z0-9][a-z0-9\\-]{1,38}[a-z0-9]" required style="flex:1;min-width:0" />
+              <span style="color:#6b7280;white-space:nowrap">.archura.ai</span>
+            </div>
             <button type="submit">Claim</button>
           </form>
+          <p class="site-hint" style="margin:8px 0 0;font-size:.85rem;min-height:1.1em"></p>
           <p class="error"></p>
         `;
+        attachSiteAvailability(el.querySelector('input[name="site"]'), el.querySelector('.site-hint'));
         el.querySelector('form').addEventListener('submit', async (e) => {
           e.preventDefault();
           const name = el.querySelector('input').value.trim().toLowerCase();
