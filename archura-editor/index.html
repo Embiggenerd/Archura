@@ -3,11 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Envelopment — Design once. Embed anywhere.</title>
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <title>Envelopment — Build once. Publish anywhere.</title>
     <meta
       name="description"
-      content="Build a branded landing page and Stripe-ready payment component without a backend. Confirm by email, publish at the edge, then copy the embed into any site."
+      content="Design pages and web components visually. Publish to a subdomain or embed the result anywhere."
     />
+    <link rel="preload" href="/envelopment-mark.png" as="image" />
+    <link rel="preload" href="/amys-bakery-bread.webp" as="image" type="image/webp" />
     <script>
       // Legacy deep links: /?site=… and /?component=… used to be the editor
       if (/[?&](site|component)=/.test(location.search)) {
@@ -15,218 +18,340 @@
       }
     </script>
     <style>
-      /* Base design tokens + utilities the front-page fragment builds on
-         (fragment source of truth: docs/ARCHURA_FRONTPAGE_EDITOR.html) */
       :root {
-        --background: #faf9f7;
+        color-scheme: light;
+        --background: #f8f6f0;
         --foreground: #1a1815;
-        --muted: #eceae5;
-        --muted-foreground: #6f6a61;
-        --card: #ffffff;
-        --card-foreground: #1a1815;
-        --border: #e2dfd8;
-        --primary: #b8860b;
-        --primary-foreground: #ffffff;
-        --viz-series-1: #b8860b;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          --background: #16140f;
-          --foreground: #eae7e0;
-          --muted: #24211b;
-          --muted-foreground: #9b958a;
-          --card: #1d1a14;
-          --card-foreground: #eae7e0;
-          --border: #343027;
-          --primary: #d4a12c;
-          --primary-foreground: #16140f;
-          --viz-series-1: #d4a12c;
-        }
+        --muted-foreground: #6d685f;
+        --surface: #fffefa;
+        --border: #d9d4c8;
+        --primary: #1a1815;
+        --primary-foreground: #fffefa;
+        --gold: #b78722;
+        --gold-dark: #7b5a14;
+        --mark-gold: #eead0c;
       }
       * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
       body {
         margin: 0;
         background: var(--background);
         color: var(--foreground);
-        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-        line-height: 1.55;
+        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.6;
         -webkit-font-smoothing: antialiased;
       }
+      button, input, select { font: inherit; }
       a { color: inherit; text-decoration: none; }
-      a:hover { color: var(--foreground); }
-      .page { max-width: 1080px; margin: 0 auto; padding: 22px 24px 64px; }
-      .text-small { font-size: 0.82rem; }
+      a:hover { color: var(--gold-dark); }
+      .page { max-width: 980px; margin: 0 auto; padding: 0 32px 56px; }
+      .text-small { font-size: 0.8rem; }
       .text-muted { color: var(--muted-foreground); }
-      .card {
-        background: var(--card);
-        color: var(--card-foreground);
-        border: 1px solid var(--border);
-        border-radius: 14px;
-        padding: 22px;
-      }
       .btn {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        gap: 6px;
+        min-height: 42px;
         padding: 9px 16px;
         border: 1px solid var(--border);
-        border-radius: 9px;
-        background: var(--card);
-        color: var(--card-foreground);
-        font: inherit;
-        font-size: 0.88rem;
+        border-radius: 2px;
+        background: transparent;
+        color: var(--foreground);
         font-weight: 600;
         cursor: pointer;
-        transition: filter 120ms ease;
       }
-      .btn:hover { filter: brightness(0.96); }
+      .btn:hover { border-color: var(--foreground); }
       .btn-primary {
         background: var(--primary);
         border-color: var(--primary);
         color: var(--primary-foreground);
       }
-      .btn-ghost { background: transparent; border-color: transparent; }
-      .btn-block { width: 100%; }
-      .viz-row { display: flex; align-items: center; gap: 10px; }
-      .viz-controls { display: flex; gap: 8px; }
-      .viz-badge {
-        padding: 3px 10px;
-        border-radius: 999px;
-        background: color-mix(in srgb, var(--viz-series-1) 16%, transparent);
-        color: var(--foreground);
-        font-size: 0.75rem;
-        font-weight: 600;
-      }
-      .form-label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--muted-foreground); }
-      .form-control, .form-select {
-        width: 100%;
-        padding: 9px 11px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: var(--background);
-        color: var(--foreground);
-        font: inherit;
-        font-size: 0.9rem;
-      }
-      .form-range { width: 100%; accent-color: var(--primary); }
-      code {
-        font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-        background: color-mix(in srgb, var(--muted) 70%, transparent);
-        padding: 3px 8px;
-        border-radius: 6px;
+      .btn-primary:hover { color: var(--primary-foreground); }
+      .btn-accent {
+        background: var(--gold);
+        border-color: var(--gold);
+        color: #17140f;
       }
     </style>
   </head>
   <body>
     <div class="page">
-      <!-- Fragment source: docs/ARCHURA_FRONTPAGE_EDITOR.html
-           (edits from source: Sign in → /account/, demo Publish → real editor) -->
       <div id="archura-frontpage-editor">
-        <nav class="site-nav" aria-label="Front page navigation">
-          <strong>Envelopment</strong>
-          <div class="nav-links text-small">
+        <header class="site-header">
+          <a class="brand" href="/" aria-label="Envelopment home">
+            <img src="/envelopment-mark.png" alt="" width="42" height="42" />
+            <strong>Envelopment</strong>
+          </a>
+          <nav class="site-nav" aria-label="Front page navigation">
             <a href="#how-it-works">How it works</a>
-            <a href="#components">Components</a>
-            <a href="#docs">Docs</a>
-          </div>
-          <div class="viz-row">
-            <a class="btn btn-ghost" href="/account/">Sign in</a>
-            <button type="button" class="btn" data-register>Register</button>
-            <button type="button" class="btn btn-primary" data-start>Start building</button>
-          </div>
-        </nav>
+            <a href="/pricing/">Plans</a>
+            <a href="/account/">Sign in</a>
+            <button type="button" class="nav-action" data-register>Register</button>
+          </nav>
+        </header>
 
-        <section class="hero-layout" aria-labelledby="frontpage-title">
-          <div class="hero-copy">
-            <p class="eyebrow text-small">VISUAL PUBLISHING + EMBEDS</p>
-            <h1 id="frontpage-title">Build, Design and Publish anything without code.</h1>
-            <p class="text-muted">Integrate stripe payments in your app here, or embed it in your own application, wherever it is. </p>
-            <div class="viz-row hero-actions">
-              <button type="button" class="btn btn-primary" data-start>Start building free</button>
-              <button type="button" class="btn" data-scroll="#components">See how embedding works</button>
-            </div>
-            <p class="text-small text-muted">No signup to start · Unlimited sites and organizations · Email link to publish</p>
-          </div>
-
-          <div class="card product-preview" aria-label="Published Envelopment example">
-            <div class="preview-bar text-small">
-              <span>mikes-bakery.archura.app</span>
-              <span class="viz-badge">Published</span>
-            </div>
-            <div class="preview-hero">
-              <p class="eyebrow text-small">FRESH EVERY MORNING</p>
-              <h2>Good bread, made nearby.</h2>
-              <p>A real page assembled and styled in the Envelopment editor.</p>
-            </div>
-            <div class="payment-row">
-              <div>
-                <strong>Weekend pastry box</strong>
-                <div class="text-small text-muted">Stripe-ready component</div>
+        <main>
+          <section class="hero-layout" aria-labelledby="frontpage-title">
+            <div class="hero-copy">
+              <p class="eyebrow">VISUAL PUBLISHING FOR THE OPEN WEB</p>
+              <h1 id="frontpage-title">Build once.<br />Publish anywhere.</h1>
+              <p class="hero-lede">
+                Design a page or web component visually. Publish it to a subdomain,
+                or embed the result wherever it is useful.
+              </p>
+              <div class="hero-actions">
+                <button type="button" class="btn btn-primary" data-start>Start building</button>
+                <a class="text-link" href="#how-it-works">How it works <span aria-hidden="true">↓</span></a>
               </div>
-              <button type="button" class="btn btn-primary">Pay $28</button>
+              <p class="hero-note">No account needed to begin.</p>
             </div>
-            <code class="text-small">&lt;archura-stripe-payment&gt;</code>
-          </div>
-        </section>
+            <div class="bakery-envelope">
+              <span class="preview-contour preview-contour-curve"></span>
+              <span class="preview-contour preview-contour-top"></span>
+              <span class="preview-contour preview-contour-left"></span>
+              <span class="preview-contour preview-contour-right"></span>
+              <span class="preview-contour preview-contour-diagonal"></span>
+              <span class="preview-contour preview-contour-bottom"></span>
 
-        <section class="flow-strip" id="how-it-works" aria-label="How Envelopment works">
-          <div>
-            <span class="flow-number">1</span>
-            <strong>Build visually</strong>
-            <p class="text-small text-muted">Page, typography, images, cards, and payment styling.</p>
-          </div>
-          <div>
-            <span class="flow-number">2</span>
-            <strong>Confirm and publish</strong>
-            <p class="text-small text-muted">Choose a subdomain; the email link proves ownership.</p>
-          </div>
-          <div>
-            <span class="flow-number">3</span>
-            <strong>Use it anywhere</strong>
-            <p class="text-small text-muted">Open the hosted preview or paste the generated embed.</p>
-          </div>
-        </section>
-
-        <section class="audience-grid" id="components" aria-label="Envelopment audiences">
-          <div class="card">
-            <p class="eyebrow text-small">FOR MERCHANTS</p>
-            <h3>Launch a complete experience.</h3>
-            <p>A page-sized component can fill the preview or embed inside an existing site.</p>
-          </div>
-          <div class="card">
-            <p class="eyebrow text-small">FOR DEVELOPERS + AGENTS</p>
-            <h3>Embed any component.</h3>
-            <p>A standards-based custom element and generated module—not a widget trapped in a builder.</p>
-          </div>
-        </section>
-
-        <section class="editor-section" id="editor" aria-labelledby="editor-title">
-          <div class="editor-intro">
-            <div>
-              <p class="eyebrow text-small">START BUILDING</p>
-              <h2 id="editor-title">Edit it right here.</h2>
-              <p class="text-muted">Start anonymously. Choose a page-sized or smaller component, then confirm by email when you publish.</p>
+              <div
+                class="bakery-preview"
+                role="img"
+                aria-label="Example website for Amy's Bakery, framed by the Envelopment contour"
+                data-preview-rotator
+              >
+                <div class="preview-device-screen">
+                  <div
+                    class="bakery-window preview-slide is-active"
+                    data-preview-label="Amy's Bakery"
+                    aria-hidden="false"
+                  >
+                    <div class="bakery-toolbar">
+                      <span class="bakery-menu"><i></i><i></i><i></i></span>
+                      <span class="bakery-monogram">A</span>
+                      <span class="bakery-bag"></span>
+                    </div>
+                    <div class="bakery-page">
+                      <div class="bakery-content">
+                        <p class="bakery-kicker">SOURDOUGH · PASTRIES · CAKES</p>
+                        <h3>Amy’s<br />Bakery</h3>
+                        <p class="bakery-tagline">Bread worth sharing.</p>
+                        <span class="bakery-cta">See today’s bake</span>
+                        <div class="bakery-photo">
+                          <img
+                            src="/amys-bakery-bread.webp"
+                            alt=""
+                            width="1024"
+                            height="1536"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    class="bakery-window preview-slide preview-app preview-app-anime"
+                    data-preview-label="Neon Frame anime streaming"
+                    aria-hidden="true"
+                  >
+                    <img
+                      class="preview-concept"
+                      src="/images/app-concept-neon-frame-anime.jpg"
+                      alt=""
+                      width="972"
+                      height="1619"
+                      decoding="async"
+                    />
+                    <div class="preview-app-action" aria-hidden="true">
+                      <span><small>Continue watching</small><strong>Redline Courier · Episode 6</strong></span>
+                      <span class="preview-app-button">Watch</span>
+                    </div>
+                  </div>
+                  <div
+                    class="bakery-window preview-slide preview-app preview-app-coffee"
+                    data-preview-label="Joshua's Coffee ordering"
+                    aria-hidden="true"
+                  >
+                    <img
+                      class="preview-concept"
+                      src="/images/app-concept-joshuas-coffee.jpg"
+                      alt=""
+                      width="972"
+                      height="1619"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <div class="preview-app-action" aria-hidden="true">
+                      <span><small>2 items · $6.75</small><strong>Pickup in 12–15 minutes</strong></span>
+                      <span class="preview-app-button">View order</span>
+                    </div>
+                  </div>
+                  <div
+                    class="bakery-window preview-slide preview-app preview-app-bookkeeping"
+                    data-preview-label="Judy's Bookkeeping services and CRM"
+                    aria-hidden="true"
+                  >
+                    <img
+                      class="preview-concept"
+                      src="/images/app-concept-judys-bookkeeping.jpg"
+                      alt=""
+                      width="972"
+                      height="1619"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <div class="preview-app-action" aria-hidden="true">
+                      <span><small>New CRM lead</small><strong>Sunrise Retail · Follow-up due</strong></span>
+                      <span class="preview-app-button">Open CRM</span>
+                    </div>
+                  </div>
+                  <!-- <div
+                    class="bakery-window preview-slide preview-app preview-app-plot"
+                    data-preview-label="Plot garden planner"
+                    aria-hidden="true"
+                  >
+                    <img
+                      class="preview-concept"
+                      src="/images/app-concept-plot-garden.jpg"
+                      alt=""
+                      width="1003"
+                      height="1568"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <span class="preview-app-menu" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <div class="preview-app-action" aria-hidden="true">
+                      <span><small>Stripe checkout</small><strong>Garden plan · $24</strong></span>
+                      <span class="preview-app-button">Checkout</span>
+                    </div>
+                  </div> -->
+                  <div
+                    class="bakery-window preview-slide preview-app preview-app-borrow"
+                    data-preview-label="Borrow neighborhood exchange"
+                    aria-hidden="true"
+                  >
+                    <img
+                      class="preview-concept"
+                      src="/images/app-concept-borrow.jpg"
+                      alt=""
+                      width="972"
+                      height="1619"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <span class="preview-app-menu" aria-hidden="true"><i></i><i></i><i></i></span>
+                    <div class="preview-app-action" aria-hidden="true">
+                      <span><small>Available nearby</small><strong>Cordless drill · Today</strong></span>
+                      <span class="preview-app-button">Request</span>
+                    </div>
+                  </div>
+                  <div
+                    class="bakery-window preview-slide preview-app preview-app-mushroom"
+                    data-preview-label="Morrow mushroom identification"
+                    aria-hidden="true"
+                  >
+                    <img
+                      class="preview-concept"
+                      src="/images/app-concept-morrow-mushroom-id.jpg"
+                      alt=""
+                      width="972"
+                      height="1619"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <div class="preview-app-action" aria-hidden="true">
+                      <span><small>Identification is uncertain</small><strong>Fly agaric · 92% match</strong></span>
+                      <span class="preview-app-button">Retake</span>
+                    </div>
+                  </div>
+                  
+                  <div class="preview-device-status" aria-hidden="true">
+                    <span>9:41</span>
+                    <span class="preview-device-island"></span>
+                    <span class="preview-device-network">5G <i></i></span>
+                  </div>
+                  <span class="preview-device-home" aria-hidden="true"></span>
+                </div>
+                <!-- <span class="preview-device-button preview-device-button-mute" aria-hidden="true"></span>
+                <span class="preview-device-button preview-device-button-volume-up" aria-hidden="true"></span>
+                <span class="preview-device-button preview-device-button-volume-down" aria-hidden="true"></span>
+                <span class="preview-device-button preview-device-button-power" aria-hidden="true"></span> -->
+              </div>
             </div>
-            <div class="viz-controls" aria-label="Editor output type">
-              <button type="button" class="btn btn-primary" data-mode="page" aria-pressed="true">Page-sized component</button>
-              <button type="button" class="btn" data-mode="component" aria-pressed="false">Payment component · Basic</button>
-              <button type="button" class="btn btn-primary" data-deploy>Deploy</button>
+          </section>
+
+          <section class="method-section" id="how-it-works" aria-labelledby="method-title">
+            <div class="section-heading">
+              <p class="eyebrow">HOW IT WORKS</p>
+              <h2 id="method-title">From a blank page to a useful thing.</h2>
             </div>
-          </div>
+            <ol class="method-list">
+              <li>
+                <span>01</span>
+                <div>
+                  <h3>Design visually</h3>
+                  <p>Choose a starting point, then shape the type, spacing, color, and content.</p>
+                </div>
+              </li>
+              <li>
+                <span>02</span>
+                <div>
+                  <h3>Confirm ownership</h3>
+                  <p>Pick a subdomain. A link sent to your email confirms that it belongs to you.</p>
+                </div>
+              </li>
+              <li>
+                <span>03</span>
+                <div>
+                  <h3>Publish or embed</h3>
+                  <p>Use the hosted page as-is, or copy the standards-based component into another site.</p>
+                </div>
+              </li>
+            </ol>
+          </section>
 
-          <!-- The real editor, mounted directly — the same composable web
-               component clients embed; nothing is mocked or iframed -->
-          <div class="card editor-shell" data-editor-mount></div>
+          <section class="statement-section" id="components" aria-labelledby="statement-title">
+            <p class="eyebrow">ONE OUTPUT, TWO DESTINATIONS</p>
+            <h2 id="statement-title">
+              A complete page when you need one.<br />
+              A component when you do not.
+            </h2>
+            <p>
+              Envelopment keeps the result portable. Your work can live on its own
+              or become one useful part of something larger.
+            </p>
+          </section>
 
-          <div class="publish-flow" aria-label="Publishing steps">
-            <div><span class="flow-number">1</span><strong>Choose a subdomain</strong></div>
-            <span class="text-muted">→</span>
-            <div><span class="flow-number">2</span><strong>Confirm by email</strong></div>
-            <span class="text-muted">→</span>
-            <div><span class="flow-number">3</span><strong>Copy the embed code</strong></div>
-          </div>
-        </section>
+          <section class="editor-section" id="editor" aria-labelledby="editor-title">
+            <div class="editor-intro">
+              <div>
+                <p class="eyebrow">BUILD HERE</p>
+                <h2 id="editor-title">Start with the page in front of you.</h2>
+                <p>Begin anonymously. Confirm by email only when you are ready to publish.</p>
+              </div>
+              <div class="editor-controls" aria-label="Editor output type">
+                <button type="button" class="btn btn-primary" data-mode="page" aria-pressed="true">Page</button>
+                <button type="button" class="btn" data-mode="component" aria-pressed="false">Component · Basic</button>
+                <button type="button" class="btn btn-accent" data-deploy>Publish</button>
+              </div>
+            </div>
+
+            <div class="editor-shell" data-editor-mount></div>
+
+            <p class="publish-flow">
+              Choose a subdomain <span aria-hidden="true">→</span>
+              Confirm by email <span aria-hidden="true">→</span>
+              Publish or copy the embed
+            </p>
+          </section>
+        </main>
+
+        <footer class="site-footer">
+          <span>Envelopment</span>
+          <nav aria-label="Footer navigation">
+            <a href="https://envelopment.org/">Purpose</a>
+            <a href="/pricing/">Plans</a>
+            <a href="/account/">Account</a>
+          </nav>
+        </footer>
 
         <script type="module">
           import './src/index.ts';
@@ -255,10 +380,6 @@
           root.querySelectorAll('[data-start]').forEach((button) => {
             button.addEventListener('click', () => editorSection.scrollIntoView({ behavior: 'smooth', block: 'start' }));
           });
-          root.querySelectorAll('[data-scroll]').forEach((button) => {
-            button.addEventListener('click', () => document.querySelector(button.dataset.scroll)?.scrollIntoView({ behavior: 'smooth' }));
-          });
-
           // The toggle retargets the mounted editor
           modeButtons.forEach((button) => {
             button.addEventListener('click', () => {
@@ -281,52 +402,725 @@
           // The real funnel: same deploy modal as the editor page
           root.querySelector('[data-deploy]').addEventListener('click', () => showDeployModal(editorEl, components));
           root.querySelector('[data-register]').addEventListener('click', () => showRegisterModal());
+
+          const previewRotator = root.querySelector('[data-preview-rotator]');
+          const previewSlides = [...previewRotator.querySelectorAll('[data-preview-label]')];
+          console.log(previewSlides);
+          const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+          let previewIndex = 0;
+          let previewTimer;
+          let previewPaused = false;
+
+          const showPreview = (index) => {
+            const previousIndex = previewIndex;
+            previewIndex = index % previewSlides.length;
+            previewSlides.forEach((slide, slideIndex) => {
+              const active = slideIndex === previewIndex;
+              slide.classList.remove('is-active', 'is-exiting');
+              if (active) slide.classList.add('is-active');
+              slide.setAttribute('aria-hidden', String(!active));
+            });
+            if (previousIndex !== previewIndex) {
+              previewSlides[previousIndex].classList.add('is-exiting');
+            }
+            const label = previewSlides[previewIndex].dataset.previewLabel;
+            previewRotator.setAttribute('aria-label', `${label}, framed by the Envelopment contour`);
+          };
+
+          const schedulePreview = () => {
+            window.clearTimeout(previewTimer);
+            if (previewPaused || reducedMotion.matches) return;
+            previewTimer = window.setTimeout(() => {
+              showPreview(previewIndex + 1);
+              schedulePreview();
+            }, 3000);
+          };
+
+          previewRotator.addEventListener('mouseenter', () => {
+            previewPaused = true;
+            window.clearTimeout(previewTimer);
+          });
+          previewRotator.addEventListener('mouseleave', () => {
+            previewPaused = false;
+            schedulePreview();
+          });
+          previewRotator.addEventListener('focusin', () => {
+            previewPaused = true;
+            window.clearTimeout(previewTimer);
+          });
+          previewRotator.addEventListener('focusout', () => {
+            previewPaused = false;
+            schedulePreview();
+          });
+          reducedMotion.addEventListener('change', schedulePreview);
+          schedulePreview();
         </script>
 
         <style>
-          #archura-frontpage-editor { display: grid; gap: 0; color: var(--foreground); }
+          #archura-frontpage-editor { color: var(--foreground); }
           #archura-frontpage-editor [hidden] { display: none; }
           #archura-frontpage-editor h1,
           #archura-frontpage-editor h2,
           #archura-frontpage-editor h3,
           #archura-frontpage-editor p { margin-top: 0; }
-          #archura-frontpage-editor h1 { font-size: 2.3rem; line-height: 1.15; margin-bottom: 14px; }
-          #archura-frontpage-editor .eyebrow { letter-spacing: 0.09em; font-weight: 500; }
-          #archura-frontpage-editor .site-nav,
-          #archura-frontpage-editor .preview-bar,
-          #archura-frontpage-editor .payment-row,
-          #archura-frontpage-editor .editor-toolbar,
-          #archura-frontpage-editor .canvas-nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-          #archura-frontpage-editor .site-nav { padding-bottom: 16px; border-bottom: 1px solid var(--border); }
-          #archura-frontpage-editor .nav-links { display: flex; gap: 18px; }
-          #archura-frontpage-editor .nav-links a { color: var(--muted-foreground); }
-          #archura-frontpage-editor .hero-layout { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.95fr); gap: 28px; align-items: center; padding: 44px 0 34px; }
-          #archura-frontpage-editor .hero-copy { max-width: 620px; }
-          #archura-frontpage-editor .hero-actions { margin: 20px 0 12px; }
-          #archura-frontpage-editor .product-preview { display: grid; gap: 18px; }
-          #archura-frontpage-editor .preview-hero { padding: 16px 0; }
-          #archura-frontpage-editor .payment-row { padding-top: 14px; border-top: 1px solid var(--border); }
-          #archura-frontpage-editor .flow-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; padding: 26px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-          #archura-frontpage-editor .flow-number { display: inline-grid; place-items: center; width: 28px; height: 28px; margin-right: 8px; border-radius: 50%; background: color-mix(in srgb, var(--viz-series-1) 18%, transparent); }
-          #archura-frontpage-editor .flow-strip p { margin: 8px 0 0 40px; }
-          #archura-frontpage-editor .audience-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 24px 0 76px; }
-          #archura-frontpage-editor .editor-section { padding-top: 48px; border-top: 1px solid var(--border); scroll-margin-top: 20px; }
-          #archura-frontpage-editor .editor-intro { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
-          #archura-frontpage-editor .editor-intro > div:first-child { max-width: 620px; }
-          #archura-frontpage-editor .editor-shell { padding: 0; overflow: hidden; }
+          #archura-frontpage-editor h1,
+          #archura-frontpage-editor h2 {
+            font-family: Georgia, "Times New Roman", serif;
+            font-weight: 500;
+            letter-spacing: -0.025em;
+          }
+          #archura-frontpage-editor h1 {
+            max-width: 680px;
+            margin-bottom: 24px;
+            font-size: clamp(3.1rem, 8vw, 6rem);
+            line-height: 0.96;
+          }
+          #archura-frontpage-editor h2 {
+            margin-bottom: 18px;
+            font-size: clamp(2rem, 4.5vw, 3.35rem);
+            line-height: 1.08;
+          }
+          #archura-frontpage-editor h3 {
+            margin-bottom: 6px;
+            font-size: 1rem;
+          }
+          #archura-frontpage-editor .eyebrow {
+            margin-bottom: 20px;
+            color: var(--gold-dark);
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.16em;
+          }
+          #archura-frontpage-editor .site-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 86px;
+            border-bottom: 1px solid var(--border);
+          }
+          #archura-frontpage-editor .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            letter-spacing: 0.04em;
+          }
+          #archura-frontpage-editor .brand img {
+            display: block;
+            width: 42px;
+            height: 42px;
+            border-radius: 9px;
+          }
+          #archura-frontpage-editor .site-nav {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            font-size: 0.84rem;
+          }
+          #archura-frontpage-editor .nav-action {
+            padding: 0;
+            border: 0;
+            border-bottom: 1px solid var(--foreground);
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+          }
+          #archura-frontpage-editor .nav-action:hover { color: var(--gold-dark); }
+          #archura-frontpage-editor .hero-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1.08fr) minmax(310px, 0.92fr);
+            gap: clamp(44px, 7vw, 76px);
+            align-items: center;
+            min-height: 720px;
+            padding: 96px 0 120px;
+          }
+          #archura-frontpage-editor .hero-copy { max-width: 560px; }
+          #archura-frontpage-editor .hero-lede {
+            max-width: 590px;
+            margin-bottom: 0;
+            color: var(--muted-foreground);
+            font-size: 1.08rem;
+          }
+          #archura-frontpage-editor .hero-actions {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            margin-top: 32px;
+          }
+          #archura-frontpage-editor .text-link {
+            border-bottom: 1px solid var(--border);
+            font-size: 0.9rem;
+          }
+          #archura-frontpage-editor .hero-note {
+            margin: 14px 0 0;
+            color: var(--muted-foreground);
+            font-size: 0.78rem;
+          }
+          #archura-frontpage-editor .bakery-envelope {
+            position: relative;
+            width: 100%;
+            max-width: 405px;
+            padding: 28px 30px 36px 24px;
+            justify-self: end;
+          }
+          #archura-frontpage-editor .bakery-preview {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            height: 534px;
+            filter: drop-shadow(0 24px 30px rgba(51, 42, 25, 0.12));
+          }
+          #archura-frontpage-editor .preview-device-screen {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+            border: 1px solid #b9cbd4;
+            border-radius: 20px;
+            background: #f8fbfc;
+            clip-path: polygon(
+              0 0,
+              100% 0,
+              100% calc(100% - 72px),
+              calc(100% - 72px) 100%,
+              0 100%
+            );
+          }
+          #archura-frontpage-editor .bakery-window {
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+            background: #f8fbfc;
+          }
+          #archura-frontpage-editor .preview-slide {
+            z-index: 0;
+            transform: translateX(105%);
+            transition: none;
+          }
+          #archura-frontpage-editor .preview-slide.is-active {
+            z-index: 2;
+            transform: translateX(0);
+            transition: transform 700ms cubic-bezier(0.65, 0, 0.35, 1);
+          }
+          #archura-frontpage-editor .preview-slide.is-exiting {
+            z-index: 1;
+            transform: translateX(-105%);
+            transition: transform 700ms cubic-bezier(0.65, 0, 0.35, 1);
+          }
+          #archura-frontpage-editor .preview-concept {
+            display: block;
+            width: 100%;
+            height: 100%;
+            padding-top: 26px;
+            background: #fff;
+            box-sizing: border-box;
+            object-fit: cover;
+            object-position: top center;
+          }
+          #archura-frontpage-editor .preview-device-status {
+            position: absolute;
+            top: 0;
+            right: 0;
+            left: 0;
+            z-index: 5;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            height: 26px;
+            padding: 0 13px;
+            background: rgba(248, 251, 252, 0.9);
+            color: #111;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-size: 0.54rem;
+            font-weight: 700;
+            pointer-events: none;
+          }
+          #archura-frontpage-editor .preview-device-island {
+            width: 58px;
+            height: 17px;
+            border-radius: 12px;
+            background: #111;
+          }
+          #archura-frontpage-editor .preview-device-network {
+            display: inline-flex;
+            align-items: center;
+            justify-self: end;
+            gap: 5px;
+          }
+          #archura-frontpage-editor .preview-device-network i {
+            position: relative;
+            display: block;
+            width: 15px;
+            height: 7px;
+            border: 1px solid currentColor;
+            border-radius: 2px;
+          }
+          #archura-frontpage-editor .preview-device-network i::before {
+            position: absolute;
+            inset: 1px;
+            width: 9px;
+            background: currentColor;
+            content: "";
+          }
+          #archura-frontpage-editor .preview-device-network i::after {
+            position: absolute;
+            top: 2px;
+            right: -3px;
+            width: 2px;
+            height: 3px;
+            border-radius: 0 1px 1px 0;
+            background: currentColor;
+            content: "";
+          }
+          #archura-frontpage-editor .preview-device-home {
+            position: absolute;
+            right: 50%;
+            bottom: 7px;
+            z-index: 5;
+            width: 92px;
+            height: 4px;
+            border-radius: 3px;
+            background: rgba(17, 17, 17, 0.82);
+            pointer-events: none;
+            transform: translateX(50%);
+          }
+          #archura-frontpage-editor .preview-device-button {
+            position: absolute;
+            z-index: 4;
+            width: 4px;
+            border: 1px solid #070707;
+            border-radius: 2px;
+            background: #242424;
+            pointer-events: none;
+          }
+          #archura-frontpage-editor .preview-device-button-mute {
+            top: 70px;
+            left: -3px;
+            height: 18px;
+          }
+          #archura-frontpage-editor .preview-device-button-volume-up {
+            top: 102px;
+            left: -3px;
+            height: 40px;
+          }
+          #archura-frontpage-editor .preview-device-button-volume-down {
+            top: 151px;
+            left: -3px;
+            height: 40px;
+          }
+          #archura-frontpage-editor .preview-device-button-power {
+            top: 116px;
+            right: -3px;
+            height: 62px;
+          }
+          #archura-frontpage-editor .preview-app-menu {
+            position: absolute;
+            top: 37px;
+            right: 14px;
+            z-index: 4;
+            display: grid;
+            width: 31px;
+            height: 31px;
+            place-content: center;
+            gap: 3px;
+            border: 1px solid rgba(17, 17, 17, 0.14);
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: 0 4px 12px rgba(17, 17, 17, 0.08);
+          }
+          #archura-frontpage-editor .preview-app-menu i {
+            display: block;
+            width: 12px;
+            height: 1px;
+            background: #151515;
+          }
+          #archura-frontpage-editor .preview-app-action {
+            position: absolute;
+            right: 12px;
+            bottom: 18px;
+            left: 12px;
+            z-index: 4;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 12px;
+            min-height: 58px;
+            padding: 9px 10px 9px 13px;
+            border: 1px solid color-mix(in srgb, var(--app-accent) 22%, white);
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.96);
+            box-shadow: 0 10px 22px rgba(17, 17, 17, 0.14);
+            color: #1c2523;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          }
+          #archura-frontpage-editor .preview-app-action > span:first-child {
+            display: grid;
+            min-width: 0;
+            gap: 2px;
+          }
+          #archura-frontpage-editor .preview-app-action small {
+            color: color-mix(in srgb, var(--app-accent) 82%, #333);
+            font-size: 0.49rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+          }
+          #archura-frontpage-editor .preview-app-action strong {
+            overflow: hidden;
+            font-size: 0.66rem;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          #archura-frontpage-editor .preview-app-button {
+            display: inline-flex;
+            min-height: 32px;
+            align-items: center;
+            padding: 7px 12px;
+            border-radius: 9px;
+            background: var(--app-accent);
+            color: #fff;
+            font-size: 0.58rem;
+            font-weight: 700;
+          }
+          #archura-frontpage-editor .preview-app-anime { --app-accent: #ff174f; }
+          #archura-frontpage-editor .preview-app-plot { --app-accent: #3f623b; }
+          #archura-frontpage-editor .preview-app-borrow { --app-accent: #e52b20; }
+          #archura-frontpage-editor .preview-app-mushroom { --app-accent: #6334ff; }
+          #archura-frontpage-editor .preview-app-coffee { --app-accent: #8a4325; }
+          #archura-frontpage-editor .preview-app-bookkeeping { --app-accent: #008b85; }
+          #archura-frontpage-editor .bakery-toolbar {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            height: 72px;
+            padding: 20px 18px 0;
+            border-bottom: 1px solid #b8d8e6;
+            box-sizing: border-box;
+            color: #093e56;
+          }
+          #archura-frontpage-editor .bakery-menu {
+            display: grid;
+            gap: 3px;
+            width: 16px;
+          }
+          #archura-frontpage-editor .bakery-menu i {
+            display: block;
+            height: 1px;
+            background: currentColor;
+          }
+          #archura-frontpage-editor .bakery-monogram {
+            display: grid;
+            width: 28px;
+            height: 28px;
+            place-items: center;
+            border: 1px solid #2b88ad;
+            border-radius: 50%;
+            color: #075a7e;
+            font-family: Georgia, "Times New Roman", serif;
+            font-size: 0.9rem;
+          }
+          #archura-frontpage-editor .bakery-bag {
+            position: relative;
+            width: 14px;
+            height: 15px;
+            justify-self: end;
+            border: 1px solid currentColor;
+            border-radius: 2px;
+          }
+          #archura-frontpage-editor .bakery-bag::before {
+            position: absolute;
+            top: -6px;
+            left: 3px;
+            width: 6px;
+            height: 6px;
+            border: 1px solid currentColor;
+            border-bottom: 0;
+            border-radius: 6px 6px 0 0;
+            content: "";
+          }
+          #archura-frontpage-editor .bakery-page {
+            position: relative;
+            height: 462px;
+            background: #dceff7;
+          }
+          #archura-frontpage-editor .bakery-content {
+            position: absolute;
+            inset: 48px 35px 30px;
+            z-index: 1;
+          }
+          #archura-frontpage-editor .bakery-content p { margin-bottom: 0; }
+          #archura-frontpage-editor .bakery-kicker {
+            color: #176f93;
+            font-size: 0.48rem;
+            font-weight: 700;
+            letter-spacing: 0.14em;
+          }
+          #archura-frontpage-editor .bakery-content h3 {
+            margin: 12px 0 8px;
+            color: #073c54;
+            font-family: Georgia, "Times New Roman", serif;
+            font-size: 2.45rem;
+            font-weight: 500;
+            letter-spacing: -0.04em;
+            line-height: 0.86;
+          }
+          #archura-frontpage-editor .bakery-tagline {
+            color: #285f76;
+            font-family: Georgia, "Times New Roman", serif;
+            font-size: 0.9rem;
+          }
+          #archura-frontpage-editor .bakery-cta {
+            display: inline-flex;
+            min-height: 29px;
+            align-items: center;
+            margin-top: 14px;
+            padding: 6px 11px;
+            border-radius: 2px;
+            background: #0d7ca6;
+            color: #fff;
+            font-family: Georgia, "Times New Roman", serif;
+            font-size: 0.62rem;
+          }
+          #archura-frontpage-editor .bakery-photo {
+            position: relative;
+            overflow: hidden;
+            display: block;
+            width: 100%;
+            height: 226px;
+            margin-top: 20px;
+            background: #147fa5;
+          }
+          #archura-frontpage-editor .bakery-photo::after {
+            position: absolute;
+            inset: 0;
+            background: #147fa5;
+            content: "";
+            mix-blend-mode: color;
+            opacity: 0.2;
+            pointer-events: none;
+          }
+          #archura-frontpage-editor .bakery-photo img {
+            display: block;
+            width: 100%;
+            height: 100%;
+            filter: saturate(1.05) contrast(1.02);
+            object-fit: cover;
+            object-position: center 62%;
+          }
+          #archura-frontpage-editor .preview-contour {
+            position: absolute;
+            z-index: 2;
+            display: block;
+            background: var(--mark-gold);
+            pointer-events: none;
+          }
+          #archura-frontpage-editor .preview-contour-curve {
+            top: 0;
+            left: 0;
+            width: 72px;
+            height: 72px;
+            border-top: 14px solid var(--mark-gold);
+            border-left: 14px solid var(--mark-gold);
+            border-radius: 52px 0 0;
+            background: transparent;
+          }
+          #archura-frontpage-editor .preview-contour-top {
+            top: 0;
+            right: 0;
+            left: 50px;
+            height: 14px;
+          }
+          #archura-frontpage-editor .preview-contour-left {
+            top: 50px;
+            bottom: 18px;
+            left: 0;
+            width: 14px;
+          }
+          #archura-frontpage-editor .preview-contour-right {
+            top: 0;
+            right: 0;
+            bottom: 107px;
+            width: 14px;
+          }
+          #archura-frontpage-editor .preview-contour-diagonal {
+            right: 5px;
+            bottom: 104px;
+            width: 140px;
+            height: 14px;
+            /* clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%); */
+            transform: rotate(-45deg);
+            transform-origin: right center;
+            clip-path: polygon(0 0, 100% 0, 100% 100%, 14px 100%);
+          }
+          /* #archura-frontpage-editor .preview-contour-diagonal::after {
+            position: absolute;
+            top: -2px;
+            right: -2px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--mark-gold);
+            content: "";
+          } */
+          #archura-frontpage-editor .preview-contour-bottom {
+            right: 130px;
+            bottom: 18px;
+            left: 0;
+            height: 14px;
+            clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%);
+          }
+          #archura-frontpage-editor .method-section,
+          #archura-frontpage-editor .statement-section,
+          #archura-frontpage-editor .editor-section {
+            border-top: 1px solid var(--border);
+            scroll-margin-top: 24px;
+          }
+          #archura-frontpage-editor .method-section {
+            display: grid;
+            grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+            gap: 80px;
+            padding: 110px 0 128px;
+          }
+          #archura-frontpage-editor .section-heading h2 {
+            max-width: 380px;
+            font-size: clamp(2rem, 4vw, 3rem);
+          }
+          #archura-frontpage-editor .method-list {
+            margin: 2px 0 0;
+            padding: 0;
+            list-style: none;
+          }
+          #archura-frontpage-editor .method-list li {
+            display: grid;
+            grid-template-columns: 42px 1fr;
+            gap: 18px;
+            padding: 0 0 28px;
+            border-bottom: 1px solid var(--border);
+          }
+          #archura-frontpage-editor .method-list li + li { padding-top: 28px; }
+          #archura-frontpage-editor .method-list li > span {
+            color: var(--gold-dark);
+            font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+            font-size: 0.72rem;
+          }
+          #archura-frontpage-editor .method-list p {
+            max-width: 470px;
+            margin-bottom: 0;
+            color: var(--muted-foreground);
+            font-size: 0.92rem;
+          }
+          #archura-frontpage-editor .statement-section {
+            max-width: 760px;
+            padding: 120px 0 140px;
+          }
+          #archura-frontpage-editor .statement-section > p:last-child {
+            max-width: 560px;
+            margin-bottom: 0;
+            color: var(--muted-foreground);
+          }
+          #archura-frontpage-editor .editor-section { padding: 112px 0 72px; }
+          #archura-frontpage-editor .editor-intro {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 40px;
+            margin-bottom: 28px;
+          }
+          #archura-frontpage-editor .editor-intro > div:first-child { max-width: 570px; }
+          #archura-frontpage-editor .editor-intro h2 {
+            margin-bottom: 14px;
+            font-size: clamp(2rem, 4vw, 3rem);
+          }
+          #archura-frontpage-editor .editor-intro p:last-child {
+            margin-bottom: 0;
+            color: var(--muted-foreground);
+          }
+          #archura-frontpage-editor .editor-controls {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 8px;
+          }
+          #archura-frontpage-editor .editor-shell {
+            overflow: hidden;
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--surface);
+          }
           #archura-frontpage-editor .editor-shell archura-editor {
             display: block; height: min(78vh, 760px);
           }
-          #archura-frontpage-editor .publish-flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: center; gap: 14px; padding: 26px 0; }
-          #archura-frontpage-editor .publish-flow > div { display: flex; align-items: center; gap: 2px; }
-          @media (max-width: 640px) {
-            #archura-frontpage-editor .nav-links { display: none; }
-            #archura-frontpage-editor .hero-layout,
-            #archura-frontpage-editor .flow-strip,
-            #archura-frontpage-editor .audience-grid,
-            #archura-frontpage-editor .publish-flow { grid-template-columns: 1fr; }
-            #archura-frontpage-editor .editor-intro { align-items: flex-start; flex-direction: column; }
-            #archura-frontpage-editor .publish-flow > span { display: none; }
+          #archura-frontpage-editor .publish-flow {
+            margin: 18px 0 0;
+            color: var(--muted-foreground);
+            font-size: 0.78rem;
+            word-spacing: 0.12em;
+          }
+          #archura-frontpage-editor .publish-flow span {
+            padding: 0 8px;
+            color: var(--gold-dark);
+          }
+          #archura-frontpage-editor .site-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 30px 0 8px;
+            border-top: 1px solid var(--border);
+            color: var(--muted-foreground);
+            font-size: 0.78rem;
+          }
+          #archura-frontpage-editor .site-footer nav {
+            display: flex;
+            gap: 22px;
+          }
+          @media (max-width: 720px) {
+            .page { padding: 0 20px 40px; }
+            #archura-frontpage-editor .site-header { min-height: 72px; }
+            #archura-frontpage-editor .brand img { width: 34px; height: 34px; border-radius: 7px; }
+            #archura-frontpage-editor .site-nav { gap: 14px; }
+            #archura-frontpage-editor .site-nav a:first-child,
+            #archura-frontpage-editor .site-nav a:nth-child(2) { display: none; }
+            #archura-frontpage-editor .hero-layout {
+              grid-template-columns: 1fr;
+              gap: 64px;
+              min-height: auto;
+              padding: 76px 0 100px;
+            }
+            #archura-frontpage-editor .bakery-envelope {
+              overflow: hidden;
+              width: min(100%, 405px);
+              justify-self: center;
+            }
+            #archura-frontpage-editor .method-section {
+              grid-template-columns: 1fr;
+              gap: 48px;
+              padding: 88px 0 100px;
+            }
+            #archura-frontpage-editor .statement-section { padding: 88px 0 104px; }
+            #archura-frontpage-editor .editor-section { padding-top: 88px; }
+            #archura-frontpage-editor .editor-intro {
+              align-items: flex-start;
+              flex-direction: column;
+            }
+            #archura-frontpage-editor .editor-controls { justify-content: flex-start; }
+            #archura-frontpage-editor .publish-flow {
+              display: grid;
+              gap: 4px;
+            }
+            #archura-frontpage-editor .publish-flow span { display: none; }
+          }
+          @media (max-width: 420px) {
+            #archura-frontpage-editor .brand strong { display: none; }
+            #archura-frontpage-editor h1 { font-size: 3rem; }
+            #archura-frontpage-editor .hero-actions { align-items: flex-start; flex-direction: column; }
+            #archura-frontpage-editor .editor-controls { display: grid; width: 100%; }
+            #archura-frontpage-editor .site-footer {
+              align-items: flex-start;
+              flex-direction: column;
+              gap: 16px;
+            }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            #archura-frontpage-editor .preview-slide.is-active,
+            #archura-frontpage-editor .preview-slide.is-exiting { transition: none; }
           }
         </style>
       </div>
