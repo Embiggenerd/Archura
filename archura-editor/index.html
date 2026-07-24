@@ -105,7 +105,7 @@
               </div>
               <p class="hero-note">No account needed to begin.</p>
             </div>
-            <div class="bakery-envelope">
+            <div class="bakery-envelope" data-preview-layout="phone">
               <span class="preview-contour preview-contour-curve"></span>
               <span class="preview-contour preview-contour-top"></span>
               <span class="preview-contour preview-contour-left"></span>
@@ -123,6 +123,7 @@
                   <div
                     class="bakery-window preview-slide is-active"
                     data-preview-label="Amy's Bakery"
+                    data-preview-layout="phone"
                     aria-hidden="false"
                   >
                     <div class="bakery-toolbar">
@@ -150,24 +151,22 @@
                   <div
                     class="bakery-window preview-slide preview-app preview-app-anime"
                     data-preview-label="Neon Frame anime streaming"
+                    data-preview-layout="tablet"
                     aria-hidden="true"
                   >
                     <img
                       class="preview-concept"
-                      src="/images/app-concept-neon-frame-anime.jpg"
+                      src="/images/app-concept-neon-frame-anime-tablet.jpg"
                       alt=""
-                      width="972"
-                      height="1619"
+                      width="1448"
+                      height="1086"
                       decoding="async"
                     />
-                    <div class="preview-app-action" aria-hidden="true">
-                      <span><small>Continue watching</small><strong>Redline Courier · Episode 6</strong></span>
-                      <span class="preview-app-button">Watch</span>
-                    </div>
                   </div>
                   <div
                     class="bakery-window preview-slide preview-app preview-app-coffee"
                     data-preview-label="Joshua's Coffee ordering"
+                    data-preview-layout="phone"
                     aria-hidden="true"
                   >
                     <img
@@ -187,21 +186,18 @@
                   <div
                     class="bakery-window preview-slide preview-app preview-app-bookkeeping"
                     data-preview-label="Judy's Bookkeeping services and CRM"
+                    data-preview-layout="desktop"
                     aria-hidden="true"
                   >
                     <img
                       class="preview-concept"
-                      src="/images/app-concept-judys-bookkeeping.jpg"
+                      src="/images/app-concept-judys-bookkeeping-desktop.jpg"
                       alt=""
-                      width="972"
-                      height="1619"
+                      width="1586"
+                      height="992"
                       loading="lazy"
                       decoding="async"
                     />
-                    <div class="preview-app-action" aria-hidden="true">
-                      <span><small>New CRM lead</small><strong>Sunrise Retail · Follow-up due</strong></span>
-                      <span class="preview-app-button">Open CRM</span>
-                    </div>
                   </div>
                   <!-- <div
                     class="bakery-window preview-slide preview-app preview-app-plot"
@@ -226,6 +222,7 @@
                   <div
                     class="bakery-window preview-slide preview-app preview-app-borrow"
                     data-preview-label="Borrow neighborhood exchange"
+                    data-preview-layout="phone"
                     aria-hidden="true"
                   >
                     <img
@@ -246,6 +243,7 @@
                   <div
                     class="bakery-window preview-slide preview-app preview-app-mushroom"
                     data-preview-label="Morrow mushroom identification"
+                    data-preview-layout="phone"
                     aria-hidden="true"
                   >
                     <img
@@ -406,7 +404,9 @@
           const previewRotator = root.querySelector('[data-preview-rotator]');
           const previewSlides = [...previewRotator.querySelectorAll('[data-preview-label]')];
           console.log(previewSlides);
+          const previewEnvelope = root.querySelector('.bakery-envelope');
           const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+          const previewTransitionMs = 720;
           let previewIndex = 0;
           let previewTimer;
           let previewPaused = false;
@@ -414,16 +414,33 @@
           const showPreview = (index) => {
             const previousIndex = previewIndex;
             previewIndex = index % previewSlides.length;
-            previewSlides.forEach((slide, slideIndex) => {
-              const active = slideIndex === previewIndex;
-              slide.classList.remove('is-active', 'is-exiting');
-              if (active) slide.classList.add('is-active');
-              slide.setAttribute('aria-hidden', String(!active));
-            });
-            if (previousIndex !== previewIndex) {
-              previewSlides[previousIndex].classList.add('is-exiting');
+            const nextSlide = previewSlides[previewIndex];
+            const previousSlide = previewSlides[previousIndex];
+            previewEnvelope.dataset.previewLayout = nextSlide.dataset.previewLayout || 'phone';
+
+            const commitPreview = () => {
+              previewSlides.forEach((slide, slideIndex) => {
+                const active = slideIndex === previewIndex;
+                slide.classList.remove('is-active', 'is-exiting');
+                if (active) slide.classList.add('is-active');
+                slide.setAttribute('aria-hidden', String(!active));
+              });
+              if (previousIndex !== previewIndex) {
+                previousSlide.classList.add('is-exiting');
+                window.setTimeout(
+                  () => previousSlide.classList.remove('is-exiting'),
+                  reducedMotion.matches ? 0 : previewTransitionMs,
+                );
+              }
+            };
+
+            if (reducedMotion.matches) {
+              commitPreview();
+            } else {
+              window.requestAnimationFrame(commitPreview);
             }
-            const label = previewSlides[previewIndex].dataset.previewLabel;
+
+            const label = nextSlide.dataset.previewLabel;
             previewRotator.setAttribute('aria-label', `${label}, framed by the Envelopment contour`);
           };
 
@@ -433,7 +450,7 @@
             previewTimer = window.setTimeout(() => {
               showPreview(previewIndex + 1);
               schedulePreview();
-            }, 3000);
+            }, 5000);
           };
 
           previewRotator.addEventListener('mouseenter', () => {
@@ -527,13 +544,16 @@
           #archura-frontpage-editor .nav-action:hover { color: var(--gold-dark); }
           #archura-frontpage-editor .hero-layout {
             display: grid;
-            grid-template-columns: minmax(0, 1.08fr) minmax(310px, 0.92fr);
-            gap: clamp(44px, 7vw, 76px);
+            grid-template-columns: minmax(480px, 1fr) minmax(0, 700px);
+            gap: 32px;
             align-items: center;
-            min-height: 720px;
+            width: min(1360px, calc(100vw - 48px));
+            min-height: 820px;
+            margin-left: 50%;
             padding: 96px 0 120px;
+            transform: translateX(-50%);
           }
-          #archura-frontpage-editor .hero-copy { max-width: 560px; }
+          #archura-frontpage-editor .hero-copy { max-width: 640px; }
           #archura-frontpage-editor .hero-lede {
             max-width: 590px;
             margin-bottom: 0;
@@ -556,18 +576,29 @@
             font-size: 0.78rem;
           }
           #archura-frontpage-editor .bakery-envelope {
+            --preview-envelope-width: 405px;
+            --preview-height: 534px;
             position: relative;
-            width: 100%;
-            max-width: 405px;
+            width: min(100%, var(--preview-envelope-width));
             padding: 28px 30px 36px 24px;
-            justify-self: end;
+            justify-self: center;
+            transition: width 720ms cubic-bezier(0.65, 0, 0.35, 1);
+          }
+          #archura-frontpage-editor .bakery-envelope[data-preview-layout="tablet"] {
+            --preview-envelope-width: 580px;
+            --preview-height: 421px;
+          }
+          #archura-frontpage-editor .bakery-envelope[data-preview-layout="desktop"] {
+            --preview-envelope-width: 700px;
+            --preview-height: 405px;
           }
           #archura-frontpage-editor .bakery-preview {
             position: relative;
             z-index: 1;
             width: 100%;
-            height: 534px;
+            height: var(--preview-height);
             filter: drop-shadow(0 24px 30px rgba(51, 42, 25, 0.12));
+            transition: height 720ms cubic-bezier(0.65, 0, 0.35, 1);
           }
           #archura-frontpage-editor .preview-device-screen {
             position: absolute;
@@ -583,6 +614,17 @@
               calc(100% - 72px) 100%,
               0 100%
             );
+            transition: border-radius 720ms cubic-bezier(0.65, 0, 0.35, 1);
+          }
+          #archura-frontpage-editor
+            .bakery-envelope[data-preview-layout="tablet"]
+            .preview-device-screen {
+            border-radius: 16px;
+          }
+          #archura-frontpage-editor
+            .bakery-envelope[data-preview-layout="desktop"]
+            .preview-device-screen {
+            border-radius: 12px;
           }
           #archura-frontpage-editor .bakery-window {
             position: absolute;
@@ -598,12 +640,12 @@
           #archura-frontpage-editor .preview-slide.is-active {
             z-index: 2;
             transform: translateX(0);
-            transition: transform 700ms cubic-bezier(0.65, 0, 0.35, 1);
+            transition: transform 720ms cubic-bezier(0.65, 0, 0.35, 1);
           }
           #archura-frontpage-editor .preview-slide.is-exiting {
             z-index: 1;
             transform: translateX(-105%);
-            transition: transform 700ms cubic-bezier(0.65, 0, 0.35, 1);
+            transition: transform 720ms cubic-bezier(0.65, 0, 0.35, 1);
           }
           #archura-frontpage-editor .preview-concept {
             display: block;
@@ -614,6 +656,11 @@
             box-sizing: border-box;
             object-fit: cover;
             object-position: top center;
+          }
+          #archura-frontpage-editor
+            .bakery-envelope[data-preview-layout="desktop"]
+            .preview-concept {
+            padding-top: 0;
           }
           #archura-frontpage-editor .preview-device-status {
             position: absolute;
@@ -632,12 +679,22 @@
             font-size: 0.54rem;
             font-weight: 700;
             pointer-events: none;
+            transition: opacity 180ms ease;
           }
           #archura-frontpage-editor .preview-device-island {
             width: 58px;
             height: 17px;
             border-radius: 12px;
             background: #111;
+            transition:
+              width 720ms cubic-bezier(0.65, 0, 0.35, 1),
+              height 720ms cubic-bezier(0.65, 0, 0.35, 1);
+          }
+          #archura-frontpage-editor
+            .bakery-envelope[data-preview-layout="tablet"]
+            .preview-device-island {
+            width: 8px;
+            height: 8px;
           }
           #archura-frontpage-editor .preview-device-network {
             display: inline-flex;
@@ -681,6 +738,15 @@
             background: rgba(17, 17, 17, 0.82);
             pointer-events: none;
             transform: translateX(50%);
+            transition: opacity 180ms ease;
+          }
+          #archura-frontpage-editor
+            .bakery-envelope[data-preview-layout="desktop"]
+            .preview-device-status,
+          #archura-frontpage-editor
+            .bakery-envelope[data-preview-layout="desktop"]
+            .preview-device-home {
+            opacity: 0;
           }
           #archura-frontpage-editor .preview-device-button {
             position: absolute;
@@ -1071,6 +1137,17 @@
             display: flex;
             gap: 22px;
           }
+          @media (max-width: 1259px) and (min-width: 721px) {
+            #archura-frontpage-editor .hero-layout {
+              grid-template-columns: 1fr;
+              gap: 64px;
+              width: auto;
+              min-height: auto;
+              margin-left: 0;
+              transform: none;
+            }
+            #archura-frontpage-editor .bakery-envelope { justify-self: center; }
+          }
           @media (max-width: 720px) {
             .page { padding: 0 20px 40px; }
             #archura-frontpage-editor .site-header { min-height: 72px; }
@@ -1081,13 +1158,37 @@
             #archura-frontpage-editor .hero-layout {
               grid-template-columns: 1fr;
               gap: 64px;
+              width: auto;
               min-height: auto;
+              margin-left: 0;
               padding: 76px 0 100px;
+              transform: none;
+            }
+            #archura-frontpage-editor .bakery-envelope,
+            #archura-frontpage-editor .bakery-envelope[data-preview-layout="tablet"],
+            #archura-frontpage-editor .bakery-envelope[data-preview-layout="desktop"] {
+              --preview-envelope-width: 405px;
+              --preview-height: 534px;
             }
             #archura-frontpage-editor .bakery-envelope {
               overflow: hidden;
               width: min(100%, 405px);
               justify-self: center;
+              transition: none;
+            }
+            #archura-frontpage-editor .bakery-preview { transition: none; }
+            #archura-frontpage-editor
+              .bakery-envelope[data-preview-layout="tablet"]
+              .preview-concept {
+              object-fit: contain;
+              background: #080b13;
+            }
+            #archura-frontpage-editor
+              .bakery-envelope[data-preview-layout="desktop"]
+              .preview-concept {
+              padding-top: 0;
+              object-fit: contain;
+              background: #fbf8f2;
             }
             #archura-frontpage-editor .method-section {
               grid-template-columns: 1fr;
@@ -1119,6 +1220,12 @@
             }
           }
           @media (prefers-reduced-motion: reduce) {
+            #archura-frontpage-editor .bakery-envelope,
+            #archura-frontpage-editor .bakery-preview,
+            #archura-frontpage-editor .preview-device-screen,
+            #archura-frontpage-editor .preview-device-status,
+            #archura-frontpage-editor .preview-device-island,
+            #archura-frontpage-editor .preview-device-home,
             #archura-frontpage-editor .preview-slide.is-active,
             #archura-frontpage-editor .preview-slide.is-exiting { transition: none; }
           }
