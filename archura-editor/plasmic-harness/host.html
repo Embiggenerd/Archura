@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plasmic fixture harness</title>
+    <link rel="stylesheet" href="/out/host.css" />
+    <style>
+      body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: #f3f4f6;
+        font-family: system-ui, sans-serif;
+      }
+      archura-editor {
+        display: block;
+        flex: 1;
+        min-height: 0;
+        padding: 12px;
+        box-sizing: border-box;
+      }
+      archura-canvas .gjs-container {
+        height: 100%;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module" src="/out/host.js"></script>
+  </body>
+</html>

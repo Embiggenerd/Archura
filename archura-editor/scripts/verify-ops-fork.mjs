@@ -313,6 +313,18 @@ try {
   const apex = await worker.fetch(new Request('https://archura.ai/pricing/?a=1', { redirect: 'manual' }), splitEnv);
   assert.equal(apex.status, 301, 'bare sites domain redirects');
   assert.equal(apex.headers.get('Location'), 'https://envelopment.ai/pricing/?a=1', 'redirect preserves path and query');
+  // The emailed confirmation link names the sites domain (CONFIRM_URL_BASE);
+  // this redirect is what moves it to the app origin BEFORE handleConfirm runs,
+  // so the archura_session cookie is issued on the app domain where the
+  // waiting tab can see it. If this breaks, confirmation still "works" in the
+  // email tab but the check-email tab never signs in.
+  const splitConfirm = await worker.fetch(new Request('https://archura.ai/confirm?token=split-domain-token', { redirect: 'manual' }), splitEnv);
+  assert.equal(splitConfirm.status, 301, 'sites-domain confirm link redirects to the app origin');
+  assert.equal(
+    splitConfirm.headers.get('Location'),
+    'https://envelopment.ai/confirm?token=split-domain-token',
+    'confirm redirect preserves /confirm and the untouched token query'
+  );
   const siteOnRoot = await worker.fetch(new Request('https://never-published-xyz.archura.ai/'), splitEnv);
   assert.equal(siteOnRoot.status, 200, 'subdomain of sites root serves a site response');
   assert.ok((await siteOnRoot.text()).includes('Nothing published'), 'unclaimed subdomain shows the waiting page');

@@ -1,0 +1,31 @@
+[
+  {
+    "kind": "component",
+    "path": [
+      "plasmic",
+      "proj-fixture-1",
+      "cardfixture00001"
+    ],
+    "tagName": "archura-fixture-project-pricing-card-07irspt",
+    "label": "Pricing Card",
+    "moduleUrl": "/out-real/archura-fixture-project-pricing-card-07irspt.js"
+  },
+  {
+    "kind": "page",
+    "path": [
+      "plasmic",
+      "proj-fixture-1",
+      "landingfixture01"
+    ],
+    "tagName": "archura-fixture-project-landing-1qorwv6",
+    "label": "Landing",
+    "uses": [
+      [
+        "plasmic",
+        "proj-fixture-1",
+        "cardfixture00001"
+      ]
+    ],
+    "moduleUrl": "/out-real/archura-fixture-project-landing-1qorwv6.js"
+  }
+]

@@ -69,6 +69,39 @@ export function checkEmailHtml(email) {
     ${isLocalDev() ? '<p><a href="/dev-mail/">Running locally? Open the dev mailbox.</a></p>' : ''}`;
 }
 
+// Confirmation happens in another tab; this tab only learns about it when the
+// user comes back. Focus/visibility are the only recheck signals (no polling,
+// no cross-tab messaging) — /api/me is the authority, and the redirect fires
+// only for the email this modal is actually waiting on.
+function showCheckEmail(overlay, email) {
+  overlay.querySelector('.modal').innerHTML = checkEmailHtml(email);
+  const submitted = email.trim().toLowerCase();
+  let inFlight = false;
+  const detach = () => {
+    window.removeEventListener('focus', onSignal);
+    document.removeEventListener('visibilitychange', onSignal);
+  };
+  const onSignal = async () => {
+    if (!overlay.isConnected) return detach();
+    if (document.visibilityState === 'hidden' || inFlight) return;
+    inFlight = true;
+    try {
+      const res = await fetch('/api/me');
+      if (!res.ok) return; // 401 while unconfirmed, transient 5xx — keep waiting
+      const me = await res.json().catch(() => null);
+      if ((me?.email ?? '').toLowerCase() !== submitted) return;
+      detach();
+      location.assign('/dashboard/');
+    } catch {
+      // Network hiccup — the next focus/visibility signal retries.
+    } finally {
+      inFlight = false;
+    }
+  };
+  window.addEventListener('focus', onSignal);
+  document.addEventListener('visibilitychange', onSignal);
+}
+
 // Signed-in capacity preemption: if the session's default organization has no
 // site slots left, publishing is doomed — say so the moment a site-creating
 // form opens, before any work is invested. Advisory only (the claim/confirm
@@ -148,7 +181,7 @@ export function showRegisterModal() {
         'Could not send the link.';
       return;
     }
-    overlay.querySelector('.modal').innerHTML = checkEmailHtml(email);
+    showCheckEmail(overlay, email);
   });
 }
 
@@ -214,6 +247,6 @@ export function showDeployModal(editorEl, components) {
         'Deploy failed — try again.';
       return;
     }
-    overlay.querySelector('.modal').innerHTML = checkEmailHtml(email);
+    showCheckEmail(overlay, email);
   });
 }

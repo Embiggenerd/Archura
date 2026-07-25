@@ -126,14 +126,17 @@ added or changed, update the matching `stories-*.mjs` suite first.
 
 | Story leaf | Status | Assertion |
 |------------|--------|-----------|
-| Index → editor | covered | `/` redirects to `/edit/` with canvas |
+| Index → inline editor | covered | `/` stays on `/`; `[data-editor-mount] archura-editor` canvas renders |
 | Edit then Deploy | covered | Distinctive title commits |
 | Invalid email | covered | No advance; validity or error |
 | New subdomain + email → check inbox | covered | Check-email UI + `/dev-mail/` link |
-| Confirm → Open site → live match | covered | Live card title === edited marker |
+| Focus without confirmation | covered | Waiting tab stays on `/` with check-email modal |
+| Confirm (2nd tab) → live match | covered | Confirmation tab lands on the site; card title === edited marker |
+| Waiting tab → dashboard | covered | Refocus after confirmation redirects to signed-in `/dashboard/` |
+| Signed-in `/` → dashboard | covered | Server redirect preserved |
 | Used subdomain → message | covered | Error; no advance |
-| Already-used email → message | failing | Error; no advance — product currently accepts a second deploy (gap) |
-| Register button → inbox → dashboard | covered | Signed-in dashboard + claim field |
+| Already-used email → message | covered | Error; no advance |
+| Register button → inbox → dashboard | covered | Two-tab confirm; waiting tab reaches signed-in dashboard + claim field |
 | Register invalid email | covered | Blocked |
 
 ### 5.1 Funnel & account (`funnel.mjs`)
