@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "sh ../scripts/dev-up.sh",
+    "dev:editor": "vite",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build:app": "vite build",
     "build:components": "node scripts/build-components.mjs",

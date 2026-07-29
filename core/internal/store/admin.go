@@ -600,6 +600,96 @@ func (s *Store) FinalizeFork(
 	return updated, nil
 }
 
+// ApplyFork records the outcome of applying a ready fork over its source
+// design. "applied" transitions ready → applied (idempotent: an already-
+// applied fork returns success without a second audit event, so a Worker
+// retry after a lost response converges). "rejected" records an audited
+// rejection (e.g. moderation) without changing the row — the fork stays
+// ready for another attempt.
+func (s *Store) ApplyFork(
+	ctx context.Context,
+	forkID string,
+	apply ForkApply,
+	audit AuditEvent,
+) (Design, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return Design{}, fmt.Errorf("begin apply fork: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	row := tx.QueryRow(ctx, `
+		SELECT id, organization_id::text, name, component_path,
+			COALESCE(forked_from, ''), COALESCE(source_org_id, ''), COALESCE(forked_by, ''), forked_at,
+			COALESCE(source_artifact_kind, ''), COALESCE(source_artifact_etag, ''),
+			COALESCE(template_ref, ''), COALESCE(fork_idempotency_key, ''), COALESCE(fork_status, ''),
+			created_at, updated_at
+		FROM designs WHERE id = $1 AND deleted_at IS NULL
+		FOR UPDATE`, forkID)
+	current, err := scanDesign(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Design{}, ErrNotFound
+		}
+		return Design{}, err
+	}
+	if current.ForkIdempotencyKey == "" {
+		return Design{}, ErrNotFound
+	}
+	if current.ForkStatus != "ready" && current.ForkStatus != "applied" {
+		return Design{}, ErrInvalidState
+	}
+
+	metadata := ForkAuditMetadata{
+		SourceOrganizationID: current.SourceOrganizationID,
+		SourceDesignID:       current.ForkedFrom,
+		DestinationForkID:    current.ID,
+		ForcedWarnings:       apply.ForcedWarnings,
+		Reason:               apply.Reason,
+	}
+	audit.OrganizationID = current.OrganizationID
+	audit.ResourceType = "design"
+	audit.ResourceID = current.ID
+	audit.Metadata = metadata
+
+	if apply.Outcome == "rejected" {
+		audit.Action = "admin.fork_apply_rejected"
+		if err := insertAudit(ctx, tx, audit); err != nil {
+			return Design{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return Design{}, fmt.Errorf("commit apply rejection: %w", err)
+		}
+		return current, nil
+	}
+
+	if current.ForkStatus == "applied" {
+		return current, tx.Commit(ctx)
+	}
+
+	row = tx.QueryRow(ctx, `
+		UPDATE designs
+		SET fork_status = 'applied', updated_at = now()
+		WHERE id = $1
+		RETURNING id, organization_id::text, name, component_path,
+			COALESCE(forked_from, ''), COALESCE(source_org_id, ''), COALESCE(forked_by, ''), forked_at,
+			COALESCE(source_artifact_kind, ''), COALESCE(source_artifact_etag, ''),
+			COALESCE(template_ref, ''), COALESCE(fork_idempotency_key, ''), COALESCE(fork_status, ''),
+			created_at, updated_at`, forkID)
+	updated, err := scanDesign(row)
+	if err != nil {
+		return Design{}, mapStoreError("apply fork", err)
+	}
+	audit.Action = "admin.fork_applied"
+	if err := insertAudit(ctx, tx, audit); err != nil {
+		return Design{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Design{}, fmt.Errorf("commit apply fork: %w", err)
+	}
+	return updated, nil
+}
+
 func (s *Store) BootstrapPlatformWorkspace(
 	ctx context.Context,
 	p CreateOrganizationParams,

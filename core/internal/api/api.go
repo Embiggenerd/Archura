@@ -129,6 +129,7 @@ func (s *Server) Router() http.Handler {
 		r.Get("/designs/{designID}", s.handleAdminDesign)
 		r.Post("/forks", s.handleAdminCreateFork)
 		r.Post("/forks/{forkID}/finalize", s.handleAdminFinalizeFork)
+		r.Post("/forks/{forkID}/apply", s.handleAdminApplyFork)
 		r.Get("/forks", s.handleAdminForks)
 		r.Get("/default-plan", s.handleAdminDefaultPlan)
 		r.Patch("/default-plan", s.handleAdminPatchDefaultPlan)

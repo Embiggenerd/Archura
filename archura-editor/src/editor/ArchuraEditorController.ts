@@ -202,6 +202,15 @@ export class ArchuraEditorController {
   // no manual Save. Publishing is still an explicit promote of the saved draft.
   #autosaveTimer?: ReturnType<typeof setTimeout>;
   #autosaving = false;
+  // Stale-write protection: every edit bumps the revision; a save only clears
+  // #dirty when no edits arrived while its write was in flight, and a retry
+  // always re-serializes the CURRENT state — old bytes are never resent.
+  #saveRevision = 0;
+  // Failed autosaves stash to localStorage and retry on a backoff, so a brief
+  // backend outage means "save lands late", not "keystrokes lost".
+  #retryTimer?: ReturnType<typeof setTimeout>;
+  #retryDelayMs = 2000;
+  #restoredFromStash = false;
   // Content signature of what's currently live, so re-publishing identical
   // content is a no-op rather than redundant work.
   #lastPublishedFingerprint: string | null = null;
@@ -273,14 +282,23 @@ export class ArchuraEditorController {
   async save(): Promise<CanonicalComponentData[]> {
     // Supersede any pending autosave — this write covers it.
     clearTimeout(this.#autosaveTimer);
+    const revision = this.#saveRevision;
     const artifact = this.#createCurrentArtifact();
     this.#artifacts = [artifact];
     const store = this.#config.persistence;
     if (store) {
       await store.put(draftKey(artifact.config.componentPath), JSON.stringify(artifact));
       this.#draftExists = true;
+      this.#clearPendingStash();
+      this.#retryDelayMs = 2000;
     }
-    this.#dirty = false;
+    if (revision === this.#saveRevision) {
+      this.#dirty = false;
+    } else {
+      // Edits arrived while the write was in flight — they are a newer
+      // revision that still needs its own save. Never clear their dirty bit.
+      this.#scheduleAutosave();
+    }
     this.#config.onSave?.({ artifacts: this.#artifacts });
     this.#config.onChange?.(this.#artifacts);
     this.#notify();
@@ -299,6 +317,7 @@ export class ArchuraEditorController {
 
   #markDirty(): void {
     this.#dirty = true;
+    this.#saveRevision += 1;
     this.#scheduleAutosave();
   }
 
@@ -317,9 +336,51 @@ export class ArchuraEditorController {
     try {
       await this.save();
     } catch (error) {
+      // The backend may be briefly down: stash the current state so a tab
+      // close loses nothing, and retry on a backoff. The retry goes through
+      // save(), which re-serializes the LATEST editor state.
+      this.#stashPending();
+      clearTimeout(this.#retryTimer);
+      this.#retryTimer = setTimeout(() => void this.#autosave(), this.#retryDelayMs);
+      this.#retryDelayMs = Math.min(this.#retryDelayMs * 2, 30_000);
       this.#config.onError?.(error);
     } finally {
       this.#autosaving = false;
+    }
+  }
+
+  // --- Pending-save stash: one localStorage slot per design, no history ---
+
+  // Scoped by the store's identity (site:<name> / design:<org>:<id>): the same
+  // component path recurs across customers, and a stash from one must never be
+  // offered for restore in another's editor.
+  #stashKey(): string {
+    const scope = this.#config.persistence?.scope ?? 'local';
+    return `archura.pending.${scope}.${this.#state.componentPath.join('/')}`;
+  }
+
+  #stashPending(): void {
+    try {
+      localStorage.setItem(this.#stashKey(), JSON.stringify(this.#createCurrentArtifact()));
+    } catch {
+      // Storage full or unavailable: the in-memory state and retry loop remain.
+    }
+  }
+
+  #clearPendingStash(): void {
+    try {
+      localStorage.removeItem(this.#stashKey());
+    } catch {
+      // Ignore: absence of a stash is the success case anyway.
+    }
+  }
+
+  #readPendingStash(): CanonicalComponentData | null {
+    try {
+      const raw = localStorage.getItem(this.#stashKey());
+      return raw ? (JSON.parse(raw) as CanonicalComponentData) : null;
+    } catch {
+      return null;
     }
   }
 
@@ -633,6 +694,7 @@ export class ArchuraEditorController {
       await store.put(draftKey(path), JSON.stringify(artifact));
       this.#draftExists = true;
       this.#dirty = false;
+      this.#clearPendingStash();
       if (store.publish) {
         // Server-orchestrated publish (design store): send the generated embed
         // modules and let the backend promote the draft + gate.
@@ -1232,7 +1294,25 @@ export class ArchuraEditorController {
         this.#draftExists = draftRaw != null;
         this.#publishedExists = publishedRaw != null;
         const raw = draftRaw ?? publishedRaw;
-        const artifact = raw ? (JSON.parse(raw) as CanonicalComponentData) : null;
+        let artifact = raw ? (JSON.parse(raw) as CanonicalComponentData) : null;
+        // A stash newer than the loaded draft means a save never reached the
+        // store (e.g. the backend was down when the tab closed) — offer it back.
+        const stashed = this.#readPendingStash();
+        if (stashed) {
+          const loadedAt = artifact ? Date.parse(artifact.meta?.updatedAt ?? '') : Number.NaN;
+          const stashedAt = Date.parse(stashed.meta?.updatedAt ?? '');
+          const stashIsNewer = Number.isFinite(stashedAt) && (!Number.isFinite(loadedAt) || stashedAt > loadedAt);
+          if (
+            stashIsNewer &&
+            typeof globalThis.confirm === 'function' &&
+            globalThis.confirm('You have unsaved changes from a previous session. Restore them?')
+          ) {
+            artifact = stashed;
+            this.#restoredFromStash = true;
+          } else {
+            this.#clearPendingStash();
+          }
+        }
         if (artifact) {
           this.#state = {
             componentPath: [...artifact.config.componentPath],
@@ -1299,6 +1379,12 @@ export class ArchuraEditorController {
       // Loading/expansion fires component:update; the canvas isn't user-dirty yet
       this.#dirty = false;
       clearTimeout(this.#autosaveTimer);
+      if (this.#restoredFromStash) {
+        // Restored content exists only in this tab until a save lands — treat
+        // it as a fresh edit so the normal autosave/retry path persists it.
+        this.#restoredFromStash = false;
+        this.#markDirty();
+      }
       this.#notify();
     } catch (error) {
       this.#config.onError?.(error);
@@ -1437,6 +1523,9 @@ export class ArchuraEditorController {
   }
 
   destroy(): void {
+    // A destroyed controller must not keep retrying saves for a dead session.
+    clearTimeout(this.#autosaveTimer);
+    clearTimeout(this.#retryTimer);
     if (this.#colorPickerListener) {
       document.removeEventListener('click', this.#colorPickerListener, true);
       this.#colorPickerListener = null;

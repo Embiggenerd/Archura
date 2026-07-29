@@ -36,6 +36,12 @@ export type ArchuraStoreEntry = {
  * extras for host tooling (dashboards, cleanup); the editor never calls them.
  */
 export type ArchuraStore = {
+  /**
+   * Identity of the backing namespace (e.g. `site:acme`, `design:<org>:<id>`).
+   * Used to scope per-design local state (the pending-save stash) so the same
+   * component path in two customers' stores can never share it.
+   */
+  scope?: string;
   get(key: string): Promise<string | null>;
   put(key: string, value: string): Promise<void>;
   delete?(key: string): Promise<void>;

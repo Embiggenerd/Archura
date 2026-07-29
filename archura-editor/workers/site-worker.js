@@ -612,6 +612,12 @@ async function handleOpsApi(request, env, url) {
     return handleOpsFork(request, env, sessionToken);
   }
 
+  // POST /api/ops/forks/:id/apply — publish a ready fork's set over its source.
+  const applyMatch = rest.match(/^forks\/([^/]+)\/apply$/);
+  if (applyMatch && request.method === 'POST') {
+    return handleOpsForkApply(request, env, sessionToken, applyMatch[1]);
+  }
+
   // DELETE org/account — orchestrated: core deletes rows (auth + guards) and its
   // response names what to purge; the Worker then removes the R2 blobs. A failed
   // purge is reported as pending, not fatal — the nightly reconciliation sweep
@@ -720,6 +726,150 @@ async function handleOpsFork(request, env, sessionToken) {
     }).catch(() => {});
     return json({ error: 'Fork copy failed' }, 502);
   }
+}
+
+// Apply a ready fork's published set over its source design
+// (docs/PLAN_FILE_ON_DEMAND.md step 3). Warnings, not locks: staleness and
+// open-draft surface as a 409 the caller can force past; the conditional
+// artifact write makes the staleness answer true at write time, and etag
+// equality between source and fork detects a partial earlier attempt to
+// resume instead of 409ing on our own write.
+const normalizeEtag = (etag) => (etag ?? '').replace(/^W\//, '').replaceAll('"', '');
+
+// Create-once archive under history/: If-None-Match * means a retry after a
+// partial apply can never overwrite the true pre-apply copy.
+function archiveOnce(env, key, forkId, bytes, contentType) {
+  return env.ARTIFACTS.put(`history/${key}/pre-apply-${forkId}`, bytes, {
+    httpMetadata: { contentType },
+    onlyIf: new Headers({ 'If-None-Match': '*' }),
+  });
+}
+
+async function handleOpsForkApply(request, env, sessionToken, forkId) {
+  let input;
+  try {
+    input = await readBoundedJSON(request);
+  } catch {
+    return json({ error: 'Invalid body' }, 400);
+  }
+  const force = input?.force === true;
+
+  // 1. The fork row, staff-gated: core 403s non-staff before any R2 access.
+  const recordResponse = await coreRequest(env, `/v1/admin/designs/${encodeURIComponent(forkId)}`, {
+    bearer: sessionToken,
+  });
+  if (!recordResponse.ok) return opsPassthrough(recordResponse);
+  const fork = await recordResponse.json();
+  if (!fork.fork_status) return json({ error: 'Not a fork' }, 400);
+  // 'applied' is a legitimate resume state (core committed, response lost).
+  if (fork.fork_status !== 'ready' && fork.fork_status !== 'applied') {
+    return json({ error: `Fork is ${fork.fork_status}` }, 409);
+  }
+  const sourceBase = `orgs/${fork.source_org_id}/designs/${fork.forked_from}`;
+  const forkBase = `orgs/${fork.organization_id}/designs/${forkId}`;
+
+  // 2. Anchoring reads: fork's published artifact (required), source artifact
+  //    (may be absent for template forks), source draft (presence only).
+  const [forkArtifact, sourceArtifact, sourceDraft] = await Promise.all([
+    env.ARTIFACTS.get(`${forkBase}/artifact.json`),
+    env.ARTIFACTS.get(`${sourceBase}/artifact.json`),
+    env.ARTIFACTS.get(`${sourceBase}/artifact.draft.json`),
+  ]);
+  if (!forkArtifact) return json({ error: 'Fork has no published artifact' }, 409);
+  const forkBytes = await forkArtifact.arrayBuffer();
+  const forkEtag = normalizeEtag(forkArtifact.etag ?? forkArtifact.httpEtag);
+  const sourceEtag = sourceArtifact ? normalizeEtag(sourceArtifact.etag ?? sourceArtifact.httpEtag) : null;
+  const resuming = sourceEtag !== null && sourceEtag === forkEtag;
+
+  // 3. Warnings. Open draft is checked on every attempt, including resume — a
+  //    draft opened between attempts must still surface. Staleness is skipped
+  //    on resume (the "change" is our own earlier write).
+  const warnings = [];
+  if (sourceDraft) warnings.push('open_draft');
+  if (!resuming) {
+    const forkTimeEtag = normalizeEtag(fork.source_etag ?? '');
+    const stale =
+      fork.source_artifact_kind === 'template' ? sourceArtifact !== null : sourceEtag !== forkTimeEtag;
+    if (stale) warnings.push('stale_source');
+  }
+  if (warnings.length > 0 && !force) {
+    return json({ error: 'Apply blocked by warnings', warnings }, 409);
+  }
+  const forcedWarnings = force ? warnings : [];
+
+  // 4. Archive the source's current published set, create-once. Skipped on
+  //    resume: the first attempt archived before it wrote, and re-archiving
+  //    now would capture already-applied content. Template forks with no
+  //    source artifact archive nothing.
+  if (sourceArtifact && !resuming) {
+    await archiveOnce(env, `${sourceBase}/artifact.json`, forkId, await sourceArtifact.arrayBuffer(), 'application/json');
+    for (const object of await listAllObjects(env.ARTIFACTS, `${sourceBase}/embed/`)) {
+      const blob = await env.ARTIFACTS.get(object.key);
+      if (blob) await archiveOnce(env, object.key, forkId, await blob.arrayBuffer(), 'text/javascript; charset=utf-8');
+    }
+  }
+
+  // 5. Gates, against the SOURCE org: tier and moderation. A moderation flag
+  //    blocks and is audited as a rejection — the row stays ready.
+  let forkArtifactData;
+  try {
+    forkArtifactData = JSON.parse(new TextDecoder().decode(forkBytes));
+  } catch {
+    return json({ error: 'Fork artifact is not valid JSON' }, 409);
+  }
+  const denied = await deployCheck(env, fork.source_org_id, forkArtifactData);
+  if (denied) return denied;
+  const reasons = moderationReasons(forkArtifactData);
+  if (reasons.length > 0) {
+    await coreRequest(env, `/v1/admin/forks/${encodeURIComponent(forkId)}/apply`, {
+      method: 'POST',
+      bearer: sessionToken,
+      body: { outcome: 'rejected', reason: 'moderation', forced_warnings: forcedWarnings },
+    }).catch(() => {});
+    return json({ error: 'Apply blocked by moderation', reasons }, 409);
+  }
+
+  // 6. Write the artifact, conditionally: If-Match when the source exists
+  //    (closes the race with a concurrent client publish and serializes two
+  //    staff applying different forks), create-only when it doesn't (template
+  //    fork — a concurrently created first artifact wins). Skipped on resume.
+  if (!resuming) {
+    await recordHistory(env, `${sourceBase}/artifact.json`, forkBytes, 'application/json');
+    const written = await env.ARTIFACTS.put(`${sourceBase}/artifact.json`, forkBytes, {
+      httpMetadata: { contentType: 'application/json' },
+      onlyIf: sourceArtifact
+        ? { etagMatches: sourceArtifact.etag ?? normalizeEtag(sourceArtifact.httpEtag) }
+        : new Headers({ 'If-None-Match': '*' }),
+    });
+    if (written === null) {
+      return json({ error: 'Source changed during apply — re-check and retry', warnings: ['stale_source'] }, 409);
+    }
+  }
+
+  // 7. Copy the fork's embeds (normal publish semantics: writes what it has,
+  //    never deletes stale source embeds), then finalize in core (idempotent).
+  for (const object of await listAllObjects(env.ARTIFACTS, `${forkBase}/embed/`)) {
+    const name = object.key.slice(`${forkBase}/embed/`.length);
+    const blob = await env.ARTIFACTS.get(object.key);
+    if (!blob) continue;
+    const bytes = await blob.arrayBuffer();
+    await recordHistory(env, `${sourceBase}/embed/${name}`, bytes, 'text/javascript; charset=utf-8');
+    await env.ARTIFACTS.put(`${sourceBase}/embed/${name}`, bytes, {
+      httpMetadata: { contentType: 'text/javascript; charset=utf-8' },
+    });
+  }
+  const finalized = await coreRequest(env, `/v1/admin/forks/${encodeURIComponent(forkId)}/apply`, {
+    method: 'POST',
+    bearer: sessionToken,
+    body: { outcome: 'applied', forced_warnings: forcedWarnings },
+  });
+  if (!finalized.ok) return opsPassthrough(finalized);
+  return json({
+    applied: true,
+    fork_design_id: forkId,
+    source_design_id: fork.forked_from,
+    forced_warnings: forcedWarnings,
+  });
 }
 
 // Delete an org or account through core, then purge the R2 blobs its response

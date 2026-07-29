@@ -81,12 +81,15 @@ function createHttpStore(options: {
  */
 export function createFileSystemAdapter(options: { endpoint?: string; site?: string } = {}): ArchuraStore {
   const site = options.site ?? 'dev';
-  return createHttpStore({
-    artifactBase: options.endpoint ?? `/api/artifacts/sites/${site}`,
-    origin: '',
-    site,
-    headers: {},
-  });
+  return {
+    ...createHttpStore({
+      artifactBase: options.endpoint ?? `/api/artifacts/sites/${site}`,
+      origin: '',
+      site,
+      headers: {},
+    }),
+    scope: `site:${site}`,
+  };
 }
 
 /**
@@ -100,7 +103,10 @@ export function createR2Adapter(options: { endpoint: string; token?: string; sit
   const headers: Record<string, string> = options.token ? { Authorization: `Bearer ${options.token}` } : {};
   // The namespace routes live on the same server as the artifact endpoint.
   const origin = options.endpoint.replace(/\/api\/artifacts(\/.*)?$/, '');
-  return createHttpStore({ artifactBase: options.endpoint, origin, site: options.site, headers });
+  return {
+    ...createHttpStore({ artifactBase: options.endpoint, origin, site: options.site, headers }),
+    ...(options.site ? { scope: `site:${options.site}` } : {}),
+  };
 }
 
 /**
@@ -116,6 +122,7 @@ export function createDesignStore(options: { organizationId: string; designId: s
   const isDraftKey = (key: string) => key.endsWith('.draft');
 
   return {
+    scope: `design:${options.organizationId}:${options.designId}`,
     async get(key: string): Promise<string | null> {
       const response = await fetch(isDraftKey(key) ? `${base}/artifact/draft` : `${base}/artifact`);
       if (response.status === 404) return null;

@@ -48,7 +48,7 @@ func auditMetadata(event AuditEvent) ([]byte, error) {
 		if _, ok := event.Metadata.(ComponentSessionAuditMetadata); !ok {
 			return nil, errors.New("component_session.created requires ComponentSessionAuditMetadata")
 		}
-	case "admin.fork_created", "admin.fork_finalized":
+	case "admin.fork_created", "admin.fork_finalized", "admin.fork_applied", "admin.fork_apply_rejected":
 		if _, ok := event.Metadata.(ForkAuditMetadata); !ok {
 			return nil, fmt.Errorf("%s requires ForkAuditMetadata", event.Action)
 		}

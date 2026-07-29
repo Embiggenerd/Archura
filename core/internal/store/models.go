@@ -287,6 +287,12 @@ type ForkFinalize struct {
 	TemplateRef        string
 }
 
+type ForkApply struct {
+	Outcome        string // "applied" | "rejected"
+	ForcedWarnings []string
+	Reason         string // rejection reason (e.g. "moderation"); empty for applied
+}
+
 type FreePlanAuditMetadata struct {
 	Before any    `json:"before"`
 	After  any    `json:"after"`
@@ -294,12 +300,14 @@ type FreePlanAuditMetadata struct {
 }
 
 type ForkAuditMetadata struct {
-	SourceOrganizationID string `json:"source_organization_id"`
-	SourceDesignID       string `json:"source_design_id"`
-	DestinationForkID    string `json:"destination_fork_id"`
-	SourceArtifactKind   string `json:"source_artifact_kind,omitempty"`
-	SourceETag           string `json:"source_etag,omitempty"`
-	TemplateRef          string `json:"template_ref,omitempty"`
+	SourceOrganizationID string   `json:"source_organization_id"`
+	SourceDesignID       string   `json:"source_design_id"`
+	DestinationForkID    string   `json:"destination_fork_id"`
+	SourceArtifactKind   string   `json:"source_artifact_kind,omitempty"`
+	SourceETag           string   `json:"source_etag,omitempty"`
+	TemplateRef          string   `json:"template_ref,omitempty"`
+	ForcedWarnings       []string `json:"forced_warnings,omitempty"`
+	Reason               string   `json:"reason,omitempty"`
 }
 
 type DeletionAuditMetadata struct {

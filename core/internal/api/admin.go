@@ -26,6 +26,7 @@ type adminRepository interface {
 	AdminForks(context.Context, string, int, int) (store.AdminPage[store.Design], error)
 	CreateFork(context.Context, string, string, string, store.AuditEvent) (store.Design, error)
 	FinalizeFork(context.Context, string, store.ForkFinalize, store.AuditEvent) (store.Design, error)
+	ApplyFork(context.Context, string, store.ForkApply, store.AuditEvent) (store.Design, error)
 	DefaultFreePlan(context.Context) (store.DefaultFreePlan, error)
 	UpdateDefaultFreePlan(context.Context, store.FreePlanPatch, store.AuditEvent) (store.DefaultFreePlan, error)
 	UpdateOrganizationFreePlan(context.Context, string, store.OrganizationFreePlanPatch, store.AuditEvent) (store.OrganizationBilling, error)
@@ -428,6 +429,65 @@ func (s *Server) handleAdminFinalizeFork(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, adminDesignResponse(fork))
 }
 
+type applyForkRequest struct {
+	Outcome        string   `json:"outcome"`
+	ForcedWarnings []string `json:"forced_warnings"`
+	Reason         string   `json:"reason"`
+}
+
+func (s *Server) handleAdminApplyFork(w http.ResponseWriter, r *http.Request) {
+	repository, ok := s.adminRepository(w, r)
+	if !ok {
+		return
+	}
+	var input applyForkRequest
+	if err := decodeJSON(w, r, &input); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "The request body is invalid.")
+		return
+	}
+	input.Outcome = strings.TrimSpace(input.Outcome)
+	input.Reason = strings.TrimSpace(input.Reason)
+	if !validApply(input) {
+		writeError(w, r, http.StatusUnprocessableEntity, "invalid_apply", "The apply outcome, warnings, or reason are invalid.")
+		return
+	}
+	account := adminAccount(r)
+	fork, err := repository.ApplyFork(r.Context(), chi.URLParam(r, "forkID"), store.ForkApply{
+		Outcome: input.Outcome, ForcedWarnings: input.ForcedWarnings, Reason: input.Reason,
+	}, adminAudit(r, account))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, r, http.StatusNotFound, "fork_not_found", "The fork was not found.")
+		return
+	}
+	if errors.Is(err, store.ErrInvalidState) {
+		writeError(w, r, http.StatusConflict, "fork_state_conflict", "The fork is not in an applicable state.")
+		return
+	}
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, adminDesignResponse(fork))
+}
+
+func validApply(input applyForkRequest) bool {
+	if input.Outcome != "applied" && input.Outcome != "rejected" {
+		return false
+	}
+	if (input.Outcome == "rejected") != (input.Reason != "") {
+		return false
+	}
+	if len(input.ForcedWarnings) > 4 {
+		return false
+	}
+	for _, warning := range input.ForcedWarnings {
+		if warning != "stale_source" && warning != "open_draft" {
+			return false
+		}
+	}
+	return len(input.Reason) <= 64
+}
+
 func validFinalize(input finalizeForkRequest) bool {
 	if input.Status != "ready" && input.Status != "failed" {
 		return false
@@ -454,7 +514,7 @@ func (s *Server) handleAdminForks(w http.ResponseWriter, r *http.Request) {
 	if state == "" {
 		state = "ready"
 	}
-	if state != "ready" && state != "pending" && state != "failed" {
+	if state != "ready" && state != "pending" && state != "failed" && state != "applied" {
 		writeError(w, r, http.StatusUnprocessableEntity, "invalid_fork_state", "The fork state is invalid.")
 		return
 	}

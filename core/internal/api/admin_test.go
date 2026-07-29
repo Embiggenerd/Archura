@@ -56,6 +56,9 @@ func (*adminTestRepository) CreateFork(context.Context, string, string, string, 
 func (*adminTestRepository) FinalizeFork(context.Context, string, store.ForkFinalize, store.AuditEvent) (store.Design, error) {
 	return store.Design{}, nil
 }
+func (*adminTestRepository) ApplyFork(context.Context, string, store.ForkApply, store.AuditEvent) (store.Design, error) {
+	return store.Design{}, nil
+}
 func (*adminTestRepository) DefaultFreePlan(context.Context) (store.DefaultFreePlan, error) {
 	return store.DefaultFreePlan{TrialDays: 2, FreeDesignLimit: 3, FreeSiteLimit: 1}, nil
 }
@@ -277,6 +280,30 @@ func TestFinalizeProvenanceValidation(t *testing.T) {
 	}
 	if !validFinalize(finalizeForkRequest{Status: "failed"}) {
 		t.Fatal("plain failed finalize rejected")
+	}
+}
+
+func TestApplyValidation(t *testing.T) {
+	if !validApply(applyForkRequest{Outcome: "applied"}) {
+		t.Fatal("plain applied rejected")
+	}
+	if !validApply(applyForkRequest{Outcome: "applied", ForcedWarnings: []string{"stale_source", "open_draft"}}) {
+		t.Fatal("applied with forced warnings rejected")
+	}
+	if !validApply(applyForkRequest{Outcome: "rejected", Reason: "moderation"}) {
+		t.Fatal("moderation rejection rejected")
+	}
+	if validApply(applyForkRequest{Outcome: "rejected"}) {
+		t.Fatal("rejection without reason accepted")
+	}
+	if validApply(applyForkRequest{Outcome: "applied", Reason: "moderation"}) {
+		t.Fatal("applied with reason accepted")
+	}
+	if validApply(applyForkRequest{Outcome: "applied", ForcedWarnings: []string{"something_else"}}) {
+		t.Fatal("unknown warning name accepted")
+	}
+	if validApply(applyForkRequest{Outcome: "done"}) {
+		t.Fatal("unknown outcome accepted")
 	}
 }
 

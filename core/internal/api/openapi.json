@@ -526,6 +526,16 @@
           "template_ref": { "type": "string" }
         }
       },
+      "ApplyForkRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["outcome"],
+        "properties": {
+          "outcome": { "type": "string", "enum": ["applied", "rejected"] },
+          "forced_warnings": { "type": "array", "maxItems": 4, "items": { "type": "string", "enum": ["stale_source", "open_draft"] } },
+          "reason": { "type": "string", "maxLength": 64 }
+        }
+      },
       "CreateDesignRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -1180,6 +1190,14 @@
         "tags": ["Admin"], "operationId": "finalizeAdminFork", "summary": "Finalize a pending or failed fork", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
         "parameters": [{ "name": "forkID", "in": "path", "required": true, "schema": { "type": "string" } }],
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FinalizeForkRequest" } } } },
+        "responses": { "200": { "description": "Fork", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminDesign" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "422": { "$ref": "#/components/responses/BadRequest" } }
+      }
+    },
+    "/v1/admin/forks/{forkID}/apply": {
+      "post": {
+        "tags": ["Admin"], "operationId": "applyAdminFork", "summary": "Record the outcome of applying a ready fork over its source design", "security": [{ "ServiceAuth": [], "BearerAuth": [] }],
+        "parameters": [{ "name": "forkID", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApplyForkRequest" } } } },
         "responses": { "200": { "description": "Fork", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminDesign" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "$ref": "#/components/responses/Conflict" }, "422": { "$ref": "#/components/responses/BadRequest" } }
       }
     },
