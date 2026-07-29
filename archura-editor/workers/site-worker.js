@@ -1274,10 +1274,12 @@ async function serveApi(request, env, url) {
       }
       const denied = await deployCheck(env, orgId, draftArtifact);
       if (denied) return denied;
+      await recordHistory(env, publishedKey, draftBytes, 'application/json');
       await env.ARTIFACTS.put(publishedKey, draftBytes, { httpMetadata: { contentType: 'application/json' } });
       const embeds = input && typeof input.embeds === 'object' && input.embeds ? input.embeds : {};
       for (const [name, source] of Object.entries(embeds)) {
         if (!EMBED_NAME.test(name) || typeof source !== 'string') continue;
+        await recordHistory(env, `${base}/embed/${name}`, source, 'text/javascript; charset=utf-8');
         await env.ARTIFACTS.put(`${base}/embed/${name}`, source, {
           httpMetadata: { contentType: 'text/javascript; charset=utf-8' },
         });
@@ -1298,6 +1300,7 @@ async function serveApi(request, env, url) {
         if (error instanceof RangeError) return json({ error: 'Embed too large' }, 413);
         return json({ error: 'Invalid body' }, 400);
       }
+      await recordHistory(env, `${base}/embed/${name}`, body, 'text/javascript; charset=utf-8');
       await env.ARTIFACTS.put(`${base}/embed/${name}`, body, {
         httpMetadata: { contentType: 'text/javascript; charset=utf-8' },
       });
@@ -1346,6 +1349,7 @@ async function serveApi(request, env, url) {
       const publishOrg = publishMeta ? (await publishMeta.json())?.organizationId : null;
       const tierDenied = await deployCheck(env, publishOrg, artifact);
       if (tierDenied) return tierDenied;
+      await recordHistory(env, key, body, 'application/json');
       await env.ARTIFACTS.put(key, body, { httpMetadata: { contentType: 'application/json' } });
       await recordModerationResult(env, site, artifact);
       return new Response(null, { status: 204 });
@@ -1391,6 +1395,7 @@ async function serveApi(request, env, url) {
         if (error instanceof RangeError) return json({ error: 'Embed too large' }, 413);
         return json({ error: 'Invalid body' }, 400);
       }
+      await recordHistory(env, `sites/${site}/embed/${name}`, body, 'text/javascript; charset=utf-8');
       await env.ARTIFACTS.put(`sites/${site}/embed/${name}`, body, {
         httpMetadata: { contentType: 'text/javascript; charset=utf-8' },
       });
@@ -1724,17 +1729,38 @@ function reserveSiteMeta(env, site, meta) {
   });
 }
 
-// Ordered site purge: meta.json strictly last. Two invariants depend on this —
-// serveSite treats a site with missing meta as a legacy *published* site and
-// would serve leftover artifacts, and the reconciliation sweep discovers
-// orphans through meta, so a partial purge must stay discoverable. A crash at
-// any step leaves the site un-servable but findable.
+// Application-level versioning — R2 has no native object versioning. Every
+// publish of a servable content key also writes history/<key>/<ISO>-<uuid>
+// (uuid: same-millisecond publishes must not collide) with the same bytes.
+// Callers write history FIRST and let a failure abort the live write, so a
+// successful publish always has a version; the failure mode is a publish
+// error the client retries, never a versionless publish. Draft and meta keys
+// are never versioned — this guard is the backstop for every hook.
+function isHistoryExempt(key) {
+  return key.endsWith('.draft.json') || key.split('/').includes('draft') || key.endsWith('/meta.json');
+}
+
+async function recordHistory(env, key, bytes, contentType) {
+  if (isHistoryExempt(key)) return;
+  await env.ARTIFACTS.put(`history/${key}/${new Date().toISOString()}-${crypto.randomUUID()}`, bytes, {
+    httpMetadata: { contentType },
+  });
+}
+
+// Ordered site purge: history first, then content, meta.json strictly last.
+// Three invariants depend on this — serveSite treats a site with missing meta
+// as a legacy *published* site and would serve leftover artifacts, the
+// reconciliation sweep discovers orphans through meta so a partial purge must
+// stay discoverable, and history must go before the live keys because once
+// they're gone nothing re-discovers stranded history. A crash at any step
+// leaves the site un-servable but findable.
 export async function releaseSiteObjects(env, site, meta = null) {
   const metaKey = `sites/${site}/meta.json`;
   if (!meta) {
     const stored = await env.ARTIFACTS.get(metaKey);
     meta = stored ? await stored.json().catch(() => null) : null;
   }
+  await purgePrefix(env, `history/sites/${site}/`);
   const objects = await listAllObjects(env.ARTIFACTS, `sites/${site}/`);
   for (const object of objects) {
     if (object.key === metaKey) continue;
@@ -1860,7 +1886,11 @@ export async function reconcileDeletedOrganizations(env) {
   const orgIds = [...new Set(orgObjects.map((object) => object.key.split('/')[1]).filter(Boolean))];
   for (const orgId of orgIds) {
     if (await organizationGone(orgId)) {
-      await purgePrefix(env, `orgs/${orgId}/`).catch(() => {});
+      // History before live keys: a failure between the two leaves the org
+      // prefix intact for the next nightly pass to re-discover.
+      await purgePrefix(env, `history/orgs/${orgId}/`)
+        .then(() => purgePrefix(env, `orgs/${orgId}/`))
+        .catch(() => {});
       console.log(JSON.stringify({ event: 'reconcile_org_purged', organization_id: orgId }));
     }
   }
@@ -1937,7 +1967,10 @@ async function promoteSite(env, site) {
     const contentType = rest.startsWith('embed/')
       ? 'text/javascript; charset=utf-8'
       : 'application/json';
-    await env.ARTIFACTS.put(`sites/${site}/${rest}`, source.body, {
+    // Buffered (not streamed): the same bytes are written twice, history first.
+    const bytes = await source.arrayBuffer();
+    await recordHistory(env, `sites/${site}/${rest}`, bytes, contentType);
+    await env.ARTIFACTS.put(`sites/${site}/${rest}`, bytes, {
       httpMetadata: { contentType },
     });
     await env.ARTIFACTS.delete(object.key);

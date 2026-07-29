@@ -15,7 +15,11 @@ class MemoryBucket {
     const value = this.objects.get(key);
     if (value == null) return null;
     const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
-    return { body: bytes, async json() { return JSON.parse(new TextDecoder().decode(bytes)); } };
+    return {
+      body: bytes,
+      async json() { return JSON.parse(new TextDecoder().decode(bytes)); },
+      async arrayBuffer() { return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength); },
+    };
   }
   async put(key, value) {
     if (value instanceof ReadableStream) value = new Uint8Array(await new Response(value).arrayBuffer());
@@ -61,6 +65,9 @@ globalThis.fetch = async (input, init) => {
       return Response.json({ id: DESIGN_ID, organization_id: ORG, name: 'Splash', component_path: 'pages/Landing' }, { status: 201 });
     }
     return Response.json({ organization_id: ORG, designs: [{ id: DESIGN_ID, name: 'Splash' }] });
+  }
+  if (url.pathname === `/v1/organizations/${ORG}/deploy-check`) {
+    return Response.json({ allowed: true });
   }
   if (url.pathname === `/v1/organizations/${OTHER_ORG}/designs`) {
     return Response.json({ error: { code: 'organization_not_found' } }, { status: 404 });
@@ -121,10 +128,30 @@ try {
   );
   assert.equal(embed.status, 204, 'store embed blob');
 
-  // --- R2 holds only blobs, never a design meta row ---
+  // --- publish promotes the draft to artifact.json and clears the draft ---
+  const published = await worker.fetch(
+    signed(`/api/orgs/${ORG}/designs/${DESIGN_ID}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({ embeds: { 'Landing.js': 'export const published = true;' } }),
+    }),
+    env
+  );
+  assert.equal(published.status, 204, 'publish promotes the draft');
+  const designPrefix = `orgs/${ORG}/designs/${DESIGN_ID}/`;
+  assert.ok(!env.ARTIFACTS.objects.has(`${designPrefix}artifact.draft.json`), 'publish clears the draft');
+
+  // --- R2 holds only blobs (live or history), never a design meta row ---
   const keys = [...env.ARTIFACTS.objects.keys()];
-  assert.ok(keys.every((k) => k.startsWith(`orgs/${ORG}/designs/${DESIGN_ID}/`)), 'blobs under the design namespace');
+  assert.ok(
+    keys.every((k) => k.startsWith(designPrefix) || k.startsWith(`history/${designPrefix}`)),
+    'blobs under the design namespace'
+  );
   assert.ok(keys.every((k) => !k.endsWith('/meta.json')), 'no R2 meta — core owns the design row');
+
+  // --- history: every publish is versioned, drafts never are ---
+  assert.ok(keys.some((k) => k.startsWith(`history/${designPrefix}artifact.json/`)), 'publish records artifact history');
+  assert.ok(keys.some((k) => k.startsWith(`history/${designPrefix}embed/Landing.js/`)), 'embed publishes record history');
+  assert.ok(!keys.some((k) => k.startsWith('history/') && k.includes('.draft')), 'drafts are never versioned');
 
   // --- auth: no session → 401; non-member org → core 404 passthrough ---
   const anon = await worker.fetch(new Request(`https://archura.test/api/orgs/${ORG}/designs`, { method: 'GET' }), env);

@@ -19,6 +19,7 @@
     "lit": "^3.2.0"
   },
   "devDependencies": {
+    "aws4fetch": "^1.0.20",
     "esbuild": "^0.28.1",
     "playwright": "^1.60.0",
     "typescript": "^5.0.0",

@@ -158,7 +158,10 @@
       const site = params.get('site');
       const design = params.get('design');
       const org = params.get('org');
-      const component = params.get('component') ?? (site || design ? 'pages/Landing' : null);
+      // Dev-only: content pulled into artifacts/sites/<name>/ by
+      // scripts/pull-artifact.mjs, served by the Vite artifact-store.
+      const localSite = import.meta.env.PROD ? null : params.get('localSite');
+      const component = params.get('component') ?? (site || design || localSite ? 'pages/Landing' : null);
 
       // In the built app, component modules are the self-contained bundles
       // served by the Worker, not raw Vite source
@@ -340,6 +343,8 @@
           const organization = me?.organizations?.find((candidate) => candidate.id === org) ?? { id: org };
           showUpgradeModal(organization, error?.message ?? 'This design uses a component that needs the Basic plan.');
         });
+      } else if (localSite) {
+        mountEditor(createFileSystemAdapter({ site: localSite }));
       } else if (site) {
         const token = localStorage.getItem(`archura:site-token:${site}`);
         const url = localStorage.getItem(`archura:site-url:${site}`);
